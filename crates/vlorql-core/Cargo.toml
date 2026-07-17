@@ -14,6 +14,8 @@ derive_builder.workspace = true
 async-trait.workspace = true
 chrono.workspace = true
 serde_yaml.workspace = true
+xxhash-rust = { version = "0.8", features = ["xxh3"] }
+moka = { version = "0.12", features = ["future"] }
 
 [dev-dependencies]
 mockall.workspace = true
@@ -36,4 +38,14 @@ harness = false
 [[bench]]
 name = "concurrent"
 path = "benches/concurrent.rs"
+harness = false
+
+[[bench]]
+name = "optimizer_bench"
+path = "benches/optimizer_bench.rs"
+harness = false
+
+[[bench]]
+name = "cache_bench"
+path = "benches/cache_bench.rs"
 harness = false

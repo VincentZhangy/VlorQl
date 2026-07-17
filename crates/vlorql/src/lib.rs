@@ -22,15 +22,19 @@ use tokio::sync::mpsc;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use vlorql_core::compile::{get_compiler, SqlCompiler};
 use vlorql_core::errors::{ConfigErrorKind, LlmErrorKind, ValidationErrorKind, VlorQLError};
+use vlorql_core::optimizer::QueryOptimizer;
 use vlorql_core::policy::{PolicyConfig, PolicyEngine};
 use vlorql_core::prompt::PromptBuilder;
 use vlorql_core::schema::{ArcSchemaSnapshot, QueryPlan};
+use vlorql_core::statistics::StatisticsProvider;
 use vlorql_core::validate::ValidationPipeline;
 
+pub use vlorql_core::cache::{CompileCache, PromptCache, SchemaCache};
 pub use vlorql_core::compile::{CompiledQuery, Parameter};
 pub use vlorql_core::errors::{ErrorResponse, ValidationErrors};
+pub use vlorql_core::optimizer::QueryOptimizer as QueryOptimizerCore;
 pub use vlorql_core::schema::{DialectProfile, SchemaSnapshot, SqlDialect};
-pub use vlorql_core::validate::ValidatedPlan;
+pub use vlorql_core::validate::{OptimizedPlan, ValidatedPlan};
 pub use vlorql_llm::{create_llm_client, LlmClient, LlmConfig, LlmProvider};
 
 const DEFAULT_MAX_RETRIES: usize = 2;
@@ -118,6 +122,10 @@ pub struct VlorQl {
     compiler: Arc<dyn SqlCompiler>,
     llm_client: Option<Arc<dyn LlmClient>>,
     max_retries: usize,
+    optimizer: Option<QueryOptimizer>,
+    schema_cache: Option<Arc<SchemaCache>>,
+    compile_cache: Option<Arc<CompileCache>>,
+    prompt_cache: Option<Arc<PromptCache>>,
 }
 
 impl std::fmt::Debug for VlorQl {
@@ -129,6 +137,10 @@ impl std::fmt::Debug for VlorQl {
             .field("policy", &self.policy)
             .field("compiler_dialect", &self.compiler.dialect())
             .field("has_llm_client", &self.llm_client.is_some())
+            .field("has_optimizer", &self.optimizer.is_some())
+            .field("has_schema_cache", &self.schema_cache.is_some())
+            .field("has_compile_cache", &self.compile_cache.is_some())
+            .field("has_prompt_cache", &self.prompt_cache.is_some())
             .field("max_retries", &self.max_retries)
             .finish()
     }
@@ -141,6 +153,14 @@ impl VlorQl {
     }
 
     /// Generates a plan with the configured LLM, validates it, and compiles it.
+    ///
+    /// When a statistics provider has been configured, the validated plan
+    /// is also passed through the [`QueryOptimizer`] before compilation.
+    ///
+    /// When a [`PromptCache`] is configured, the system prompt is retrieved
+    /// from the cache when possible.  When a [`CompileCache`] is configured,
+    /// a plan that has already been compiled for the same dialect is
+    /// returned without re-compiling.
     pub async fn query(&self, question: &str) -> Result<CompiledQuery, VlorQLError> {
         let client = self.llm_client.as_ref().ok_or_else(|| {
             VlorQLError::config(
@@ -148,18 +168,70 @@ impl VlorQl {
                 json!({"operation": "query"}),
             )
         })?;
-        let system_prompt = PromptBuilder::new(
+
+        // Build the system prompt, optionally using the prompt cache.
+        let prompt_builder = PromptBuilder::new(
             Arc::clone(&self.schema),
             self.dialect.clone(),
             self.policy.clone(),
-        )
-        .build_system_prompt(question);
+        );
+        let system_prompt = match &self.prompt_cache {
+            Some(cache) => {
+                prompt_builder
+                    .build_system_prompt_with_cache(question, cache.as_ref())
+                    .await
+            }
+            None => prompt_builder.build_system_prompt(question),
+        };
 
         let mut llm_question = question.to_owned();
         for attempt in 0..=self.max_retries {
             let plan = client.generate_plan(&llm_question, &system_prompt).await?;
             match self.validate_only(&plan) {
-                Ok(validated_plan) => return self.compile_only(&validated_plan),
+                Ok(validated_plan) => {
+                    // Optimize when an optimizer is configured, then compile.
+                    let plan_for_compile = match &self.optimizer {
+                        Some(optimizer) => {
+                            match optimizer.optimize_async(validated_plan.as_plan()).await {
+                                Ok(optimized) => {
+                                    // Re-validate policy on the optimized plan.
+                                    let pipeline = self.build_pipeline();
+                                    if let Err(stage_errors) =
+                                        pipeline.policy().validate(&optimized, &self.schema)
+                                    {
+                                        return Err(validation_errors_to_error(
+                                            ValidationErrors(stage_errors),
+                                        ));
+                                    }
+                                    ValidatedPlan(Arc::new(optimized))
+                                }
+                                Err(e) => return Err(e),
+                            }
+                        }
+                        None => validated_plan,
+                    };
+
+                    // Check the compile cache before compiling.
+                    if let Some(cache) = &self.compile_cache {
+                        if let Some(cached) =
+                            cache.get(&plan_for_compile, &self.dialect).await
+                        {
+                            return Ok(cached);
+                        }
+                    }
+
+                    // Compile (cache miss).
+                    let compiled = self.compile_only(&plan_for_compile)?;
+
+                    // Insert into the compile cache.
+                    if let Some(cache) = &self.compile_cache {
+                        cache
+                            .insert(&plan_for_compile, &self.dialect, compiled.clone())
+                            .await;
+                    }
+
+                    return Ok(compiled);
+                }
                 Err(errors) => {
                     let can_retry = attempt < self.max_retries
                         && !errors.is_empty()
@@ -235,12 +307,24 @@ impl VlorQl {
 
     /// Validates a plan without invoking the LLM or compiler.
     pub fn validate_only(&self, plan: &QueryPlan) -> Result<ValidatedPlan, ValidationErrors> {
-        ValidationPipeline::new(
-            Arc::clone(&self.schema),
-            self.dialect.clone(),
-            PolicyEngine::new(self.policy.clone()),
-        )
-        .validate(plan)
+        self.build_pipeline().validate(plan)
+    }
+
+    /// Validates a plan and, when an optimizer is configured, applies
+    /// optimisation passes.  Returns an [`OptimizedPlan`] that derefs to
+    /// [`ValidatedPlan`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ValidationErrors`] when any validation stage (including
+    /// the post-optimisation policy re-check) fails.
+    pub async fn validate_and_optimize(
+        &self,
+        plan: &QueryPlan,
+    ) -> Result<OptimizedPlan, ValidationErrors> {
+        self.build_pipeline_with_optimizer()
+            .validate_and_optimize(plan)
+            .await
     }
 
     /// Compiles a plan that has already passed validation.
@@ -266,6 +350,70 @@ impl VlorQl {
     /// Returns the maximum number of validation retries.
     pub fn max_retries(&self) -> usize {
         self.max_retries
+    }
+
+    /// Returns a reference to the optional schema cache.
+    pub fn schema_cache(&self) -> Option<&Arc<SchemaCache>> {
+        self.schema_cache.as_ref()
+    }
+
+    /// Returns a reference to the optional compile cache.
+    pub fn compile_cache(&self) -> Option<&Arc<CompileCache>> {
+        self.compile_cache.as_ref()
+    }
+
+    /// Returns a reference to the optional prompt cache.
+    pub fn prompt_cache(&self) -> Option<&Arc<PromptCache>> {
+        self.prompt_cache.as_ref()
+    }
+
+    /// Invalidates all schema cache entries matching `version`.
+    pub fn invalidate_schema_cache(&self, version: &str) {
+        if let Some(cache) = &self.schema_cache {
+            cache.invalidate_version(version);
+        }
+    }
+
+    /// Invalidates the compile cache entry for `plan` under the current dialect.
+    pub async fn invalidate_compile_cache(&self, plan: &ValidatedPlan) {
+        if let Some(cache) = &self.compile_cache {
+            cache.invalidate_plan(plan, &self.dialect).await;
+        }
+    }
+
+    /// Clears all three caches (schema, compile, prompt).
+    pub fn clear_all_caches(&self) {
+        if let Some(cache) = &self.schema_cache {
+            cache.clear();
+        }
+        if let Some(cache) = &self.compile_cache {
+            cache.clear();
+        }
+        if let Some(cache) = &self.prompt_cache {
+            cache.clear();
+        }
+    }
+
+    /// Builds a [`ValidationPipeline`] without the optimizer.
+    fn build_pipeline(&self) -> ValidationPipeline {
+        ValidationPipeline::new(
+            Arc::clone(&self.schema),
+            self.dialect.clone(),
+            PolicyEngine::new(self.policy.clone()),
+        )
+    }
+
+    /// Builds a [`ValidationPipeline`] with the optional optimizer attached.
+    fn build_pipeline_with_optimizer(&self) -> ValidationPipeline {
+        let mut pipeline = ValidationPipeline::new(
+            Arc::clone(&self.schema),
+            self.dialect.clone(),
+            PolicyEngine::new(self.policy.clone()),
+        );
+        if let Some(ref optimizer) = self.optimizer {
+            pipeline = pipeline.with_optimizer(optimizer.clone());
+        }
+        pipeline
     }
 }
 
@@ -307,6 +455,10 @@ pub struct VlorQlBuilder {
     llm_client: Option<Box<dyn LlmClient>>,
     llm_config: Option<LlmConfig>,
     max_retries: usize,
+    stats_provider: Option<Arc<dyn StatisticsProvider>>,
+    schema_cache: Option<Arc<SchemaCache>>,
+    compile_cache: Option<Arc<CompileCache>>,
+    prompt_cache: Option<Arc<PromptCache>>,
 }
 
 impl Default for VlorQlBuilder {
@@ -320,6 +472,10 @@ impl Default for VlorQlBuilder {
             llm_client: None,
             llm_config: None,
             max_retries: DEFAULT_MAX_RETRIES,
+            stats_provider: None,
+            schema_cache: None,
+            compile_cache: None,
+            prompt_cache: None,
         }
     }
 }
@@ -392,6 +548,50 @@ impl VlorQlBuilder {
         self
     }
 
+    /// Supplies a statistics provider used for cost-based query optimisation.
+    ///
+    /// When set, the built [`VlorQl`] facade will run the
+    /// [`QueryOptimizer`](vlorql_core::optimizer::QueryOptimizer) after
+    /// validation succeeds, applying constant folding, predicate pushdown,
+    /// column pruning, and (when statistics are available) cost-based join
+    /// reordering.
+    #[must_use]
+    pub fn with_statistics_provider(mut self, provider: Arc<dyn StatisticsProvider>) -> Self {
+        self.stats_provider = Some(provider);
+        self
+    }
+
+    /// Configures a [`SchemaCache`] with the given capacity and TTL.
+    ///
+    /// Caches schema snapshots keyed by version + source to avoid
+    /// re-parsing or re-fetching.
+    #[must_use]
+    pub fn with_schema_cache(mut self, capacity: u64, ttl_seconds: u64) -> Self {
+        self.schema_cache = Some(Arc::new(SchemaCache::new(capacity, ttl_seconds)));
+        self
+    }
+
+    /// Configures a [`CompileCache`] with the given weight limit and TTL.
+    ///
+    /// Caches compiled SQL results keyed by plan hash + dialect so that
+    /// the same plan does not need to be re-compiled for the same dialect.
+    #[must_use]
+    pub fn with_compile_cache(mut self, max_size: u64, ttl_seconds: u64) -> Self {
+        self.compile_cache = Some(Arc::new(CompileCache::new(max_size, ttl_seconds)));
+        self
+    }
+
+    /// Configures a [`PromptCache`] with the given capacity and TTL.
+    ///
+    /// Caches system prompts keyed by schema version + dialect + policy
+    /// hash, avoiding re-generation when the configuration has not
+    /// changed.
+    #[must_use]
+    pub fn with_prompt_cache(mut self, capacity: u64, ttl_seconds: u64) -> Self {
+        self.prompt_cache = Some(Arc::new(PromptCache::new(capacity, ttl_seconds)));
+        self
+    }
+
     /// Builds the facade and verifies the required schema and dialect/compiler setup.
     pub fn build(self) -> Result<VlorQl, VlorQLError> {
         let schema = self.schema.ok_or_else(|| {
@@ -421,6 +621,11 @@ impl VlorQlBuilder {
             (None, Some(config)) => Some(Arc::from(create_llm_client(config)?)),
             (None, None) => None,
         };
+
+        let optimizer = self.stats_provider.map(|provider| {
+            QueryOptimizer::new(provider)
+        });
+
         Ok(VlorQl {
             schema,
             dialect,
@@ -428,6 +633,10 @@ impl VlorQlBuilder {
             compiler: Arc::from(compiler),
             llm_client,
             max_retries: self.max_retries,
+            optimizer,
+            schema_cache: self.schema_cache,
+            compile_cache: self.compile_cache,
+            prompt_cache: self.prompt_cache,
         })
     }
 }

@@ -14,6 +14,8 @@
 //! * [`policy_enforcement`] — table/column/row-filter policy checks.
 //! * [`error_recovery`] — validation aggregation, retry classification,
 //!   and short-circuiting tests.
+//! * [`optimizer_tests`] — query-optimizer integration tests.
+//! * [`cache_integration`] — cache layer integration tests.
 
 #[path = "integration/common.rs"]
 mod common;
@@ -29,3 +31,9 @@ mod policy_enforcement;
 
 #[path = "integration/error_recovery.rs"]
 mod error_recovery;
+
+#[path = "integration/optimizer_tests.rs"]
+mod optimizer_tests;
+
+#[path = "integration/cache_integration.rs"]
+mod cache_integration;

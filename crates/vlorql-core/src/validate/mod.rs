@@ -7,7 +7,7 @@ mod schema;
 
 pub use dialect::{BoundDialectValidator, DialectValidator};
 pub use operand::OperandValidator;
-pub use pipeline::{ValidatedPlan, ValidationPipeline};
+pub use pipeline::{OptimizedPlan, ValidatedPlan, ValidationPipeline};
 pub use schema::validate_schema;
 
 #[cfg(test)]

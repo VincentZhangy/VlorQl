@@ -18,8 +18,10 @@
 
 #![deny(missing_docs)]
 
+pub mod cache;
 pub mod compile;
 pub mod errors;
+pub mod optimizer;
 pub mod policy;
 pub mod prompt;
 pub(crate) mod query;

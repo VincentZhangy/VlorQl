@@ -6,10 +6,25 @@
 //! source. Two providers ship with the crate:
 //! [`DummyStatisticsProvider`] (fixed in-memory catalog, for tests) and
 //! [`ConfigFileStatisticsProvider`] (a JSON or YAML file on disk).
+//!
+//! Built on top of the providers, [`CardinalityEstimator`] turns those
+//! statistics into result-row estimates and [`CostEstimator`] scores
+//! plan operations with a three-axis [`Cost`] (CPU/IO/memory) so a
+//! planner can compare alternative execution plans.
 
+mod cardinality;
+mod cost;
 mod providers;
 mod stats;
 
+pub use cardinality::{
+    CardinalityEstimator, DEFAULT_BETWEEN_SELECTIVITY, DEFAULT_JOIN_SELECTIVITY,
+    DEFAULT_RANGE_SELECTIVITY, DEFAULT_SELECTIVITY, DEFAULT_TABLE_ROWS, LIKE_SELECTIVITY,
+};
+pub use cost::{
+    Cost, CostEstimator, INDEX_SCAN_COST_PER_ROW, JOIN_CPU_COST_PER_PAIR, NETWORK_COST_PER_ROW,
+    SORT_CPU_COST_PER_ROW, SORT_MEMORY_PER_ROW, TABLE_SCAN_COST_PER_ROW,
+};
 pub use providers::{
     ConfigFileStatisticsProvider, DummyStatisticsProvider, StatisticsProvider,
 };

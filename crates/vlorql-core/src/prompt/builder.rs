@@ -1,5 +1,6 @@
 //! Context-minimized system prompt construction.
 
+use crate::cache::{PromptCache, PromptCacheKey};
 use crate::policy::{PolicyConfig, TablePolicy};
 use crate::query::collect_predicate_references;
 use crate::schema::{
@@ -91,6 +92,40 @@ impl PromptBuilder {
         if self.include_examples {
             self.push_example(&mut prompt, &relevant_tables);
         }
+
+        prompt
+    }
+
+    /// Builds the system prompt with cache support.
+    ///
+    /// When a cache is provided and the key is present, the cached prompt
+    /// is returned without re-building.  On a cache miss the prompt is
+    /// generated and inserted into the cache before returning.
+    ///
+    /// This method is async because the cache uses an async backing store.
+    pub async fn build_system_prompt_with_cache(
+        &self,
+        user_question: &str,
+        cache: &PromptCache,
+    ) -> String {
+        let schema_version = self
+            .schema
+            .metadata
+            .version
+            .as_deref()
+            .unwrap_or("unknown");
+        let key = PromptCacheKey::new(schema_version, &self.dialect, &self.policy);
+
+        // Try cache hit.
+        if let Some(cached) = cache.get(&key).await {
+            return cached;
+        }
+
+        // Cache miss — generate the prompt.
+        let prompt = self.build_system_prompt(user_question);
+
+        // Insert into cache.
+        cache.insert(key, prompt.clone()).await;
 
         prompt
     }
