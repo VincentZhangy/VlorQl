@@ -1,0 +1,29 @@
+[package]
+name = "vlorql-llm"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+vlorql-core = { path = "../vlorql-core", version = "0.1.0" }
+async-trait.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+schemars.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+bytes.workspace = true
+tokio-util = { workspace = true, features = ["codec"] }
+tokio-stream.workspace = true
+futures.workspace = true
+futures-util.workspace = true
+
+[dev-dependencies]
+mockall.workspace = true
+rstest.workspace = true
+mockito.workspace = true
+
+[[test]]
+name = "multi_provider"
+path = "tests/integration/multi_provider.rs"

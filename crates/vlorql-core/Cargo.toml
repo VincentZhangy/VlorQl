@@ -1,0 +1,39 @@
+[package]
+name = "vlorql-core"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+schemars.workspace = true
+tracing.workspace = true
+derive_builder.workspace = true
+async-trait.workspace = true
+chrono.workspace = true
+serde_yaml.workspace = true
+
+[dev-dependencies]
+mockall.workspace = true
+rstest.workspace = true
+criterion.workspace = true
+tokio = { workspace = true }
+serde_json.workspace = true
+futures.workspace = true
+
+[[bench]]
+name = "schema_validation"
+path = "benches/schema_validation.rs"
+harness = false
+
+[[bench]]
+name = "query_compilation"
+path = "benches/query_compilation.rs"
+harness = false
+
+[[bench]]
+name = "concurrent"
+path = "benches/concurrent.rs"
+harness = false

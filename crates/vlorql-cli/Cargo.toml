@@ -1,0 +1,18 @@
+[package]
+name = "vlorql-cli"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+vlorql = { path = "../vlorql", version = "0.1.0" }
+vlorql-core = { path = "../vlorql-core", version = "0.1.0" }
+vlorql-llm = { path = "../vlorql-llm", version = "0.1.0" }
+anyhow.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+clap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true
