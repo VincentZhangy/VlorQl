@@ -209,6 +209,14 @@ impl VlorQLError {
 
     /// Converts this error into a machine-readable response with repair guidance.
     pub fn to_error_response(&self) -> ErrorResponse {
+        // Record the error in the current span context so it can be
+        // correlated with the request's trace_id in the tracing backend.
+        tracing::error!(
+            error.code = %self.error_code(),
+            error.message = %self,
+            "Error response generated for {}",
+            self.error_code(),
+        );
         ErrorResponse {
             code: self.error_code().to_owned(),
             message: self.to_string(),
@@ -667,7 +675,7 @@ mod tests {
             ),
         }
         // The details payload must round-trip through serde.
-        let _ = serde_json::to_value(&response).expect("response should serialize");
+        serde_json::to_value(&response).expect("response should serialize");
     }
 
     #[test]

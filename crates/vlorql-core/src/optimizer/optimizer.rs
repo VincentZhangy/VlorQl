@@ -161,6 +161,11 @@ impl QueryOptimizer {
     /// statistics provider asynchronously. The returned plan is always
     /// semantically equivalent to `plan`.
     pub async fn optimize_async(&self, plan: &QueryPlan) -> Result<QueryPlan, VlorQLError> {
+        let span = tracing::info_span!(
+            "vlorql.optimize",
+            join_reorder_enabled = self.enable_join_reorder,
+        );
+        let _enter = span.enter();
         let rewritten = self.optimize(plan)?;
 
         if self.enable_join_reorder && self.within_reorder_cap(&rewritten) {

@@ -8,11 +8,10 @@
 use super::common::{base_plan, open_policy, snapshot};
 use vlorql::VlorQl;
 use vlorql_core::schema::{
-    ColumnSchema, ComparisonOperator, DataType, Expression, FromClause, Predicate, Projection,
-    QueryPlan, SqlDialect,
+    ComparisonOperator, DataType, Expression, FromClause, Predicate, Projection,
+    QueryPlan,
 };
 use vlorql_llm::MockLlmClient;
-use std::sync::Arc;
 
 /// Builds a VlorQl facade with compile cache enabled.
 fn facade_with_compile_cache() -> VlorQl {

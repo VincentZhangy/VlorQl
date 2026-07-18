@@ -28,7 +28,7 @@ use std::sync::Arc;
 use serde_json::Value;
 
 use crate::errors::VlorQLError;
-use crate::schema::{ComparisonOperator, Expression, Predicate};
+use crate::schema::{ComparisonOperator, Expression, InTarget, Predicate};
 
 use super::providers::StatisticsProvider;
 
@@ -138,12 +138,16 @@ impl CardinalityEstimator {
                 Predicate::Between { expr, low, high } => {
                     self.between_selectivity(table, expr, low, high).await?
                 }
-                Predicate::In { expr, values } => {
+                Predicate::In { expr, target } => {
                     let per_value = self.equality_selectivity(table, expr).await?;
-                    per_value * values.len() as f64
+                    match target {
+                        InTarget::Values(values) => per_value * values.len() as f64,
+                        InTarget::SubQuery(_) => per_value,
+                    }
                 }
                 Predicate::Like { .. } => LIKE_SELECTIVITY,
                 Predicate::IsNull { expr } => self.null_selectivity(table, expr).await?,
+                Predicate::Exists { .. } => LIKE_SELECTIVITY, // EXISTS selectivity is approximated as LIKE
             };
             Ok(clamp01(selectivity))
         })

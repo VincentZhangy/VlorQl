@@ -359,6 +359,16 @@ mod tests {
 
     const AUTH_HEADER: &str = "authorization";
 
+    struct RestoreEnv(Option<String>);
+    impl Drop for RestoreEnv {
+        fn drop(&mut self) {
+            match &self.0 {
+                Some(previous) => unsafe { std::env::set_var(DEEPSEEK_API_KEY_ENV, previous) },
+                None => unsafe { std::env::remove_var(DEEPSEEK_API_KEY_ENV) },
+            }
+        }
+    }
+
     fn plan() -> QueryPlan {
         QueryPlan {
             select: vec![Projection::Column {
@@ -698,7 +708,7 @@ mod tests {
 
     #[test]
     fn deepseek_client_requires_api_key() {
-        let key_backup = std::env::var(DEEPSEEK_API_KEY_ENV).ok();
+        let guard = RestoreEnv(std::env::var(DEEPSEEK_API_KEY_ENV).ok());
         // Clear any leaked env var so the test does not depend on the host.
         unsafe {
             std::env::remove_var(DEEPSEEK_API_KEY_ENV);
@@ -707,11 +717,7 @@ mod tests {
         config.api_key = None;
         config.api_base = None;
         let result = DeepSeekClient::new(config);
-        if let Some(previous) = key_backup {
-            unsafe {
-                std::env::set_var(DEEPSEEK_API_KEY_ENV, previous);
-            }
-        }
+        drop(guard);
         let error = match result {
             Ok(_) => panic!("missing api key should fail"),
             Err(error) => error,
@@ -731,7 +737,7 @@ mod tests {
             .create_async()
             .await;
 
-        let key_backup = std::env::var(DEEPSEEK_API_KEY_ENV).ok();
+        let guard = RestoreEnv(std::env::var(DEEPSEEK_API_KEY_ENV).ok());
         // SAFETY: tests in this module run on a single-threaded test
         // harness so setting an env var here is observable only by this
         // process.
@@ -744,28 +750,12 @@ mod tests {
         let client = match DeepSeekClient::new(config) {
             Ok(client) => client,
             Err(error) => {
-                if let Some(previous) = key_backup {
-                    unsafe {
-                        std::env::set_var(DEEPSEEK_API_KEY_ENV, previous);
-                    }
-                } else {
-                    unsafe {
-                        std::env::remove_var(DEEPSEEK_API_KEY_ENV);
-                    }
-                }
+                drop(guard);
                 panic!("client should build from env var: {error}");
             }
         };
         let result = client.generate_plan("q", "s").await;
-        if let Some(previous) = key_backup {
-            unsafe {
-                std::env::set_var(DEEPSEEK_API_KEY_ENV, previous);
-            }
-        } else {
-            unsafe {
-                std::env::remove_var(DEEPSEEK_API_KEY_ENV);
-            }
-        }
+        drop(guard);
         let actual = result.expect("env-keyed request should succeed");
         assert_eq!(actual, expected);
         mock.assert_async().await;

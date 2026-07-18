@@ -15,7 +15,7 @@ use serde_json::{json, Value};
 
 use crate::errors::VlorQLError;
 use crate::schema::{
-    BinaryOperator, CommonTableExpression, Expression, OrderByTerm, Predicate, Projection,
+    BinaryOperator, CommonTableExpression, Expression, InTarget, OrderByTerm, Predicate, Projection,
     QueryPlan,
 };
 
@@ -183,9 +183,17 @@ fn fold_predicate(pred: &Predicate) -> Predicate {
             low: fold_expression(low),
             high: fold_expression(high),
         },
-        Predicate::In { expr, values } => Predicate::In {
+        Predicate::In { expr, target } => Predicate::In {
             expr: fold_expression(expr),
-            values: values.iter().map(fold_expression).collect(),
+            target: match target {
+                InTarget::Values(values) => {
+                    InTarget::Values(values.iter().map(fold_expression).collect())
+                }
+                InTarget::SubQuery(query) => InTarget::SubQuery(query.clone()),
+            },
+        },
+        Predicate::Exists { query } => Predicate::Exists {
+            query: query.clone(),
         },
         Predicate::Like { expr, pattern } => Predicate::Like {
             expr: fold_expression(expr),

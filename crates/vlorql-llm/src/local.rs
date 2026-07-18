@@ -44,9 +44,9 @@ use vlorql_core::errors::{ConfigErrorKind, LlmErrorKind, VlorQLError};
 use vlorql_core::schema::QueryPlan;
 
 use crate::{
-    compact_query_plan_schema, drive_sse_consumer, extract_delta_content, is_retryable,
-    response_message, retry_backoff, sse_error, sse_lines, transport_error, truncate, LlmClient,
-    LlmConfig, LlmProvider, DEFAULT_MAX_ATTEMPTS, DEFAULT_RETRY_DELAY,
+    compact_query_plan_schema, detect_template_leak, drive_sse_consumer, extract_delta_content,
+    is_retryable, response_message, retry_backoff, sse_error, sse_lines, transport_error, truncate,
+    LlmClient, LlmConfig, LlmProvider, DEFAULT_MAX_ATTEMPTS, DEFAULT_RETRY_DELAY,
 };
 
 /// Default base URL for vLLM (without the `/chat/completions` suffix).
@@ -583,6 +583,16 @@ fn parse_completion_payload(body: &str, backend: LocalBackend) -> Result<QueryPl
             json!({"source": "local_content", "backend": backend.label()}),
         ));
     }
+    if let Some(details) = detect_template_leak(content) {
+        return Err(VlorQLError::llm(
+            LlmErrorKind::ParseError { details },
+            json!({
+                "source": "local_content",
+                "backend": backend.label(),
+                "content": truncate(content, 4096),
+            }),
+        ));
+    }
     serde_json::from_str::<QueryPlan>(content).map_err(|error| {
         VlorQLError::llm(
             LlmErrorKind::ParseError {
@@ -654,8 +664,14 @@ where
             .and_then(|m| m.get("content"))
             .and_then(Value::as_str)
         {
-            if !content.is_empty() && tx.send(Ok(content.to_owned())).is_err() {
-                return true;
+            if !content.is_empty() {
+                if let Some(details) = detect_template_leak(content) {
+                    let _ = tx.send(Err(sse_error(details)));
+                    return false;
+                }
+                if tx.send(Ok(content.to_owned())).is_err() {
+                    return true;
+                }
             }
         }
     }

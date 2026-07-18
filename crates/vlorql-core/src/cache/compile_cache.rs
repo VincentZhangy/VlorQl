@@ -94,7 +94,7 @@ impl CompileCache {
         &self,
         plan: &ValidatedPlan,
         profile: &DialectProfile,
-    ) -> Option<CompiledQuery> {
+    ) -> Option<Arc<CompiledQuery>> {
         let key = CompileCacheKey::new(plan, profile);
         let result = self.inner.get(&key).await;
         let hit = result.is_some();
@@ -105,7 +105,7 @@ impl CompileCache {
             key.plan_hash,
             key.dialect,
         );
-        result.map(|arc| (*arc).clone())
+        result
     }
 
     /// Inserts a compiled query into the cache.
@@ -157,7 +157,7 @@ impl CompileCache {
 mod tests {
     use super::*;
     use crate::schema::{
-        ComparisonOperator, DataType, Expression, FromClause, Predicate, Projection, QueryPlan,
+        FromClause, Projection, QueryPlan,
         SqlDialect,
     };
     use std::sync::Arc;
@@ -215,7 +215,7 @@ mod tests {
         assert!(cache.get(&plan, &profile).await.is_none());
         cache.insert(&plan, &profile, compiled.clone()).await;
         let cached = cache.get(&plan, &profile).await;
-        assert_eq!(cached, Some(compiled));
+        assert_eq!(cached, Some(Arc::new(compiled)));
     }
 
     /// Same plan + different dialect → different cache entries.
@@ -282,7 +282,7 @@ mod tests {
 
         // plan_b should find its own entry.
         let cached = cache.get(&plan_b, &profile).await;
-        assert_eq!(cached, Some(compiled_b));
+        assert_eq!(cached, Some(Arc::new(compiled_b)));
     }
 
     /// Cache respects the max_size weigher (small size for testing).

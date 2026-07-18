@@ -21,6 +21,7 @@
 pub mod cache;
 pub mod compile;
 pub mod errors;
+pub mod observability;
 pub mod optimizer;
 pub mod policy;
 pub mod prompt;

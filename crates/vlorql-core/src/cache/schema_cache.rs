@@ -121,7 +121,7 @@ impl SchemaCache {
 
     /// Removes the entry for a single key.
     pub fn invalidate(&self, key: &SchemaCacheKey) {
-        let _ = self.inner.invalidate(key);
+        drop(self.inner.invalidate(key));
     }
 
     /// Removes all entries from the cache.

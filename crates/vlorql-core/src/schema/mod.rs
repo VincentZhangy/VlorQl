@@ -7,7 +7,7 @@ pub mod snapshot;
 pub mod types;
 
 pub use dialect::{DialectProfile, DialectProfileBuilder};
-pub use expressions::{Expression, Predicate};
+pub use expressions::{Expression, InTarget, Predicate};
 pub use query_plan::{
     CommonTableExpression, FromClause, JoinClause, OrderByTerm, Projection, QueryPlan,
 };

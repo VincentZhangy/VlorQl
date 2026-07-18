@@ -23,6 +23,7 @@ futures-util.workspace = true
 mockall.workspace = true
 rstest.workspace = true
 mockito.workspace = true
+tracing-subscriber.workspace = true
 
 [[test]]
 name = "multi_provider"

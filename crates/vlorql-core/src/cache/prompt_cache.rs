@@ -180,14 +180,16 @@ mod tests {
     /// Different policy → different key.
     #[test]
     fn different_policy_different_key() {
-        let mut strict = PolicyConfig::default();
-        strict.table_policies = HashMap::from([(
-            "secrets".to_owned(),
-            TablePolicy {
-                allowed: false,
-                ..TablePolicy::default()
-            },
-        )]);
+        let strict = PolicyConfig {
+            table_policies: HashMap::from([(
+                "secrets".to_owned(),
+                TablePolicy {
+                    allowed: false,
+                    ..TablePolicy::default()
+                },
+            )]),
+            ..PolicyConfig::default()
+        };
 
         let default_key =
             PromptCacheKey::new("v1", &DialectProfile::default(), &PolicyConfig::default());

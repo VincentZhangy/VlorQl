@@ -73,7 +73,7 @@ fn push_plan(plan: &QueryPlan) -> QueryPlan {
     let Some(where_clause) = plan.r#where.clone() else {
         return plan;
     };
-    if plan.ctes.as_ref().map_or(true, Vec::is_empty) {
+    if plan.ctes.as_ref().is_none_or(Vec::is_empty) {
         return plan;
     }
 
@@ -263,7 +263,7 @@ fn outer_join_protected_aliases(plan: &QueryPlan) -> BTreeSet<String> {
 /// predicate, so a conjunct written against the outer CTE alias resolves
 /// against the CTE body's own relations.
 fn strip_qualifiers(pred: &Predicate) -> Predicate {
-    use crate::schema::Expression;
+    use crate::schema::{Expression, InTarget};
 
     fn strip_expr(expr: &Expression) -> Expression {
         match expr {
@@ -285,7 +285,9 @@ fn strip_qualifiers(pred: &Predicate) -> Predicate {
                 args: args.iter().map(strip_expr).collect(),
                 distinct: *distinct,
             },
-            Expression::Literal { .. } => expr.clone(),
+            Expression::Literal { .. } | Expression::Star | Expression::SubQuery { .. } => {
+                expr.clone()
+            }
         }
     }
 
@@ -311,9 +313,17 @@ fn strip_qualifiers(pred: &Predicate) -> Predicate {
             low: strip_expr(low),
             high: strip_expr(high),
         },
-        Predicate::In { expr, values } => Predicate::In {
+        Predicate::In { expr, target } => Predicate::In {
             expr: strip_expr(expr),
-            values: values.iter().map(strip_expr).collect(),
+            target: match target {
+                InTarget::Values(values) => {
+                    InTarget::Values(values.iter().map(strip_expr).collect())
+                }
+                InTarget::SubQuery(query) => InTarget::SubQuery(query.clone()),
+            },
+        },
+        Predicate::Exists { query } => Predicate::Exists {
+            query: query.clone(),
         },
         Predicate::Like { expr, pattern } => Predicate::Like {
             expr: strip_expr(expr),

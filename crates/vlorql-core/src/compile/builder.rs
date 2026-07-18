@@ -1,10 +1,14 @@
 //! Dialect-aware parameterized SQL construction.
 
+/// MySQL's maximum unsigned bigint value, used as a sentinel to represent
+/// "no limit" when only OFFSET is specified (LIMIT offset, <unlimited>).
+const MYSQL_UNLIMITED_LIMIT: u64 = 18446744073709551615;
+
 use super::types::Parameter;
 use crate::errors::{CompilationErrorKind, VlorQLError};
 use crate::schema::{
     BinaryOperator, ComparisonOperator, DataType, Expression, FromClause, IdentifierQuoting,
-    JoinType, Predicate, Projection, QueryPlan, SqlDialect,
+    InTarget, JoinType, Predicate, Projection, QueryPlan, SqlDialect,
 };
 use crate::validate::ValidatedPlan;
 use serde_json::{json, Value};
@@ -35,9 +39,10 @@ impl<'a> QueryBuilder<'a> {
 
     /// Builds a SQL string and returns its parameters in placeholder order.
     pub fn build(mut self) -> Result<(String, Vec<Parameter>), VlorQLError> {
-        let plan = self.plan.as_plan().clone();
+        tracing::event!(tracing::Level::DEBUG, "Building SQL from QueryPlan");
+        let plan = self.plan.as_plan();
         let mut sql = String::new();
-        self.build_query(&plan, &mut sql)?;
+        self.build_query(plan, &mut sql)?;
         Ok((sql, self.parameters))
     }
 
@@ -74,6 +79,12 @@ impl<'a> QueryBuilder<'a> {
                     self.render_binary_operator(*op)
                 ))
             }
+            Expression::Star => Ok("*".to_owned()),
+            Expression::SubQuery { query } => {
+                let mut sub_sql = String::new();
+                self.build_query(query, &mut sub_sql)?;
+                Ok(format!("({sub_sql})"))
+            }
         }
     }
 
@@ -106,19 +117,33 @@ impl<'a> QueryBuilder<'a> {
                 let high = self.render_expression(high)?;
                 Ok(format!("{expression} BETWEEN {low} AND {high}"))
             }
-            Predicate::In { expr, values } => {
-                if values.is_empty() {
-                    return Err(compilation_error(
-                        "empty_in_list",
-                        json!({"predicate": "in"}),
-                    ));
-                }
+            Predicate::In { expr, target } => {
                 let expression = self.render_expression(expr)?;
-                let mut rendered_values = Vec::with_capacity(values.len());
-                for value in values {
-                    rendered_values.push(self.render_expression(value)?);
+                match target {
+                    InTarget::Values(values) => {
+                        if values.is_empty() {
+                            return Err(compilation_error(
+                                "empty_in_list",
+                                json!({"predicate": "in"}),
+                            ));
+                        }
+                        let mut rendered_values = Vec::with_capacity(values.len());
+                        for value in values {
+                            rendered_values.push(self.render_expression(value)?);
+                        }
+                        Ok(format!("{expression} IN ({})", rendered_values.join(", ")))
+                    }
+                    InTarget::SubQuery(query) => {
+                        let mut sub_sql = String::new();
+                        self.build_query(query, &mut sub_sql)?;
+                        Ok(format!("{expression} IN ({sub_sql})"))
+                    }
                 }
-                Ok(format!("{expression} IN ({})", rendered_values.join(", ")))
+            }
+            Predicate::Exists { query } => {
+                let mut sub_sql = String::new();
+                self.build_query(query, &mut sub_sql)?;
+                Ok(format!("EXISTS ({sub_sql})"))
             }
             Predicate::Like { expr, pattern } => {
                 let expression = self.render_expression(expr)?;
@@ -155,7 +180,7 @@ impl<'a> QueryBuilder<'a> {
         self.build_group_by(plan, sql)?;
         self.build_having(plan, sql)?;
         self.build_order_by(plan, sql)?;
-        self.build_limit_offset(plan, sql);
+        self.build_limit_offset(plan, sql)?;
         Ok(())
     }
 
@@ -228,7 +253,7 @@ impl<'a> QueryBuilder<'a> {
                 write!(
                     sql,
                     " {} {}",
-                    render_join_type(join.join_type),
+                    self.render_join_type(join.join_type)?,
                     self.render_from_clause(&join.right_table)?
                 )
                 .map_err(formatting_error)?;
@@ -287,34 +312,35 @@ impl<'a> QueryBuilder<'a> {
         write!(sql, " ORDER BY {}", rendered.join(", ")).map_err(formatting_error)
     }
 
-    fn build_limit_offset(&mut self, plan: &QueryPlan, sql: &mut String) {
+    fn build_limit_offset(&mut self, plan: &QueryPlan, sql: &mut String) -> Result<(), VlorQLError> {
         match (self.dialect, plan.limit, plan.offset) {
             (SqlDialect::MySql, Some(limit), Some(offset)) => {
                 let offset_ph = self.add_parameter(Value::from(offset), DataType::Int);
                 let limit_ph = self.add_parameter(Value::from(limit), DataType::Int);
-                let _ = write!(sql, " LIMIT {offset_ph}, {limit_ph}");
+                write!(sql, " LIMIT {offset_ph}, {limit_ph}").map_err(formatting_error)
             }
             (SqlDialect::MySql, Some(limit), None) => {
                 let limit_ph = self.add_parameter(Value::from(limit), DataType::Int);
-                let _ = write!(sql, " LIMIT {limit_ph}");
+                write!(sql, " LIMIT {limit_ph}").map_err(formatting_error)
             }
             (SqlDialect::MySql, None, Some(offset)) => {
                 let offset_ph = self.add_parameter(Value::from(offset), DataType::Int);
-                let _ = write!(sql, " LIMIT {offset_ph}, 18446744073709551615");
+                write!(sql, " LIMIT {offset_ph}, {MYSQL_UNLIMITED_LIMIT}").map_err(formatting_error)
             }
             (SqlDialect::Sqlite, None, Some(offset)) => {
                 let offset_ph = self.add_parameter(Value::from(offset), DataType::Int);
-                let _ = write!(sql, " LIMIT -1 OFFSET {offset_ph}");
+                write!(sql, " LIMIT -1 OFFSET {offset_ph}").map_err(formatting_error)
             }
             (_, limit, offset) => {
                 if let Some(limit) = limit {
                     let limit_ph = self.add_parameter(Value::from(limit), DataType::Int);
-                    let _ = write!(sql, " LIMIT {limit_ph}");
+                    write!(sql, " LIMIT {limit_ph}").map_err(formatting_error)?;
                 }
                 if let Some(offset) = offset {
                     let offset_ph = self.add_parameter(Value::from(offset), DataType::Int);
-                    let _ = write!(sql, " OFFSET {offset_ph}");
+                    write!(sql, " OFFSET {offset_ph}").map_err(formatting_error)?;
                 }
+                Ok(())
             }
         }
     }
@@ -435,15 +461,19 @@ impl<'a> QueryBuilder<'a> {
             )),
         }
     }
-}
 
-fn render_join_type(join_type: JoinType) -> &'static str {
-    match join_type {
-        JoinType::Inner => "INNER JOIN",
-        JoinType::Left => "LEFT JOIN",
-        JoinType::Right => "RIGHT JOIN",
-        JoinType::Full => "FULL JOIN",
-        JoinType::Cross => "CROSS JOIN",
+    fn render_join_type(&self, join_type: JoinType) -> Result<&'static str, VlorQLError> {
+        match join_type {
+            JoinType::Full if self.dialect == SqlDialect::MySql => Err(compilation_error(
+                "unsupported_full_join",
+                json!({"dialect": "mysql", "join_type": "full"}),
+            )),
+            JoinType::Inner => Ok("INNER JOIN"),
+            JoinType::Left => Ok("LEFT JOIN"),
+            JoinType::Right => Ok("RIGHT JOIN"),
+            JoinType::Full => Ok("FULL JOIN"),
+            JoinType::Cross => Ok("CROSS JOIN"),
+        }
     }
 }
 
@@ -454,14 +484,37 @@ fn validate_unquoted_identifier(identifier: &str) -> Result<(), VlorQLError> {
         .is_some_and(|character| character == '_' || character.is_ascii_alphabetic());
     let valid_rest =
         characters.all(|character| character == '_' || character.is_ascii_alphanumeric());
-    if valid_start && valid_rest {
-        Ok(())
-    } else {
-        Err(compilation_error(
+    if !valid_start || !valid_rest {
+        return Err(compilation_error(
             "invalid_unquoted_identifier",
             json!({"identifier": identifier}),
-        ))
+        ));
     }
+    if is_reserved_keyword(identifier) {
+        return Err(compilation_error(
+            "reserved_keyword_unquoted",
+            json!({"identifier": identifier}),
+        ));
+    }
+    Ok(())
+}
+
+/// Standard SQL reserved keywords.  Sorted alphabetically for binary search.
+static RESERVED_KEYWORDS: &[&str] = &[
+    "ALL", "AND", "AS", "BETWEEN", "BY", "CASE", "CROSS", "DELETE", "DESC",
+    "DISTINCT", "DROP", "ELSE", "END", "ESCAPE", "EXCEPT", "EXISTS", "FALSE",
+    "FROM", "FULL", "GROUP", "HAVING", "IN", "INDEX", "INNER", "INSERT",
+    "INTERSECT", "INTO", "IS", "JOIN", "LEFT", "LIKE", "LIMIT", "NOT", "NULL",
+    "OFFSET", "ON", "OR", "ORDER", "OUTER", "RIGHT", "SELECT", "SET", "TABLE",
+    "THEN", "TRUE", "UNION", "UNIQUE", "UPDATE", "VALUES", "WHEN", "WHERE",
+    "WITH",
+];
+
+/// Returns `true` when `ident` is a SQL reserved keyword (case-insensitive).
+fn is_reserved_keyword(ident: &str) -> bool {
+    RESERVED_KEYWORDS
+        .binary_search(&ident.to_uppercase().as_str())
+        .is_ok()
 }
 
 fn compilation_error(feature: impl Into<String>, details: Value) -> VlorQLError {

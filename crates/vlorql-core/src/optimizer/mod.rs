@@ -85,7 +85,7 @@ impl QueryOptimizer {
                 RewriterPipeline::new()
                     .with(ConstantFolding)
                     .with(PredicatePushdown)
-                    .with(ColumnPruning { schema: None }),
+                    .with(ColumnPruning::new()),
             ),
             join_reorderer,
             enable_join_reorder: true,
@@ -100,7 +100,7 @@ impl QueryOptimizer {
                 RewriterPipeline::new()
                     .with(ConstantFolding)
                     .with(PredicatePushdown)
-                    .with(ColumnPruning { schema: None }),
+                    .with(ColumnPruning::new()),
             ),
             join_reorderer: None,
             enable_join_reorder: false,
@@ -644,7 +644,7 @@ mod tests {
 
         // The pipeline should have folded nothing here (no constant
         // expressions), but pushdown and pruning should still run.
-        assert!(rewritten.select.len() >= 1);
+        assert!(!rewritten.select.is_empty());
     }
 
     #[tokio::test]
@@ -692,7 +692,7 @@ mod tests {
 
         // Build a plan with a CTE and an outer WHERE that contains both
         // a user conjunct and the policy conjunct.
-        let mut plan = plan_with_cte(and(
+        let plan = plan_with_cte(and(
             policy_filter.clone(),
             compare(col(Some("recent"), "id"), ComparisonOperator::Gt, int(0)),
         ));
@@ -721,7 +721,7 @@ mod tests {
 
     #[test]
     fn column_pruning_preserves_primary_and_foreign_keys() {
-        use crate::schema::{ArcSchemaSnapshot, ForeignKey};
+        use crate::schema::ForeignKey;
 
         // Build a schema snapshot where `orders` has a PK (`id`) and two
         // FKs (`user_id` → `users.id`, `product_id` → `products.id`).
@@ -836,7 +836,7 @@ mod tests {
             ctes: Some(vec![cte]),
         };
 
-        let pruner = ColumnPruning { schema: Some(schema) };
+        let pruner = ColumnPruning::with_schema(schema);
         let rewritten = pruner.rewrite(&plan).unwrap();
 
         let cte_select = &rewritten.ctes.as_ref().unwrap()[0].query.select;

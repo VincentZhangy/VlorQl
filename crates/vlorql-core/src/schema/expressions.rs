@@ -5,6 +5,7 @@
 //! validators and the SQL compiler inspect the tag to decide how to
 //! type-check or render the node.
 
+use super::query_plan::QueryPlan;
 use super::types::{BinaryOperator, ComparisonOperator, DataType};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -72,6 +73,25 @@ pub enum Expression {
         /// Right-hand operand.
         right: Box<Expression>,
     },
+    /// A literal `*` (asterisk) used inside aggregate function calls
+    /// such as `COUNT(*)` or `COUNT(DISTINCT *)`.
+    Star,
+    /// A scalar subquery expression.
+    SubQuery {
+        /// The inner query plan.
+        query: Box<QueryPlan>,
+    },
+}
+
+/// The target of an `IN` predicate: either a list of literal values
+/// or a subquery.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum InTarget {
+    /// A list of literal expressions.
+    Values(Vec<Expression>),
+    /// A subquery.
+    SubQuery(Box<QueryPlan>),
 }
 
 /// A boolean condition used by `WHERE`, `HAVING`, and join clauses.
@@ -139,12 +159,12 @@ pub enum Predicate {
         /// Inclusive upper bound.
         high: Expression,
     },
-    /// A value constrained to a list of expressions.
+    /// A value constrained to a list of expressions or a subquery.
     In {
         /// The value being tested.
         expr: Expression,
-        /// Allowed values.
-        values: Vec<Expression>,
+        /// Allowed values or a subquery.
+        target: InTarget,
     },
     /// A string pattern match.
     Like {
@@ -157,5 +177,10 @@ pub enum Predicate {
     IsNull {
         /// The value being tested.
         expr: Expression,
+    },
+    /// Tests whether a subquery returns any rows.
+    Exists {
+        /// The subquery to check.
+        query: Box<QueryPlan>,
     },
 }

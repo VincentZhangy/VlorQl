@@ -1,7 +1,7 @@
 //! Aggregating validation for controlled SQL dialect features.
 
 use crate::errors::{ValidationErrorKind, VlorQLError};
-use crate::schema::{DialectProfile, Expression, Predicate, Projection, QueryPlan};
+use crate::schema::{DialectProfile, Expression, InTarget, Predicate, Projection, QueryPlan};
 use serde_json::json;
 
 /// Entry points for validating controlled SQL dialect features.
@@ -171,6 +171,10 @@ impl BoundDialectValidator<'_> {
                 self.validate_expression(left, errors);
                 self.validate_expression(right, errors);
             }
+            Expression::Star => {} // `*` is always valid in function calls.
+            Expression::SubQuery { query } => {
+                self.validate_inner(query, errors);
+            }
         }
     }
 
@@ -190,11 +194,21 @@ impl BoundDialectValidator<'_> {
                 self.validate_expression(low, errors);
                 self.validate_expression(high, errors);
             }
-            Predicate::In { expr, values } => {
+            Predicate::In { expr, target } => {
                 self.validate_expression(expr, errors);
-                for value in values {
-                    self.validate_expression(value, errors);
+                match target {
+                    InTarget::Values(values) => {
+                        for value in values {
+                            self.validate_expression(value, errors);
+                        }
+                    }
+                    InTarget::SubQuery(query) => {
+                        self.validate_inner(query, errors);
+                    }
                 }
+            }
+            Predicate::Exists { query } => {
+                self.validate_inner(query, errors);
             }
             Predicate::Like { expr, .. } | Predicate::IsNull { expr } => {
                 self.validate_expression(expr, errors);

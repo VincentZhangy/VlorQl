@@ -1,4 +1,4 @@
-use crate::schema::{Expression, FromClause, Predicate, Projection, QueryPlan};
+use crate::schema::{Expression, FromClause, InTarget, Predicate, Projection, QueryPlan};
 use std::collections::HashSet;
 
 #[derive(Debug, Clone)]
@@ -126,6 +126,11 @@ pub(crate) fn collect_expression_references(
             collect_expression_references(left, references);
             collect_expression_references(right, references);
         }
+        Expression::Star => {}
+        Expression::SubQuery { query } => {
+            let sub_refs = collect_plan_references(query);
+            references.extend(sub_refs.columns);
+        }
     }
 }
 
@@ -148,11 +153,23 @@ pub(crate) fn collect_predicate_references(
             collect_expression_references(low, references);
             collect_expression_references(high, references);
         }
-        Predicate::In { expr, values } => {
+        Predicate::In { expr, target } => {
             collect_expression_references(expr, references);
-            for value in values {
-                collect_expression_references(value, references);
+            match target {
+                InTarget::Values(values) => {
+                    for value in values {
+                        collect_expression_references(value, references);
+                    }
+                }
+                InTarget::SubQuery(query) => {
+                    let sub_refs = collect_plan_references(query);
+                    references.extend(sub_refs.columns);
+                }
             }
+        }
+        Predicate::Exists { query } => {
+            let sub_refs = collect_plan_references(query);
+            references.extend(sub_refs.columns);
         }
         Predicate::Like { expr, .. } | Predicate::IsNull { expr } => {
             collect_expression_references(expr, references);

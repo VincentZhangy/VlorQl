@@ -136,27 +136,27 @@ impl<K, V> Default for MemoryCache<K, V> {
 
 impl<K: Eq + Hash + Send + Sync, V: Clone + Send> Cache<K, V> for MemoryCache<K, V> {
     fn get(&self, key: &K) -> Option<V> {
-        let map = self.inner.lock().expect("MemoryCache lock poisoned");
+        let map = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         map.get(key).cloned()
     }
 
     fn insert(&self, key: K, value: V) -> Option<V> {
-        let mut map = self.inner.lock().expect("MemoryCache lock poisoned");
+        let mut map = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         map.insert(key, value)
     }
 
     fn invalidate(&self, key: &K) {
-        let mut map = self.inner.lock().expect("MemoryCache lock poisoned");
+        let mut map = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         map.remove(key);
     }
 
     fn clear(&self) {
-        let mut map = self.inner.lock().expect("MemoryCache lock poisoned");
+        let mut map = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         map.clear();
     }
 
     fn size(&self) -> u64 {
-        let map = self.inner.lock().expect("MemoryCache lock poisoned");
+        let map = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         map.len() as u64
     }
 }

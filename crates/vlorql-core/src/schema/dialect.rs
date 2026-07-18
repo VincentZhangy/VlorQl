@@ -1,6 +1,6 @@
 //! Controlled SQL dialect capabilities.
 
-use super::expressions::{Expression, Predicate};
+use super::expressions::{Expression, InTarget, Predicate};
 use super::query_plan::{CommonTableExpression, JoinClause, Projection, QueryPlan};
 use super::types::{IdentifierQuoting, JoinType, SqlDialect};
 use crate::errors::{ValidationErrorKind, VlorQLError};
@@ -224,6 +224,8 @@ impl DialectProfile {
                 self.validate_expression(left)?;
                 self.validate_expression(right)
             }
+            Expression::Star => Ok(()),
+            Expression::SubQuery { query } => self.validate_dialect_features(query),
         }
     }
 
@@ -243,13 +245,19 @@ impl DialectProfile {
                 self.validate_expression(low)?;
                 self.validate_expression(high)
             }
-            Predicate::In { expr, values } => {
+            Predicate::In { expr, target } => {
                 self.validate_expression(expr)?;
-                for value in values {
-                    self.validate_expression(value)?;
+                match target {
+                    InTarget::Values(values) => {
+                        for value in values {
+                            self.validate_expression(value)?;
+                        }
+                        Ok(())
+                    }
+                    InTarget::SubQuery(query) => self.validate_dialect_features(query),
                 }
-                Ok(())
             }
+            Predicate::Exists { query } => self.validate_dialect_features(query),
             Predicate::Like { expr, .. } | Predicate::IsNull { expr } => {
                 self.validate_expression(expr)
             }

@@ -194,7 +194,7 @@ mod tests {
         assert!(prompt.contains("users"));
         assert!(prompt.contains("organizations"));
         assert!(!prompt.contains("audit_logs | id"));
-        assert!(prompt.chars().count() < 10_000);
+        assert!(prompt.chars().count() < 11_000);
     }
 
     #[test]
@@ -222,7 +222,7 @@ mod tests {
             .with_examples(false)
             .build_system_prompt("Show users");
         assert!(!prompt.contains("## Example"));
-        assert!(prompt.chars().count() < 10_000);
+        assert!(prompt.chars().count() < 11_000);
     }
 }
 

@@ -10,7 +10,6 @@
 
 use super::common::{base_plan, open_policy, snapshot};
 use vlorql::VlorQl;
-use vlorql_core::optimizer::QueryOptimizer;
 use vlorql_core::schema::{
     BinaryOperator, DataType, Expression, FromClause, JoinClause, JoinType, Predicate, Projection,
     QueryPlan,
@@ -166,14 +165,16 @@ async fn optimized_plan_still_enforces_policy() {
     use vlorql_core::policy::{PolicyConfig, TablePolicy};
     use std::collections::HashMap;
 
-    let mut strict_policy = PolicyConfig::default();
-    strict_policy.table_policies = HashMap::from([(
-        "secrets".to_owned(),
-        TablePolicy {
-            allowed: false,
-            ..TablePolicy::default()
-        },
-    )]);
+    let strict_policy = PolicyConfig {
+        table_policies: HashMap::from([(
+            "secrets".to_owned(),
+            TablePolicy {
+                allowed: false,
+                ..TablePolicy::default()
+            },
+        )]),
+        ..PolicyConfig::default()
+    };
 
     let vlorql = VlorQl::builder()
         .with_schema(snapshot())
@@ -220,8 +221,10 @@ async fn join_reorderer_picks_smallest_base_table_first() {
     // `users`. The reorderer should start from the smallest relation.
     let mut catalog = StatisticsCatalog::default();
 
-    let mut users = TableStatistics::default();
-    users.row_count = 1_000_000;
+    let mut users = TableStatistics {
+        row_count: 1_000_000,
+        ..TableStatistics::default()
+    };
     users.columns.insert(
         "id".to_owned(),
         ColumnStatistics {
@@ -232,8 +235,10 @@ async fn join_reorderer_picks_smallest_base_table_first() {
     );
     catalog.tables.insert("users".to_owned(), users);
 
-    let mut orders = TableStatistics::default();
-    orders.row_count = 10_000;
+    let mut orders = TableStatistics {
+        row_count: 10_000,
+        ..TableStatistics::default()
+    };
     orders.columns.insert(
         "owner_id".to_owned(),
         ColumnStatistics {

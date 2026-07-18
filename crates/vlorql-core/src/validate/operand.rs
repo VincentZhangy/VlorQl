@@ -3,8 +3,8 @@
 use crate::errors::{ValidationErrorKind, VlorQLError};
 use crate::query::QuerySource;
 use crate::schema::{
-    BinaryOperator, ComparisonOperator, DataType, Expression, Predicate, Projection, QueryPlan,
-    SchemaSnapshot,
+    BinaryOperator, ComparisonOperator, DataType, Expression, InTarget, Predicate, Projection,
+    QueryPlan, SchemaSnapshot,
 };
 use serde_json::{json, Value};
 use std::collections::HashSet;
@@ -139,6 +139,8 @@ impl<'a> OperandValidator<'a> {
                     _ => None,
                 }
             }
+            Expression::Star => None,
+            Expression::SubQuery { .. } => None,
         }
     }
 
@@ -172,14 +174,25 @@ impl<'a> OperandValidator<'a> {
                     validate_compatible_types("BETWEEN upper bound", expr_type, high_type, errors);
                 }
             }
-            Predicate::In { expr, values } => {
+            Predicate::In { expr, target } => {
                 let expr_type = self.validate_expression_inner(expr, scope, errors);
-                for value in values {
-                    let value_type = self.validate_expression_inner(value, scope, errors);
-                    if let (Some(expr_type), Some(value_type)) = (expr_type, value_type) {
-                        validate_compatible_types("IN value", expr_type, value_type, errors);
+                match target {
+                    InTarget::Values(values) => {
+                        for value in values {
+                            let value_type = self.validate_expression_inner(value, scope, errors);
+                            if let (Some(expr_type), Some(value_type)) = (expr_type, value_type) {
+                                validate_compatible_types("IN value", expr_type, value_type, errors);
+                            }
+                        }
+                    }
+                    InTarget::SubQuery(_) => {
+                        // Subquery type checking is deferred; no expression-level type
+                        // validation needed here.
                     }
                 }
+            }
+            Predicate::Exists { .. } => {
+                // EXISTS is a boolean check; no expression-level validation needed.
             }
             Predicate::Like { expr, .. } => {
                 if let Some(data_type) = self.validate_expression_inner(expr, scope, errors) {

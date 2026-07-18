@@ -52,7 +52,7 @@ use super::rules::PlanRewriter;
 pub struct ColumnPruning {
     /// Optional schema snapshot used to identify primary/foreign keys.
     /// When `None` the pruner is conservative and keeps all columns.
-    pub schema: Option<ArcSchemaSnapshot>,
+    schema: Option<ArcSchemaSnapshot>,
 }
 
 impl ColumnPruning {

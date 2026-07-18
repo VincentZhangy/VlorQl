@@ -157,6 +157,14 @@ The builder leaves any unset field at the [`DialectProfile::default`]
 value. Dialect-aware compile flags like the placeholder style and
 identifier quoting are picked from the `dialect` field.
 
+**Dialect-specific behaviour:**
+
+| Dialect   | Placeholder | Identifier quoting | Pagination                    | Notes                                                                 |
+|-----------|-------------|--------------------|-------------------------------|-----------------------------------------------------------------------|
+| Postgres  | `$1`, `$2`  | `"double quotes"`  | `LIMIT n OFFSET m`            | Default. Supports `ILIKE` operator.                                   |
+| SQLite    | `?`         | `"double quotes"`  | `LIMIT -1 OFFSET m`           | `OFFSET` without `LIMIT` uses `LIMIT -1`.                             |
+| MySQL     | `?`         | `` `backticks` ``  | `LIMIT m, n` / `LIMIT m, 18446744073709551615` | `FULL JOIN` is rejected at compile time. `OFFSET` without `LIMIT` uses the maximum `BIGINT UNSIGNED` sentinel. |
+
 ### 2.3 `PolicyConfig` (access control)
 
 `PolicyConfig` is a free-form bag of rules. The default policy allows
@@ -496,6 +504,44 @@ for parameter in &compiled.parameters {
 }
 ```
 
+### 6.1 Query plan optimisation
+
+VlorQl includes an optional **logical query optimizer** that runs
+between validation and compilation. It applies three synchronous
+rewrite rules and one asynchronous join reorderer:
+
+| Rule                | Effect                                                              |
+|---------------------|---------------------------------------------------------------------|
+| Constant folding    | Evaluates constant sub-expressions (`100 + 50` → `150`).            |
+| Predicate pushdown  | Moves `WHERE` conjuncts into CTE bodies for earlier filtering.      |
+| Column pruning      | Removes unreferenced columns from CTE outputs.                      |
+| Join reordering     | Reorders `INNER JOIN` chains to minimise total cost (requires statistics). |
+
+Enable it with `VlorQlBuilder::with_statistics_provider`:
+
+```rust
+use std::sync::Arc;
+use vlorql_core::statistics::DummyStatisticsProvider;
+
+let stats = Arc::new(DummyStatisticsProvider::default());
+let vlorql = VlorQl::builder()
+    .with_schema(schema)
+    .with_dialect_name("postgres")
+    .with_policy(PolicyConfig::default())
+    .with_statistics_provider(stats)
+    .build()?;
+```
+
+When statistics are available, `VlorQl::validate_and_optimize`
+returns an `OptimizedPlan` that can be passed to `compile_only`:
+
+```rust
+let optimized = vlorql.validate_and_optimize(&plan).await?;
+let compiled = vlorql.compile_only(optimized.as_validated())?;
+```
+
+See [`optimization.md`](./optimization.md) for detailed documentation.
+
 ---
 
 ## 7. Error handling
@@ -516,10 +562,20 @@ println!("suggestion: {:?}", response.suggestion);
 |-------|----------------------------------|------------|
 | `V001`–`V009` | Validation errors        | yes        |
 | `P001`–`P003` | Policy errors            | no         |
-| `C001`–`C002` | Compilation errors       | no         |
+| `C001`–`C005` | Compilation errors       | no         |
 | `S001`–`S002` | Schema errors            | no         |
 | `L001`–`L003` | LLM errors                | yes        |
 | `G001`–`G003` | Configuration errors     | no         |
+
+Compilation errors include:
+
+| Error code | Feature name                        | Meaning                                                       |
+|------------|--------------------------------------|---------------------------------------------------------------|
+| `C001`     | `unsupported_full_join`              | `FULL JOIN` is not supported by the target dialect (MySQL).   |
+| `C002`     | `reserved_keyword_unquoted`          | An unquoted identifier is a SQL reserved keyword.             |
+| `C003`     | `empty_in_list`                      | `IN` predicate has an empty value list.                       |
+| `C004`     | `empty_select_list`                  | `SELECT` list is empty.                                       |
+| `C005`     | `sql_formatting`                     | Internal formatting error.                                    |
 
 `ValidationErrorKind::InvalidJson` (`V001`) and the
 `is_retryable()` flag are what the `VlorQl::query` retry loop uses
@@ -529,7 +585,98 @@ the LLM will not help.
 
 ---
 
-## 8. FAQ
+## 8. QueryPlan AST reference
+
+The `QueryPlan` JSON object is the contract between the LLM and
+VlorQl. The variants below show the full set of supported
+expressions and predicates.
+
+### 8.1 `Expression` variants
+
+```rust
+pub enum Expression {
+    /// A literal value.
+    Literal { value: serde_json::Value, data_type: DataType },
+    /// A column reference, optionally table-qualified.
+    ColumnRef { table: Option<String>, column: String },
+    /// A function call (scalar or aggregate), with optional DISTINCT.
+    FunctionCall { name: String, args: Vec<Expression>, distinct: bool },
+    /// A binary operator application.
+    BinaryOp { left: Box<Expression>, op: BinaryOperator, right: Box<Expression> },
+    /// A literal `*` used in aggregate functions such as COUNT(*).
+    Star,
+    /// A scalar subquery: `(SELECT ...)`.
+    SubQuery { query: Box<QueryPlan> },
+}
+```
+
+**`Star`** is used inside `FunctionCall` arguments to represent `COUNT(*)`:
+
+```json
+{
+  "type": "function_call",
+  "name": "COUNT",
+  "args": [{ "type": "star" }],
+  "distinct": false
+}
+```
+
+**`SubQuery`** represents a scalar subquery expression:
+
+```json
+{
+  "type": "sub_query",
+  "query": { /* nested QueryPlan */ }
+}
+```
+
+### 8.2 `Predicate` variants
+
+```rust
+pub enum Predicate {
+    Comparison { left: Expression, op: ComparisonOperator, right: Expression },
+    And { left: Box<Predicate>, right: Box<Predicate> },
+    Or { left: Box<Predicate>, right: Box<Predicate> },
+    Not { child: Box<Predicate> },
+    Between { expr: Expression, low: Expression, high: Expression },
+    In { expr: Expression, target: InTarget },
+    Like { expr: Expression, pattern: String },
+    IsNull { expr: Expression },
+    Exists { query: Box<QueryPlan> },
+}
+```
+
+**`In`** can target either a list of values or a subquery, via the `InTarget` enum:
+
+```rust
+pub enum InTarget {
+    Values(Vec<Expression>),          // WHERE id IN (1, 2, 3)
+    SubQuery(Box<QueryPlan>),         // WHERE id IN (SELECT user_id FROM ...)
+}
+```
+
+**`Exists`** checks whether a subquery returns any rows:
+
+```json
+{
+  "type": "exists",
+  "query": { /* nested QueryPlan */ }
+}
+```
+
+### 8.3 Compiled SQL output
+
+| Expression                                 | Compiled SQL                          |
+|--------------------------------------------|---------------------------------------|
+| `FunctionCall { name: "COUNT", args: [Star], distinct: false }` | `COUNT(*)`            |
+| `FunctionCall { name: "COUNT", args: [Star], distinct: true }`  | `COUNT(DISTINCT *)`   |
+| `SubQuery { query: ... }`                 | `(SELECT ...)`                        |
+| `In { expr, target: SubQuery(query) }`    | `expr IN (SELECT ...)`                |
+| `Exists { query: ... }`                   | `EXISTS (SELECT ...)`                 |
+
+---
+
+## 9. FAQ
 
 ### The LLM keeps emitting a plan that fails validation. What now?
 
@@ -546,12 +693,22 @@ Yes. `VlorQl::validate_only` and `VlorQl::compile_only` are both
 for tests, server-side rendering of stored plans, and
 build-time validation of fixtures.
 
+### How do I optimise a plan before compilation?
+
+Call `VlorQl::validate_and_optimize` to run the query optimizer
+(constant folding, predicate pushdown, column pruning, and optional
+join reordering). The result is an `OptimizedPlan` that derefs to
+`ValidatedPlan` and can be passed to `compile_only`. See
+[`optimization.md`](./optimization.md) for details.
+
 ### How do I cache the compiled SQL?
 
 Compile output is deterministic for a given `(plan, dialect)`
 pair. Wrap the [`QueryBuilder`] (or the `SqlCompiler` trait) in
 your own cache, keyed by the JSON of the plan. The compiled
 `Vec<Parameter>` is already in the right order for any driver.
+
+VlorQl also provides built-in caches — see [`caching.md`](./caching.md).
 
 ### The LLM emits an `or` / `OR` predicate, but the dialect doesn't
 support `OR`. How does VlorQl handle it?
@@ -571,6 +728,28 @@ Yes. Implement [`SqlCompiler`] for a new struct, register it in
 to know the placeholder syntax, the identifier quoting, and the
 pagination clause; everything else is shared with
 [`QueryBuilder`].
+
+### How does MySQL handle `OFFSET` without `LIMIT`?
+
+MySQL does not support `LIMIT <offset>` without a limit argument.
+VlorQl emits `LIMIT ?, 18446744073709551615` where the second
+value is MySQL's maximum `BIGINT UNSIGNED` value, effectively
+meaning "no upper bound". This is a well-known MySQL idiom.
+
+### Can I use `FULL JOIN` with MySQL?
+
+No. MySQL does not support `FULL OUTER JOIN`. VlorQl rejects
+`JoinType::Full` at compile time with a
+`compilation_error("unsupported_full_join")` error.
+
+### Does VlorQl validate identifiers against SQL reserved keywords?
+
+Yes, when `IdentifierQuoting::Never` is used (or falls back to it).
+An unquoted identifier that matches a SQL reserved keyword
+(e.g., `select`, `table`, `from`) is rejected at compile time
+with a `compilation_error("reserved_keyword_unquoted")` error.
+When identifiers are quoted with double quotes or backticks, the
+keyword check is skipped because quoting escapes the keyword.
 
 ### Does VlorQl stream JSON tokens?
 
@@ -594,10 +773,15 @@ every system prompt under the **## Required JSON Output** section.
 
 ---
 
-## 9. See also
+## 10. See also
 
 * [`deployment.md`](./deployment.md) — local vLLM/Ollama setup,
   production deployment, and performance tuning.
+* [`optimization.md`](./optimization.md) — query optimizer
+  documentation (constant folding, predicate pushdown, column
+  pruning, join reordering).
+* [`caching.md`](./caching.md) — built-in caching system
+  (SchemaCache, CompileCache, PromptCache).
 * [`README.md`](../README.md) — the high-level elevator pitch.
 * [API reference](https://docs.rs/vlorql) — generated from the
   source with `cargo doc --workspace --no-deps`.

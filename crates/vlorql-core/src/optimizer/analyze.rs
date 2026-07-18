@@ -7,7 +7,7 @@
 
 use std::collections::BTreeSet;
 
-use crate::schema::{Expression, OrderByTerm, Predicate, Projection};
+use crate::schema::{Expression, InTarget, OrderByTerm, Predicate, Projection, QueryPlan};
 
 /// A column reference as it appears in a plan: an optional table
 /// qualifier plus the column name.
@@ -113,11 +113,21 @@ fn walk_predicate(pred: &Predicate, out: &mut BTreeSet<ColumnRef>) {
             walk_expression(low, out);
             walk_expression(high, out);
         }
-        Predicate::In { expr, values } => {
+        Predicate::In { expr, target } => {
             walk_expression(expr, out);
-            for value in values {
-                walk_expression(value, out);
+            match target {
+                InTarget::Values(values) => {
+                    for value in values {
+                        walk_expression(value, out);
+                    }
+                }
+                InTarget::SubQuery(query) => {
+                    walk_plan(query, out);
+                }
             }
+        }
+        Predicate::Exists { query } => {
+            walk_plan(query, out);
         }
         Predicate::Like { expr, .. } | Predicate::IsNull { expr } => walk_expression(expr, out),
     }
@@ -137,7 +147,48 @@ fn walk_expression(expr: &Expression, out: &mut BTreeSet<ColumnRef>) {
                 walk_expression(arg, out);
             }
         }
-        Expression::Literal { .. } => {}
+        Expression::Literal { .. } | Expression::Star => {}
+        Expression::SubQuery { query } => walk_plan(query, out),
+    }
+}
+
+fn walk_plan(plan: &QueryPlan, out: &mut BTreeSet<ColumnRef>) {
+    for projection in &plan.select {
+        match projection {
+            Projection::Column { table, column, .. } => {
+                out.insert((table.clone(), column.clone()));
+            }
+            Projection::Expr { expression, .. } => {
+                walk_expression(expression, out);
+            }
+            Projection::Star { .. } => {}
+        }
+    }
+    if let Some(predicate) = &plan.r#where {
+        walk_predicate(predicate, out);
+    }
+    if let Some(expressions) = &plan.group_by {
+        for expression in expressions {
+            walk_expression(expression, out);
+        }
+    }
+    if let Some(predicate) = &plan.having {
+        walk_predicate(predicate, out);
+    }
+    if let Some(terms) = &plan.order_by {
+        for term in terms {
+            walk_expression(&term.expr, out);
+        }
+    }
+    if let Some(joins) = &plan.joins {
+        for join in joins {
+            walk_predicate(&join.on, out);
+        }
+    }
+    if let Some(ctes) = &plan.ctes {
+        for cte in ctes {
+            walk_plan(&cte.query, out);
+        }
     }
 }
 

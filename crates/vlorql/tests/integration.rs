@@ -37,3 +37,6 @@ mod optimizer_tests;
 
 #[path = "integration/cache_integration.rs"]
 mod cache_integration;
+
+#[path = "integration/observability.rs"]
+mod observability;

@@ -19,8 +19,8 @@ mod tests {
     use super::*;
     use crate::schema::{
         BinaryOperator, CommonTableExpression, ComparisonOperator, DataType, Expression,
-        FromClause, IdentifierQuoting, JoinClause, JoinType, OrderByTerm, Predicate, Projection,
-        QueryPlan, SqlDialect,
+        FromClause, IdentifierQuoting, InTarget, JoinClause, JoinType, OrderByTerm, Predicate,
+        Projection, QueryPlan, SqlDialect,
     };
     use crate::validate::ValidatedPlan;
     use serde_json::json;
@@ -302,10 +302,10 @@ mod tests {
             right: Box::new(Predicate::Or {
                 left: Box::new(Predicate::In {
                     expr: column_ref("users", "id"),
-                    values: vec![
+                    target: InTarget::Values(vec![
                         literal(json!(2), DataType::Int),
                         literal(json!(3), DataType::Int),
-                    ],
+                    ]),
                 }),
                 right: Box::new(Predicate::Not {
                     child: Box::new(Predicate::IsNull {

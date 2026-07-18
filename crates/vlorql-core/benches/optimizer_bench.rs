@@ -76,8 +76,10 @@ fn build_catalog(n: usize) -> StatisticsCatalog {
     let mut catalog = StatisticsCatalog::default();
     for i in 0..n {
         let row_count = (i + 1) as u64;
-        let mut table = TableStatistics::default();
-        table.row_count = row_count;
+        let mut table = TableStatistics {
+            row_count,
+            ..TableStatistics::default()
+        };
         table.columns.insert(
             "id".to_owned(),
             ColumnStatistics {
@@ -110,7 +112,7 @@ fn bench_sync_rewrite(c: &mut Criterion) {
     let pipeline = RewriterPipeline::new()
         .with(ConstantFolding)
         .with(PredicatePushdown)
-        .with(ColumnPruning { schema: None });
+        .with(ColumnPruning::new());
 
     c.bench_function("optimizer/sync_rewrite_10_joins", |bencher| {
         bencher.iter(|| {

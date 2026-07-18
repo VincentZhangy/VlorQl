@@ -1,0 +1,24 @@
+# Prometheus configuration for VlorQl observability demo.
+#
+# This config scrapes the OpenTelemetry Collector's Prometheus
+# metrics endpoint when using the OTLP → Prometheus export path.
+# For the simple Docker Compose setup without a collector, metrics
+# are exported directly from the application via OTLP to Jaeger.
+#
+# To use Prometheus metrics directly, add a /metrics HTTP endpoint
+# to the application and scrape it here.
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  # Scrape the OpenTelemetry Collector (if deployed).
+  - job_name: "otel-collector"
+    static_configs:
+      - targets: ["otel-collector:8889"]
+
+  # Scrape the application directly (if it exposes /metrics).
+  - job_name: "vlorql-app"
+    static_configs:
+      - targets: ["host.docker.internal:9464"]

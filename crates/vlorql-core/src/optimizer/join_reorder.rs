@@ -402,9 +402,11 @@ impl JoinReorderer {
         let n = graph.relation_count();
 
         // Seed table: smallest base cardinality, ties broken by index.
+        // `reorder()` guards n >= 2 before calling greedy_order, so the
+        // range iterator always yields at least one element.
         let seed = (0..n)
             .min_by(|&a, &b| base_card[a].cmp(&base_card[b]).then(a.cmp(&b)))
-            .expect("at least one relation");
+            .unwrap_or(0);
 
         let mut in_set = vec![false; n];
         in_set[seed] = true;
@@ -438,7 +440,11 @@ impl JoinReorderer {
                 }
             }
 
-            let (_, j, cost, card) = best.expect("a connected graph always has a next relation");
+            let Some((_, j, cost, card)) = best else {
+                // No candidate found — append remaining relations and stop.
+                order.extend((0..n).filter(|&j| !in_set[j]));
+                break;
+            };
             in_set[j] = true;
             order.push(j);
             running_cost = cost;
