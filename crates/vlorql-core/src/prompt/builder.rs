@@ -571,10 +571,10 @@ impl PromptBuilder {
             if let Some(table) = self.schema.get_table(table_name) {
                 for column in &table.columns {
                     if let Some(fk) = &column.foreign_key
-                            && self.schema.get_table(&fk.foreign_table).is_some()
-                        {
-                            expanded.insert(fk.foreign_table.clone());
-                        }
+                        && self.schema.get_table(&fk.foreign_table).is_some()
+                    {
+                        expanded.insert(fk.foreign_table.clone());
+                    }
                 }
             }
             // Reverse: add tables whose FK points to this matched table.

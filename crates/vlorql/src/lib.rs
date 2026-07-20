@@ -716,9 +716,7 @@ impl VlorQlBuilder {
             (None, None) => None,
         };
 
-        let optimizer = self
-            .stats_provider
-            .map(QueryOptimizer::new);
+        let optimizer = self.stats_provider.map(QueryOptimizer::new);
 
         Ok(VlorQl {
             schema,

@@ -937,7 +937,8 @@ where
             match serde_json::from_str::<Value>(payload) {
                 Ok(value) => {
                     if let Some(content) = extract(&value)
-                        && !content.is_empty() && tx.send(Ok(content)).is_err()
+                        && !content.is_empty()
+                        && tx.send(Ok(content)).is_err()
                     {
                         return true;
                     }

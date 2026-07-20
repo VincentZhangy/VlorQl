@@ -14,8 +14,7 @@
 use criterion::{Criterion, criterion_group, criterion_main};
 use std::sync::Arc;
 use vlorql_core::optimizer::{
-    ColumnPruning, ConstantFolding, PredicatePushdown, QueryOptimizer,
-    RewriterPipeline,
+    ColumnPruning, ConstantFolding, PredicatePushdown, QueryOptimizer, RewriterPipeline,
 };
 use vlorql_core::schema::{
     ComparisonOperator, Expression, FromClause, JoinClause, JoinType, Predicate, Projection,
