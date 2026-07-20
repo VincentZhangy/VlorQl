@@ -120,8 +120,7 @@ fn push_plan(plan: &QueryPlan) -> QueryPlan {
     // Phase 1: collect cascade targets (inner CTE → conditions).
     // Phase 2: apply cascades and local injections.
     if let Some(ctes) = plan.ctes.as_mut() {
-        let cte_names_set: HashSet<&str> =
-            ctes.iter().map(|cte| cte.name.as_str()).collect();
+        let cte_names_set: HashSet<&str> = ctes.iter().map(|cte| cte.name.as_str()).collect();
 
         // Phase 1: decide what goes where.
         let mut cascade_targets: Vec<(String, Vec<Predicate>)> = Vec::new();
@@ -135,32 +134,19 @@ fn push_plan(plan: &QueryPlan) -> QueryPlan {
 
             let inner_table = cte.query.from.table.as_str();
             if cte_names_set.contains(inner_table) {
-                let inner_alias = cte
-                    .query
-                    .from
-                    .alias
-                    .as_deref()
-                    .unwrap_or(inner_table);
+                let inner_alias = cte.query.from.alias.as_deref().unwrap_or(inner_table);
 
                 let mut cascade: Vec<Predicate> = Vec::new();
                 let mut local: Vec<Predicate> = Vec::new();
 
                 for conjunct in conjuncts {
-                    let translated =
-                        translate_qualifier(conjunct, &cte.name, inner_alias);
+                    let translated = translate_qualifier(conjunct, &cte.name, inner_alias);
 
                     let mut inner_alias_map = HashMap::new();
-                    inner_alias_map
-                        .insert(inner_alias.to_owned(), inner_table.to_owned());
-                    let inner_protected =
-                        outer_join_protected_aliases(&cte.query);
+                    inner_alias_map.insert(inner_alias.to_owned(), inner_table.to_owned());
+                    let inner_protected = outer_join_protected_aliases(&cte.query);
 
-                    if single_cte_target(
-                        &translated,
-                        &inner_alias_map,
-                        &inner_protected,
-                    )
-                    .is_some()
+                    if single_cte_target(&translated, &inner_alias_map, &inner_protected).is_some()
                     {
                         cascade.push(translated);
                     } else {
@@ -376,12 +362,13 @@ struct QualifierTranslator {
 impl ExpressionFold for QualifierTranslator {
     fn fold_expression(&mut self, expr: &Expression) -> Expression {
         match expr {
-            Expression::ColumnRef { table: Some(t), column } if t == &self.from => {
-                Expression::ColumnRef {
-                    table: Some(self.to.clone()),
-                    column: column.clone(),
-                }
-            }
+            Expression::ColumnRef {
+                table: Some(t),
+                column,
+            } if t == &self.from => Expression::ColumnRef {
+                table: Some(self.to.clone()),
+                column: column.clone(),
+            },
             other => super::visitor::default_fold_expression(self, other),
         }
     }
@@ -478,10 +465,7 @@ mod tests {
             .as_ref()
             .expect("cte should have received the pushed filter");
         // The qualifier is stripped inside the CTE.
-        assert_eq!(
-            *cte_where,
-            gt(col(None, "amount"), lit(100)),
-        );
+        assert_eq!(*cte_where, gt(col(None, "amount"), lit(100)),);
     }
 
     #[test]

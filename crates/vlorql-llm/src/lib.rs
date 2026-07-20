@@ -21,18 +21,18 @@
 
 use async_trait::async_trait;
 use bytes::Bytes;
-use futures::stream::{self, Stream};
 use futures::StreamExt;
+use futures::stream::{self, Stream};
 
 use schemars::schema_for;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::time::sleep;
 use tokio_stream::wrappers::UnboundedReceiverStream;
-use tracing::{debug, warn, Instrument};
+use tracing::{Instrument, debug, warn};
 use vlorql_core::errors::{ConfigErrorKind, LlmErrorKind, VlorQLError};
 use vlorql_core::schema::QueryPlan;
 
@@ -779,9 +779,8 @@ pub(crate) fn compact_query_plan_schema() -> Value {
     SCHEMA
         .get_or_init(|| {
             let schema = schema_for!(QueryPlan);
-            let mut value = serde_json::to_value(schema).unwrap_or_else(|error| {
-                json!({"schema_generation_error": error.to_string()})
-            });
+            let mut value = serde_json::to_value(schema)
+                .unwrap_or_else(|error| json!({"schema_generation_error": error.to_string()}));
             remove_schema_metadata(&mut value);
             value
         })
@@ -937,10 +936,11 @@ where
             }
             match serde_json::from_str::<Value>(payload) {
                 Ok(value) => {
-                    if let Some(content) = extract(&value) {
-                        if !content.is_empty() && tx.send(Ok(content)).is_err() {
-                            return true;
-                        }
+                    if let Some(content) = extract(&value)
+                        && !content.is_empty()
+                        && tx.send(Ok(content)).is_err()
+                    {
+                        return true;
                     }
                 }
                 Err(error) => {
@@ -1554,8 +1554,8 @@ mod tests {
     async fn llm_span_contains_provider_and_model() {
         use std::sync::Arc;
         use std::sync::Mutex;
-        use tracing_subscriber::layer::SubscriberExt;
         use tracing_subscriber::Layer;
+        use tracing_subscriber::layer::SubscriberExt;
 
         let captured = Arc::new(Mutex::new(Vec::<String>::new()));
         let captured_clone = Arc::clone(&captured);

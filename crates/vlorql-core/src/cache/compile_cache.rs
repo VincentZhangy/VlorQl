@@ -156,10 +156,7 @@ impl CompileCache {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::schema::{
-        FromClause, Projection, QueryPlan,
-        SqlDialect,
-    };
+    use crate::schema::{FromClause, Projection, QueryPlan, SqlDialect};
     use std::sync::Arc;
 
     fn make_plan() -> ValidatedPlan {
@@ -231,9 +228,7 @@ mod tests {
         };
 
         let pg_compiled = make_compiled(SqlDialect::Postgres);
-        cache
-            .insert(&plan, &pg_profile, pg_compiled)
-            .await;
+        cache.insert(&plan, &pg_profile, pg_compiled).await;
 
         // SQLite query should not be found because the key includes
         // the dialect — even though the plan is the same.

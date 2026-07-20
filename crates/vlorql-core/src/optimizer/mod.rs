@@ -134,7 +134,11 @@ impl QueryOptimizer {
     /// Applies the rewrite pipeline in fixed-point iteration (up to
     /// `max_rounds`) until the plan stabilizes. See
     /// [`RewriterPipeline::repeat_until_stable`].
-    pub fn optimize_repeat(&self, plan: &QueryPlan, max_rounds: usize) -> Result<QueryPlan, VlorQLError> {
+    pub fn optimize_repeat(
+        &self,
+        plan: &QueryPlan,
+        max_rounds: usize,
+    ) -> Result<QueryPlan, VlorQLError> {
         self.pipeline.repeat_until_stable(plan, max_rounds)
     }
 
@@ -143,10 +147,10 @@ impl QueryOptimizer {
     /// consults the statistics provider.
     pub async fn optimize_async(&self, plan: &QueryPlan) -> Result<QueryPlan, VlorQLError> {
         let plan = self.pipeline.rewrite(plan)?;
-        if self.enable_join_reorder {
-            if let Some(ref reorderer) = self.join_reorderer {
-                return reorderer.reorder(&plan).await;
-            }
+        if self.enable_join_reorder
+            && let Some(ref reorderer) = self.join_reorderer
+        {
+            return reorderer.reorder(&plan).await;
         }
         Ok(plan)
     }
@@ -308,7 +312,13 @@ mod tests {
         };
 
         let folded = ConstantFolding.rewrite(&plan).unwrap();
-        assert_eq!(folded.select[0], Projection::Expr { expression: expr, alias: None });
+        assert_eq!(
+            folded.select[0],
+            Projection::Expr {
+                expression: expr,
+                alias: None
+            }
+        );
     }
 
     // --- predicate pushdown --------------------------------------------
@@ -360,7 +370,11 @@ mod tests {
         // WHERE recent.status = 1 AND recent.id > 100
         // both reference only `recent`, so both push down.
         let outer = and(
-            compare(col(Some("recent"), "status"), ComparisonOperator::Eq, int(1)),
+            compare(
+                col(Some("recent"), "status"),
+                ComparisonOperator::Eq,
+                int(1),
+            ),
             compare(col(Some("recent"), "id"), ComparisonOperator::Gt, int(100)),
         );
         let plan = plan_with_cte(outer);
@@ -416,7 +430,11 @@ mod tests {
         // WHERE recent.status = 1 AND some_base.flag = 1
         // Only the first conjunct references the CTE.
         let outer = and(
-            compare(col(Some("recent"), "status"), ComparisonOperator::Eq, int(1)),
+            compare(
+                col(Some("recent"), "status"),
+                ComparisonOperator::Eq,
+                int(1),
+            ),
             compare(col(Some("other"), "flag"), ComparisonOperator::Eq, int(1)),
         );
         let mut plan = plan_with_cte(outer);
@@ -532,11 +550,7 @@ mod tests {
     fn pruning_keeps_all_columns_under_unqualified_reference() {
         // An unqualified column in the outer query is unattributable, so
         // the pruner conservatively keeps every CTE column.
-        let mut plan = plan_with_cte(compare(
-            col(None, "status"),
-            ComparisonOperator::Eq,
-            int(1),
-        ));
+        let mut plan = plan_with_cte(compare(col(None, "status"), ComparisonOperator::Eq, int(1)));
         plan.select = vec![column_projection(None, "id")];
 
         let rewritten = ColumnPruning::new().rewrite(&plan).unwrap();
@@ -559,7 +573,11 @@ mod tests {
                     right: Box::new(int(0)),
                 },
             ),
-            compare(col(Some("recent"), "status"), ComparisonOperator::Eq, int(1)),
+            compare(
+                col(Some("recent"), "status"),
+                ComparisonOperator::Eq,
+                int(1),
+            ),
         );
         let plan = plan_with_cte(outer);
 
@@ -619,9 +637,18 @@ mod tests {
                 },
                 alias: Some("total".to_owned()),
             }],
-            from: FromClause { table: "t".to_owned(), alias: None },
-            r#where: None, group_by: None, having: None,
-            order_by: None, limit: None, offset: None, joins: None, ctes: None,
+            from: FromClause {
+                table: "t".to_owned(),
+                alias: None,
+            },
+            r#where: None,
+            group_by: None,
+            having: None,
+            order_by: None,
+            limit: None,
+            offset: None,
+            joins: None,
+            ctes: None,
         };
 
         let optimizer = QueryOptimizer::rewrites_only();
@@ -666,12 +693,22 @@ mod tests {
         // pipeline should still run without error.
         let plan = QueryPlan {
             select: vec![Projection::Column {
-                table: None, column: "id".to_owned(), alias: None,
+                table: None,
+                column: "id".to_owned(),
+                alias: None,
             }],
-            from: FromClause { table: "users".to_owned(), alias: None },
-            r#where: None, group_by: None, having: None,
-            order_by: None, limit: None, offset: None,
-            joins: None, ctes: None,
+            from: FromClause {
+                table: "users".to_owned(),
+                alias: None,
+            },
+            r#where: None,
+            group_by: None,
+            having: None,
+            order_by: None,
+            limit: None,
+            offset: None,
+            joins: None,
+            ctes: None,
         };
         let rewritten = optimizer.optimize_async(&plan).await.unwrap();
         // The pipeline may rewrite constants or reorder, but the FROM
@@ -692,11 +729,7 @@ mod tests {
         // change the semantics of outer joins.
         //
         // Simulate a policy filter: `tenant_id = 42` on the outer query.
-        let policy_filter = compare(
-            col(None, "tenant_id"),
-            ComparisonOperator::Eq,
-            int(42),
-        );
+        let policy_filter = compare(col(None, "tenant_id"), ComparisonOperator::Eq, int(42));
 
         // Build a plan with a CTE and an outer WHERE that contains both
         // a user conjunct and the policy conjunct.
@@ -714,9 +747,9 @@ mod tests {
         // not the CTE.
         let outer_where = rewritten.r#where.as_ref().unwrap();
         let conjuncts = crate::optimizer::analyze::split_conjuncts(outer_where);
-        let has_policy_filter = conjuncts.iter().any(|c| {
-            matches!(c, Predicate::Comparison { right, .. } if *right == int(42))
-        });
+        let has_policy_filter = conjuncts
+            .iter()
+            .any(|c| matches!(c, Predicate::Comparison { right, .. } if *right == int(42)));
         assert!(
             has_policy_filter,
             "policy filter `tenant_id = 42` must remain in the outer WHERE"
@@ -884,9 +917,18 @@ mod tests {
         // immediately.
         let plan = QueryPlan {
             select: vec![column_projection(None, "id")],
-            from: FromClause { table: "t".to_owned(), alias: None },
-            r#where: None, group_by: None, having: None,
-            order_by: None, limit: None, offset: None, joins: None, ctes: None,
+            from: FromClause {
+                table: "t".to_owned(),
+                alias: None,
+            },
+            r#where: None,
+            group_by: None,
+            having: None,
+            order_by: None,
+            limit: None,
+            offset: None,
+            joins: None,
+            ctes: None,
         };
         let pipeline = RewriterPipeline::new()
             .with(ConstantFolding)
@@ -903,22 +945,40 @@ mod tests {
         let plan = QueryPlan {
             select: vec![Projection::Expr {
                 expression: Expression::BinaryOp {
-                    left: Box::new(Expression::Literal { value: 10.into(), data_type: DataType::Int }),
+                    left: Box::new(Expression::Literal {
+                        value: 10.into(),
+                        data_type: DataType::Int,
+                    }),
                     op: BinaryOperator::Add,
-                    right: Box::new(Expression::Literal { value: 20.into(), data_type: DataType::Int }),
+                    right: Box::new(Expression::Literal {
+                        value: 20.into(),
+                        data_type: DataType::Int,
+                    }),
                 },
                 alias: Some("total".to_owned()),
             }],
-            from: FromClause { table: "t".to_owned(), alias: None },
-            r#where: None, group_by: None, having: None,
-            order_by: None, limit: None, offset: None, joins: None, ctes: None,
+            from: FromClause {
+                table: "t".to_owned(),
+                alias: None,
+            },
+            r#where: None,
+            group_by: None,
+            having: None,
+            order_by: None,
+            limit: None,
+            offset: None,
+            joins: None,
+            ctes: None,
         };
         let pipeline = RewriterPipeline::new().with(ConstantFolding);
         let result = pipeline.repeat_until_stable(&plan, 3).unwrap();
         assert_eq!(
             result.select[0],
             Projection::Expr {
-                expression: Expression::Literal { value: 30.into(), data_type: DataType::Int },
+                expression: Expression::Literal {
+                    value: 30.into(),
+                    data_type: DataType::Int
+                },
                 alias: Some("total".to_owned()),
             },
         );
@@ -928,9 +988,18 @@ mod tests {
     fn optimize_repeat_exposes_fixpoint_method() {
         let plan = QueryPlan {
             select: vec![column_projection(None, "id")],
-            from: FromClause { table: "t".to_owned(), alias: None },
-            r#where: None, group_by: None, having: None,
-            order_by: None, limit: None, offset: None, joins: None, ctes: None,
+            from: FromClause {
+                table: "t".to_owned(),
+                alias: None,
+            },
+            r#where: None,
+            group_by: None,
+            having: None,
+            order_by: None,
+            limit: None,
+            offset: None,
+            joins: None,
+            ctes: None,
         };
         let optimizer = QueryOptimizer::rewrites_only();
         let result = optimizer.optimize_repeat(&plan, 3).unwrap();
@@ -950,26 +1019,51 @@ mod tests {
                 column_projection(None, "id"),
                 column_projection(None, "val"),
             ],
-            from: FromClause { table: "t2".to_owned(), alias: None },
-            r#where: None, group_by: None, having: None,
-            order_by: None, limit: None, offset: None, joins: None, ctes: None,
+            from: FromClause {
+                table: "t2".to_owned(),
+                alias: None,
+            },
+            r#where: None,
+            group_by: None,
+            having: None,
+            order_by: None,
+            limit: None,
+            offset: None,
+            joins: None,
+            ctes: None,
         };
         let cte1_body = QueryPlan {
             select: vec![Projection::Star { table: None }],
-            from: FromClause { table: "cte2".to_owned(), alias: None },
-            r#where: None, group_by: None, having: None,
-            order_by: None, limit: None, offset: None, joins: None, ctes: None,
+            from: FromClause {
+                table: "cte2".to_owned(),
+                alias: None,
+            },
+            r#where: None,
+            group_by: None,
+            having: None,
+            order_by: None,
+            limit: None,
+            offset: None,
+            joins: None,
+            ctes: None,
         };
         let plan = QueryPlan {
             select: vec![Projection::Star { table: None }],
-            from: FromClause { table: "cte1".to_owned(), alias: None },
+            from: FromClause {
+                table: "cte1".to_owned(),
+                alias: None,
+            },
             r#where: Some(compare(
                 col(Some("cte1"), "val"),
                 ComparisonOperator::Gt,
                 int(10),
             )),
-            group_by: None, having: None,
-            order_by: None, limit: None, offset: None, joins: None,
+            group_by: None,
+            having: None,
+            order_by: None,
+            limit: None,
+            offset: None,
+            joins: None,
             ctes: Some(vec![
                 CommonTableExpression {
                     name: "cte2".to_owned(),
@@ -986,10 +1080,17 @@ mod tests {
         let result = pipeline.rewrite(&plan).unwrap();
 
         // The outer WHERE should be empty (condition was pushed down).
-        assert!(result.r#where.is_none(), "outer WHERE should be empty after pushdown");
+        assert!(
+            result.r#where.is_none(),
+            "outer WHERE should be empty after pushdown"
+        );
 
         // cte1's WHERE should be empty (condition was further pushed into cte2).
-        let cte1 = result.ctes.as_ref().unwrap().iter()
+        let cte1 = result
+            .ctes
+            .as_ref()
+            .unwrap()
+            .iter()
             .find(|cte| cte.name == "cte1")
             .expect("cte1 should exist");
         assert!(
@@ -999,7 +1100,11 @@ mod tests {
         );
 
         // cte2 should have the condition in its WHERE.
-        let cte2 = result.ctes.as_ref().unwrap().iter()
+        let cte2 = result
+            .ctes
+            .as_ref()
+            .unwrap()
+            .iter()
             .find(|cte| cte.name == "cte2")
             .expect("cte2 should exist");
         assert!(
@@ -1021,26 +1126,51 @@ mod tests {
                 column_projection(None, "id"),
                 column_projection(None, "val"),
             ],
-            from: FromClause { table: "t2".to_owned(), alias: None },
-            r#where: None, group_by: None, having: None,
-            order_by: None, limit: None, offset: None, joins: None, ctes: None,
+            from: FromClause {
+                table: "t2".to_owned(),
+                alias: None,
+            },
+            r#where: None,
+            group_by: None,
+            having: None,
+            order_by: None,
+            limit: None,
+            offset: None,
+            joins: None,
+            ctes: None,
         };
         let cte1_body = QueryPlan {
             select: vec![Projection::Star { table: None }],
-            from: FromClause { table: "cte2".to_owned(), alias: Some("inner_c".to_owned()) },
-            r#where: None, group_by: None, having: None,
-            order_by: None, limit: None, offset: None, joins: None, ctes: None,
+            from: FromClause {
+                table: "cte2".to_owned(),
+                alias: Some("inner_c".to_owned()),
+            },
+            r#where: None,
+            group_by: None,
+            having: None,
+            order_by: None,
+            limit: None,
+            offset: None,
+            joins: None,
+            ctes: None,
         };
         let plan = QueryPlan {
             select: vec![Projection::Star { table: None }],
-            from: FromClause { table: "cte1".to_owned(), alias: None },
+            from: FromClause {
+                table: "cte1".to_owned(),
+                alias: None,
+            },
             r#where: Some(compare(
                 col(Some("cte1"), "val"),
                 ComparisonOperator::Gt,
                 int(10),
             )),
-            group_by: None, having: None,
-            order_by: None, limit: None, offset: None, joins: None,
+            group_by: None,
+            having: None,
+            order_by: None,
+            limit: None,
+            offset: None,
+            joins: None,
             ctes: Some(vec![
                 CommonTableExpression {
                     name: "cte2".to_owned(),
@@ -1060,7 +1190,11 @@ mod tests {
         assert!(result.r#where.is_none(), "outer WHERE should be empty");
 
         // cte1's WHERE should be empty.
-        let cte1 = result.ctes.as_ref().unwrap().iter()
+        let cte1 = result
+            .ctes
+            .as_ref()
+            .unwrap()
+            .iter()
             .find(|cte| cte.name == "cte1")
             .expect("cte1 should exist");
         assert!(
@@ -1070,7 +1204,11 @@ mod tests {
         );
 
         // cte2 should have the condition.
-        let cte2 = result.ctes.as_ref().unwrap().iter()
+        let cte2 = result
+            .ctes
+            .as_ref()
+            .unwrap()
+            .iter()
             .find(|cte| cte.name == "cte2")
             .expect("cte2 should exist");
         assert!(

@@ -111,22 +111,22 @@ fn sample_plan() -> QueryPlan {
 /// * Otherwise fall back to a deterministic `MockLlmClient` so the example
 ///   always produces output — useful for `cargo test` and CI.
 fn select_llm_client() -> Box<dyn LlmClient> {
-    if let Ok(api_key) = std::env::var("OPENAI_API_KEY") {
-        if !api_key.trim().is_empty() {
-            // Optional overrides — both fall back to OpenAI defaults.
-            let model = std::env::var("OPENAI_MODEL").unwrap_or_else(|_| "gpt-4o-mini".to_owned());
-            let api_base = std::env::var("OPENAI_API_BASE").ok();
+    if let Ok(api_key) = std::env::var("OPENAI_API_KEY")
+        && !api_key.trim().is_empty()
+    {
+        // Optional overrides — both fall back to OpenAI defaults.
+        let model = std::env::var("OPENAI_MODEL").unwrap_or_else(|_| "gpt-4o-mini".to_owned());
+        let api_base = std::env::var("OPENAI_API_BASE").ok();
 
-            let config = LlmConfig {
-                provider: LlmProvider::OpenAi,
-                api_key: Some(api_key),
-                api_base,
-                model,
-                ..LlmConfig::default()
-            };
-            println!("[basic_query] using OpenAI-compatible client: {config:?}");
-            return Box::new(OpenAIClient::from_config(config));
-        }
+        let config = LlmConfig {
+            provider: LlmProvider::OpenAi,
+            api_key: Some(api_key),
+            api_base,
+            model,
+            ..LlmConfig::default()
+        };
+        println!("[basic_query] using OpenAI-compatible client: {config:?}");
+        return Box::new(OpenAIClient::from_config(config));
     }
 
     println!("[basic_query] OPENAI_API_KEY not set; using MockLlmClient");

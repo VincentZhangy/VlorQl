@@ -6,13 +6,13 @@
 
 use std::sync::Arc;
 
-use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::Layer;
+use tracing_subscriber::layer::SubscriberExt;
 use vlorql::VlorQl;
 use vlorql_core::observability::VlorqMetrics;
 use vlorql_llm::MockLlmClient;
 
-use crate::common::{snapshot, base_plan};
+use crate::common::{base_plan, snapshot};
 
 /// Verify that the `vlorql.query` span is created with the correct
 /// attributes when a query is executed with a mock LLM client.

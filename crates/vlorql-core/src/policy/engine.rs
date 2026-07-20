@@ -3,7 +3,7 @@
 use super::config::{PolicyConfig, RowFilter, TablePolicy};
 use crate::errors::{PolicyErrorKind, SchemaErrorKind, VlorQLError};
 use crate::query::{
-    collect_plan_references, collect_predicate_references, ColumnReference, QueryScope, QuerySource,
+    ColumnReference, QueryScope, QuerySource, collect_plan_references, collect_predicate_references,
 };
 use crate::schema::{Predicate, QueryPlan, SchemaSnapshot, TableSchema};
 use serde_json::json;
@@ -335,20 +335,20 @@ impl PolicyEngine {
         reported_columns: &mut HashSet<(String, String, &'static str)>,
     ) {
         let reason = self.column_denial_reason(&table.name, column);
-        if let Some(reason) = reason {
-            if reported_columns.insert((table.name.clone(), column.to_owned(), reason)) {
-                errors.push(VlorQLError::policy(
-                    PolicyErrorKind::ColumnDenied {
-                        table: table.name.clone(),
-                        column: column.to_owned(),
-                    },
-                    json!({
-                        "table": table.name,
-                        "column": column,
-                        "reason": reason,
-                    }),
-                ));
-            }
+        if let Some(reason) = reason
+            && reported_columns.insert((table.name.clone(), column.to_owned(), reason))
+        {
+            errors.push(VlorQLError::policy(
+                PolicyErrorKind::ColumnDenied {
+                    table: table.name.clone(),
+                    column: column.to_owned(),
+                },
+                json!({
+                    "table": table.name,
+                    "column": column,
+                    "reason": reason,
+                }),
+            ));
         }
     }
 

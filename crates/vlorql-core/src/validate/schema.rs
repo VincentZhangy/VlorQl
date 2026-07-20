@@ -1,7 +1,7 @@
 //! Schema existence validation for query plans.
 
 use crate::errors::{SchemaErrorKind, VlorQLError};
-use crate::query::{collect_plan_references, ColumnReference, QueryScope};
+use crate::query::{ColumnReference, QueryScope, collect_plan_references};
 use crate::schema::{QueryPlan, SchemaSnapshot};
 use serde_json::json;
 use std::collections::HashSet;

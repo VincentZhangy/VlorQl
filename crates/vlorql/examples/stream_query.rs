@@ -9,10 +9,10 @@
 //!   cargo run --example stream_query --quiet
 
 use std::error::Error;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use futures::stream::{Stream, StreamExt};
 use vlorql::{CompiledQuery, SchemaSnapshot, SqlDialect, StreamEvent, VlorQl};
 use vlorql_core::errors::VlorQLError;

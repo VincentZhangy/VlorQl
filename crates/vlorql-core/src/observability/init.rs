@@ -87,8 +87,8 @@ pub fn init_telemetry(
     let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("vlorql=info,info"));
 
-    let telemetry_layer = tracing_opentelemetry::layer()
-        .with_tracer(tracer_provider.tracer("vlorql-tracer"));
+    let telemetry_layer =
+        tracing_opentelemetry::layer().with_tracer(tracer_provider.tracer("vlorql-tracer"));
 
     tracing_subscriber::registry()
         .with(env_filter)
@@ -138,10 +138,8 @@ mod tests {
     #[test]
     fn init_then_shutdown_does_not_panic() {
         // Use noop providers so we don't need a real OTLP endpoint.
-        let tracer_provider = opentelemetry_sdk::trace::SdkTracerProvider::builder()
-            .build();
-        let meter_provider = opentelemetry_sdk::metrics::SdkMeterProvider::builder()
-            .build();
+        let tracer_provider = opentelemetry_sdk::trace::SdkTracerProvider::builder().build();
+        let meter_provider = opentelemetry_sdk::metrics::SdkMeterProvider::builder().build();
 
         global::set_tracer_provider(tracer_provider.clone());
         global::set_meter_provider(meter_provider.clone());

@@ -14,16 +14,16 @@
 
 #![deny(missing_docs)]
 
-use futures::stream::Stream;
 use futures::StreamExt;
+use futures::stream::Stream;
 use serde_json::json;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::Instrument;
-use vlorql_core::compile::{get_compiler, SqlCompiler};
+use vlorql_core::compile::{SqlCompiler, get_compiler};
 use vlorql_core::errors::{ConfigErrorKind, LlmErrorKind, ValidationErrorKind, VlorQLError};
-use vlorql_core::observability::{init_telemetry, TelemetryGuard, VlorqMetrics};
+use vlorql_core::observability::{TelemetryGuard, VlorqMetrics, init_telemetry};
 use vlorql_core::optimizer::QueryOptimizer;
 use vlorql_core::policy::{PolicyConfig, PolicyEngine};
 use vlorql_core::prompt::PromptBuilder;
@@ -37,7 +37,7 @@ pub use vlorql_core::errors::{ErrorResponse, ValidationErrors};
 pub use vlorql_core::optimizer::QueryOptimizer as QueryOptimizerCore;
 pub use vlorql_core::schema::{DialectProfile, SchemaSnapshot, SqlDialect};
 pub use vlorql_core::validate::{OptimizedPlan, ValidatedPlan};
-pub use vlorql_llm::{create_llm_client, detect_template_leak, LlmClient, LlmConfig, LlmProvider};
+pub use vlorql_llm::{LlmClient, LlmConfig, LlmProvider, create_llm_client, detect_template_leak};
 
 const DEFAULT_MAX_RETRIES: usize = 2;
 
@@ -233,15 +233,13 @@ impl VlorQl {
                         };
 
                         // Check the compile cache before compiling.
-                        if let Some(cache) = &self.compile_cache {
-                            if let Some(cached) =
-                                cache.get(&plan_for_compile, &self.dialect).await
-                            {
-                                if let Some(ref m) = self.metrics {
-                                    m.cache_hit_counter.add(1, &[]);
-                                }
-                                return Ok((*cached).clone());
+                        if let Some(cache) = &self.compile_cache
+                            && let Some(cached) = cache.get(&plan_for_compile, &self.dialect).await
+                        {
+                            if let Some(ref m) = self.metrics {
+                                m.cache_hit_counter.add(1, &[]);
                             }
+                            return Ok((*cached).clone());
                         }
                         if let Some(ref m) = self.metrics {
                             m.cache_miss_counter.add(1, &[]);
@@ -718,9 +716,7 @@ impl VlorQlBuilder {
             (None, None) => None,
         };
 
-        let optimizer = self.stats_provider.map(|provider| {
-            QueryOptimizer::new(provider)
-        });
+        let optimizer = self.stats_provider.map(QueryOptimizer::new);
 
         Ok(VlorQl {
             schema,
@@ -1191,8 +1187,8 @@ mod tests {
 
     #[tokio::test]
     async fn span_hierarchy_includes_query_validate_compile() {
-        use tracing_subscriber::layer::SubscriberExt;
         use tracing_subscriber::Layer;
+        use tracing_subscriber::layer::SubscriberExt;
 
         // Collect span events into a shared vector.
         let events = Arc::new(Mutex::new(Vec::<String>::new()));
@@ -1226,7 +1222,11 @@ mod tests {
         // the subscriber output (stderr) when `RUST_LOG` is set.
         // The presence of spans is confirmed by the fact that the subscriber
         // was installed and no panics occurred during the async move.
-        drop(events_clone.lock().expect("events lock should not be poisoned"));
+        drop(
+            events_clone
+                .lock()
+                .expect("events lock should not be poisoned"),
+        );
     }
 
     #[test]

@@ -8,7 +8,7 @@
 //! Expected: a compile cache hit should be ~0.05 ms, roughly 40× faster
 //! than a full compile (~2 ms).
 
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, criterion_group, criterion_main};
 use std::sync::Arc;
 use vlorql_core::cache::{CompileCache, SchemaCache, SchemaCacheKey};
 use vlorql_core::compile::CompiledQuery;
@@ -135,9 +135,8 @@ fn bench_schema_cache(c: &mut Criterion) {
 
     c.bench_function("cache/schema_hit", |bencher| {
         bencher.iter(|| {
-            let result = rt.block_on(cache.get_or_insert_with(key.clone(), || async {
-                Arc::clone(&schema)
-            }));
+            let result = rt
+                .block_on(cache.get_or_insert_with(key.clone(), || async { Arc::clone(&schema) }));
             criterion::black_box(result);
         });
     });
@@ -150,9 +149,9 @@ fn bench_schema_cache(c: &mut Criterion) {
 
     c.bench_function("cache/schema_miss", |bencher| {
         bencher.iter(|| {
-            let result = rt.block_on(cache.get_or_insert_with(miss_key.clone(), || async {
-                Arc::clone(&schema)
-            }));
+            let result = rt.block_on(
+                cache.get_or_insert_with(miss_key.clone(), || async { Arc::clone(&schema) }),
+            );
             criterion::black_box(result);
         });
     });

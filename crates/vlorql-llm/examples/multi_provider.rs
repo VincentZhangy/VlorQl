@@ -24,7 +24,7 @@
 use std::env;
 use std::error::Error;
 
-use vlorql_llm::{create_llm_client, LlmClient, LlmConfig, LlmProvider};
+use vlorql_llm::{LlmClient, LlmConfig, LlmProvider, create_llm_client};
 
 /// The system prompt used for every provider. In a real deployment you
 /// would inject the database schema and policies; for brevity this

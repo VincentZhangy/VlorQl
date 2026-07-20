@@ -26,7 +26,7 @@
 
 use async_trait::async_trait;
 use futures::stream::Stream;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::time::sleep;
@@ -35,8 +35,9 @@ use vlorql_core::errors::{ConfigErrorKind, LlmErrorKind, VlorQLError};
 use vlorql_core::schema::QueryPlan;
 
 use crate::{
+    DEFAULT_MAX_ATTEMPTS, DEFAULT_RETRY_DELAY, LlmClient, LlmConfig, LlmProvider,
     drive_sse_consumer, is_retryable, response_message, retry_backoff, sse_lines, transport_error,
-    truncate, LlmClient, LlmConfig, LlmProvider, DEFAULT_MAX_ATTEMPTS, DEFAULT_RETRY_DELAY,
+    truncate,
 };
 
 const DEFAULT_API_BASE: &str = "https://api.deepseek.com/v1/chat/completions";

@@ -6,7 +6,7 @@ use crate::schema::{
     BinaryOperator, ComparisonOperator, DataType, Expression, InTarget, Predicate, Projection,
     QueryPlan, SchemaSnapshot,
 };
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::HashSet;
 
 /// Validates expression operand types against a schema snapshot.
@@ -184,7 +184,9 @@ impl<'a> OperandValidator<'a> {
                         for value in values {
                             let value_type = self.validate_expression_inner(value, scope, errors);
                             if let (Some(expr_type), Some(value_type)) = (expr_type, value_type) {
-                                validate_compatible_types("IN value", expr_type, value_type, errors);
+                                validate_compatible_types(
+                                    "IN value", expr_type, value_type, errors,
+                                );
                             }
                         }
                     }
@@ -602,5 +604,7 @@ fn numeric_result_type(left: DataType, right: DataType) -> DataType {
 
 /// Returns `true` when `name` matches any candidate case-insensitively.
 fn is_any_of_ignore_case(name: &str, candidates: &[&str]) -> bool {
-    candidates.iter().any(|candidate| candidate.eq_ignore_ascii_case(name))
+    candidates
+        .iter()
+        .any(|candidate| candidate.eq_ignore_ascii_case(name))
 }

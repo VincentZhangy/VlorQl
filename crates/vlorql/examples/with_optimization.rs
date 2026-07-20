@@ -264,8 +264,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             // Re-optimize to get the optimised plan cost.
             let optimized_plan = opt.optimize_async(&plan).await?;
             if let Some(after) = opt.estimated_cost(&optimized_plan).await {
-                let improvement =
-                    (1.0 - after.total() / before.total()) * 100.0;
+                let improvement = (1.0 - after.total() / before.total()) * 100.0;
                 println!(
                     "Cost: before={:.1}, after={:.1}, improvement={:.0}%",
                     before.total(),

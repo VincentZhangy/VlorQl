@@ -35,7 +35,7 @@
 
 use async_trait::async_trait;
 use futures::stream::Stream;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::time::sleep;
@@ -44,9 +44,9 @@ use vlorql_core::errors::{ConfigErrorKind, LlmErrorKind, VlorQLError};
 use vlorql_core::schema::QueryPlan;
 
 use crate::{
+    DEFAULT_MAX_ATTEMPTS, DEFAULT_RETRY_DELAY, LlmClient, LlmConfig, LlmProvider,
     compact_query_plan_schema, detect_template_leak, drive_sse_consumer, extract_delta_content,
     is_retryable, response_message, retry_backoff, sse_error, sse_lines, transport_error, truncate,
-    LlmClient, LlmConfig, LlmProvider, DEFAULT_MAX_ATTEMPTS, DEFAULT_RETRY_DELAY,
 };
 
 /// Default base URL for vLLM (without the `/chat/completions` suffix).
@@ -165,10 +165,10 @@ impl LocalClient {
     /// Ollama. The system prompt should always inline the schema as a
     /// textual fallback so the model can produce valid output regardless.
     fn supports_strict_json_schema(&self) -> bool {
-        if let Some(override_value) = self.config.extra.get("strict_json_schema") {
-            if let Some(flag) = override_value.as_bool() {
-                return flag;
-            }
+        if let Some(override_value) = self.config.extra.get("strict_json_schema")
+            && let Some(flag) = override_value.as_bool()
+        {
+            return flag;
         }
         true
     }
@@ -275,10 +275,10 @@ impl LocalClient {
     /// Sends the request with the appropriate auth header.
     async fn send_request(&self, body: &Value) -> Result<reqwest::Response, VlorQLError> {
         let mut builder = self.client.post(self.endpoint()).json(body);
-        if matches!(self.backend, LocalBackend::VLLM) {
-            if let Some(key) = self.config.api_key.as_deref().filter(|k| !k.is_empty()) {
-                builder = builder.bearer_auth(key);
-            }
+        if matches!(self.backend, LocalBackend::VLLM)
+            && let Some(key) = self.config.api_key.as_deref().filter(|k| !k.is_empty())
+        {
+            builder = builder.bearer_auth(key);
         }
         builder
             .send()
@@ -461,23 +461,23 @@ impl LlmClient for LocalClient {
 /// `"ollama"`); falls back to the configured [`LlmProvider`]; finally
 /// defaults to vLLM.
 fn resolve_backend(config: &LlmConfig) -> Result<LocalBackend, VlorQLError> {
-    if let Some(value) = config.extra.get("backend") {
-        if let Some(label) = value.as_str() {
-            let lowered = label.trim().to_ascii_lowercase();
-            return match lowered.as_str() {
-                "vllm" => Ok(LocalBackend::VLLM),
-                "ollama" => Ok(LocalBackend::Ollama),
-                other => Err(VlorQLError::config(
-                    ConfigErrorKind::InvalidDialect {
-                        dialect: format!("unknown local backend `{other}`"),
-                    },
-                    json!({
-                        "field": "extra.backend",
-                        "value": other,
-                    }),
-                )),
-            };
-        }
+    if let Some(value) = config.extra.get("backend")
+        && let Some(label) = value.as_str()
+    {
+        let lowered = label.trim().to_ascii_lowercase();
+        return match lowered.as_str() {
+            "vllm" => Ok(LocalBackend::VLLM),
+            "ollama" => Ok(LocalBackend::Ollama),
+            other => Err(VlorQLError::config(
+                ConfigErrorKind::InvalidDialect {
+                    dialect: format!("unknown local backend `{other}`"),
+                },
+                json!({
+                    "field": "extra.backend",
+                    "value": other,
+                }),
+            )),
+        };
     }
     Ok(match config.provider {
         LlmProvider::Ollama => LocalBackend::Ollama,
@@ -663,15 +663,14 @@ where
             .get("message")
             .and_then(|m| m.get("content"))
             .and_then(Value::as_str)
+            && !content.is_empty()
         {
-            if !content.is_empty() {
-                if let Some(details) = detect_template_leak(content) {
-                    let _ = tx.send(Err(sse_error(details)));
-                    return false;
-                }
-                if tx.send(Ok(content.to_owned())).is_err() {
-                    return true;
-                }
+            if let Some(details) = detect_template_leak(content) {
+                let _ = tx.send(Err(sse_error(details)));
+                return false;
+            }
+            if tx.send(Ok(content.to_owned())).is_err() {
+                return true;
             }
         }
     }
@@ -896,9 +895,11 @@ mod tests {
             request_body["response_format"]["json_schema"]["name"],
             "QueryPlan"
         );
-        assert!(request_body["response_format"]["json_schema"]
-            .get("schema")
-            .is_some());
+        assert!(
+            request_body["response_format"]["json_schema"]
+                .get("schema")
+                .is_some()
+        );
         assert_eq!(request_body["temperature"], 0.0);
         assert_eq!(request_body["max_tokens"], 1024);
         let messages = request_body["messages"].as_array().expect("messages");

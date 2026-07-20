@@ -6,5 +6,5 @@
 mod init;
 mod metrics;
 
-pub use init::{global_meter, global_tracer, init_telemetry, shutdown_telemetry, TelemetryGuard};
+pub use init::{TelemetryGuard, global_meter, global_tracer, init_telemetry, shutdown_telemetry};
 pub use metrics::VlorqMetrics;

@@ -58,7 +58,8 @@ pub struct CardinalityEstimator {
 
 impl fmt::Debug for CardinalityEstimator {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("CardinalityEstimator").finish_non_exhaustive()
+        f.debug_struct("CardinalityEstimator")
+            .finish_non_exhaustive()
     }
 }
 
@@ -132,9 +133,7 @@ impl CardinalityEstimator {
                     let r = self.predicate_selectivity(table, right).await?;
                     l + r - l * r
                 }
-                Predicate::Not { child } => {
-                    1.0 - self.predicate_selectivity(table, child).await?
-                }
+                Predicate::Not { child } => 1.0 - self.predicate_selectivity(table, child).await?,
                 Predicate::Between { expr, low, high } => {
                     self.between_selectivity(table, expr, low, high).await?
                 }
@@ -203,26 +202,21 @@ impl CardinalityEstimator {
             None => return Ok(DEFAULT_BETWEEN_SELECTIVITY),
         };
         let stats = self.stats_provider.get_column_stats(table, column).await?;
-        if let Some(stats) = stats {
-            if let (Some(min), Some(max), Some(low), Some(high)) = (
+        if let Some(stats) = stats
+            && let (Some(min), Some(max), Some(low), Some(high)) = (
                 stats.min_value.as_ref().and_then(Value::as_f64),
                 stats.max_value.as_ref().and_then(Value::as_f64),
                 literal_f64(low),
                 literal_f64(high),
-            ) {
-                if max > min {
-                    return Ok(clamp01((high - low) / (max - min)));
-                }
-            }
+            )
+            && max > min
+        {
+            return Ok(clamp01((high - low) / (max - min)));
         }
         Ok(DEFAULT_BETWEEN_SELECTIVITY)
     }
 
-    async fn null_selectivity(
-        &self,
-        table: &str,
-        expr: &Expression,
-    ) -> Result<f64, VlorQLError> {
+    async fn null_selectivity(&self, table: &str, expr: &Expression) -> Result<f64, VlorQLError> {
         let column = match column_name(expr) {
             Some(column) => column,
             None => return Ok(DEFAULT_SELECTIVITY),
@@ -293,11 +287,7 @@ impl CardinalityEstimator {
 
     /// Fetches a column's distinct count, treating `0` (the default for
     /// an unpopulated record) as "unknown".
-    async fn distinct_count(
-        &self,
-        table: &str,
-        column: &str,
-    ) -> Result<Option<u64>, VlorQLError> {
+    async fn distinct_count(&self, table: &str, column: &str) -> Result<Option<u64>, VlorQLError> {
         let stats = self.stats_provider.get_column_stats(table, column).await?;
         Ok(stats
             .map(|stats| stats.distinct_count)
@@ -425,7 +415,10 @@ mod tests {
     #[tokio::test]
     async fn equality_selectivity_is_reciprocal_of_distinct_count() {
         let estimator = estimator();
-        let pred = eq(column("users", "status"), literal(json!("active"), DataType::String));
+        let pred = eq(
+            column("users", "status"),
+            literal(json!("active"), DataType::String),
+        );
         let selectivity = estimator
             .estimate_predicate_cardinality("users", &pred)
             .await
@@ -438,7 +431,10 @@ mod tests {
     #[tokio::test]
     async fn equality_selectivity_never_exceeds_one_without_stats() {
         let estimator = estimator();
-        let pred = eq(column("users", "no_stats"), literal(json!(1), DataType::Int));
+        let pred = eq(
+            column("users", "no_stats"),
+            literal(json!(1), DataType::Int),
+        );
         let selectivity = estimator
             .estimate_predicate_cardinality("users", &pred)
             .await
@@ -449,7 +445,10 @@ mod tests {
     #[tokio::test]
     async fn and_multiplies_or_uses_inclusion_exclusion() {
         let estimator = estimator();
-        let left = eq(column("users", "status"), literal(json!("active"), DataType::String)); // 0.25
+        let left = eq(
+            column("users", "status"),
+            literal(json!("active"), DataType::String),
+        ); // 0.25
         let right = eq(column("users", "id"), literal(json!(1), DataType::Int)); // 1/10000
 
         let and = Predicate::And {

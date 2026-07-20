@@ -5,7 +5,7 @@
 //! under 10 ms — large enough to make `cargo bench` regressions easy to spot
 //! but tight enough to catch accidental O(n²) traversals.
 
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, criterion_group, criterion_main};
 use std::sync::Arc;
 use vlorql_core::policy::{PolicyConfig, PolicyEngine};
 use vlorql_core::schema::{

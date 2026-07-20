@@ -181,12 +181,7 @@ impl CostEstimator {
     /// nested-loop-style CPU term is charged for the candidate pairs the
     /// join examines, approximated here by the output cardinality. The
     /// result set is buffered in `memory`.
-    pub fn estimate_join(
-        &self,
-        left_cost: Cost,
-        right_cost: Cost,
-        join_cardinality: u64,
-    ) -> Cost {
+    pub fn estimate_join(&self, left_cost: Cost, right_cost: Cost, join_cardinality: u64) -> Cost {
         let pairs = join_cardinality as f64;
         let join_cost = Cost {
             cpu: pairs * JOIN_CPU_COST_PER_PAIR,
@@ -203,11 +198,7 @@ impl CostEstimator {
     /// every row is buffered in `memory`.
     pub fn estimate_sort(&self, cardinality: u64) -> Cost {
         let n = cardinality as f64;
-        let comparisons = if cardinality > 1 {
-            n * n.log2()
-        } else {
-            n
-        };
+        let comparisons = if cardinality > 1 { n * n.log2() } else { n };
         Cost {
             cpu: comparisons * SORT_CPU_COST_PER_ROW,
             io: 0.0,

@@ -40,8 +40,8 @@ use crate::errors::VlorQLError;
 use crate::schema::{ArcSchemaSnapshot, CommonTableExpression, Expression, Projection, QueryPlan};
 
 use super::analyze::{
-    columns_in_expression, columns_in_order_by, columns_in_predicate, columns_in_projection,
-    ColumnRef,
+    ColumnRef, columns_in_expression, columns_in_order_by, columns_in_predicate,
+    columns_in_projection,
 };
 use super::rules::PlanRewriter;
 use super::visitor::ExpressionFold;
@@ -140,7 +140,9 @@ impl ColumnPruning {
         for projection in &inner.select {
             match projection {
                 Projection::Column {
-                    column, alias: None, ..
+                    column,
+                    alias: None,
+                    ..
                 } => {
                     output_map.push((column.clone(), projection));
                 }
@@ -251,10 +253,10 @@ impl ColumnPruning {
         // projections that consumers actually reference. An unreferenced
         // aggregate's argument columns do not need to be preserved.
         for (name, projection) in output_map {
-            if referenced.contains(name.as_str()) {
-                if let Projection::Expr { expression, .. } = projection {
-                    required.extend(self.aggregate_args(expression));
-                }
+            if referenced.contains(name.as_str())
+                && let Projection::Expr { expression, .. } = projection
+            {
+                required.extend(self.aggregate_args(expression));
             }
         }
 
@@ -630,7 +632,10 @@ mod tests {
 
         assert!(kept.contains(&"a"), "group key `a` kept");
         assert!(kept.contains(&"b"), "group key `b` kept");
-        assert!(!kept.contains(&"c"), "`c` is neither key nor aggregate → pruned");
+        assert!(
+            !kept.contains(&"c"),
+            "`c` is neither key nor aggregate → pruned"
+        );
     }
 
     #[test]
@@ -711,7 +716,10 @@ mod tests {
             .collect();
 
         assert!(kept.contains(&"id"), "referenced column `id` kept");
-        assert!(!kept.contains(&"plus_one"), "unreferenced expression `plus_one` pruned");
+        assert!(
+            !kept.contains(&"plus_one"),
+            "unreferenced expression `plus_one` pruned"
+        );
     }
 
     #[test]

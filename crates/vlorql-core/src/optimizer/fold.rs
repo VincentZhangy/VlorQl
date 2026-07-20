@@ -23,7 +23,7 @@
 //! about (mixed types, division by zero, string operands, `NULL`) is
 //! left untouched so the rewrite never changes query semantics.
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::errors::VlorQLError;
 use crate::schema::{
@@ -31,7 +31,7 @@ use crate::schema::{
 };
 
 use super::rules::PlanRewriter;
-use super::visitor::{default_fold_expression, default_fold_predicate, ExpressionFold};
+use super::visitor::{ExpressionFold, default_fold_expression, default_fold_predicate};
 
 /// Folds constant expressions such as `1 + 2` into a single literal.
 ///
@@ -107,10 +107,9 @@ impl ExpressionFold for ConstantFolding {
                         value: right_value, ..
                     },
                 ) = (&left, &right)
+                    && let Some(folded) = fold_binary(left_value, *op, right_value)
                 {
-                    if let Some(folded) = fold_binary(left_value, *op, right_value) {
-                        return folded;
-                    }
+                    return folded;
                 }
 
                 Expression::BinaryOp {
@@ -119,7 +118,11 @@ impl ExpressionFold for ConstantFolding {
                     right: Box::new(right),
                 }
             }
-            Expression::FunctionCall { name, args, distinct } => Expression::FunctionCall {
+            Expression::FunctionCall {
+                name,
+                args,
+                distinct,
+            } => Expression::FunctionCall {
                 name: name.clone(),
                 args: args.iter().map(|a| self.fold_expression(a)).collect(),
                 distinct: *distinct,
@@ -137,10 +140,10 @@ impl ExpressionFold for ConstantFolding {
                     return *inner.clone();
                 }
                 // NOT on a comparison with all-literal operands.
-                if let Predicate::Comparison { left, op, right } = &child {
-                    if let Some(result) = fold_not_comparison(left, *op, right) {
-                        return result;
-                    }
+                if let Predicate::Comparison { left, op, right } = &child
+                    && let Some(result) = fold_not_comparison(left, *op, right)
+                {
+                    return result;
                 }
                 Predicate::Not {
                     child: Box::new(child),
@@ -164,20 +167,18 @@ impl ExpressionFold for ConstantFolding {
             Predicate::And { left, right } => {
                 let left = self.fold_predicate(left);
                 let right = self.fold_predicate(right);
-                fold_and_or_short_circuit(&left, true, &right)
-                    .unwrap_or_else(|| Predicate::And {
-                        left: Box::new(left),
-                        right: Box::new(right),
-                    })
+                fold_and_or_short_circuit(&left, true, &right).unwrap_or_else(|| Predicate::And {
+                    left: Box::new(left),
+                    right: Box::new(right),
+                })
             }
             Predicate::Or { left, right } => {
                 let left = self.fold_predicate(left);
                 let right = self.fold_predicate(right);
-                fold_and_or_short_circuit(&left, false, &right)
-                    .unwrap_or_else(|| Predicate::Or {
-                        left: Box::new(left),
-                        right: Box::new(right),
-                    })
+                fold_and_or_short_circuit(&left, false, &right).unwrap_or_else(|| Predicate::Or {
+                    left: Box::new(left),
+                    right: Box::new(right),
+                })
             }
             other => default_fold_predicate(self, other),
         }
@@ -188,7 +189,11 @@ impl ExpressionFold for ConstantFolding {
 
 /// Applies `AND`/`OR` short-circuit and identity rules at the
 /// `Expression` level (`true AND col` → `col`).
-fn fold_boolean_identity(left: &Expression, op: BinaryOperator, right: &Expression) -> Option<Expression> {
+fn fold_boolean_identity(
+    left: &Expression,
+    op: BinaryOperator,
+    right: &Expression,
+) -> Option<Expression> {
     let left_bool = lit_as_bool(left);
     let right_bool = lit_as_bool(right);
 
@@ -213,18 +218,30 @@ fn fold_boolean_identity(left: &Expression, op: BinaryOperator, right: &Expressi
 ///
 /// These are safe for all values including NULL because the identity
 /// element does not change the operand (NULL + 0 = NULL, NULL * 1 = NULL).
-fn fold_algebraic_identity(left: &Expression, op: BinaryOperator, right: &Expression) -> Option<Expression> {
-    let right_is_zero = matches!(right, Expression::Literal { value, .. } if value.as_f64() == Some(0.0));
-    let right_is_one = matches!(right, Expression::Literal { value, .. } if value.as_f64() == Some(1.0));
-    let left_is_zero = matches!(left, Expression::Literal { value, .. } if value.as_f64() == Some(0.0));
-    let left_is_one = matches!(left, Expression::Literal { value, .. } if value.as_f64() == Some(1.0));
+fn fold_algebraic_identity(
+    left: &Expression,
+    op: BinaryOperator,
+    right: &Expression,
+) -> Option<Expression> {
+    let right_is_zero =
+        matches!(right, Expression::Literal { value, .. } if value.as_f64() == Some(0.0));
+    let right_is_one =
+        matches!(right, Expression::Literal { value, .. } if value.as_f64() == Some(1.0));
+    let left_is_zero =
+        matches!(left, Expression::Literal { value, .. } if value.as_f64() == Some(0.0));
+    let left_is_one =
+        matches!(left, Expression::Literal { value, .. } if value.as_f64() == Some(1.0));
 
     match op {
         BinaryOperator::Add => {
             // x + 0 → x,  0 + x → x
-            if right_is_zero { Some(left.clone()) }
-            else if left_is_zero { Some(right.clone()) }
-            else { None }
+            if right_is_zero {
+                Some(left.clone())
+            } else if left_is_zero {
+                Some(right.clone())
+            } else {
+                None
+            }
         }
         BinaryOperator::Sub if right_is_zero => {
             // x - 0 → x
@@ -232,9 +249,13 @@ fn fold_algebraic_identity(left: &Expression, op: BinaryOperator, right: &Expres
         }
         BinaryOperator::Mul => {
             // x * 1 → x,  1 * x → x
-            if right_is_one { Some(left.clone()) }
-            else if left_is_one { Some(right.clone()) }
-            else { None }
+            if right_is_one {
+                Some(left.clone())
+            } else if left_is_one {
+                Some(right.clone())
+            } else {
+                None
+            }
         }
         BinaryOperator::Div if right_is_one => {
             // x / 1 → x
@@ -245,7 +266,11 @@ fn fold_algebraic_identity(left: &Expression, op: BinaryOperator, right: &Expres
 }
 
 /// Applies `AND`/`OR` short-circuit at the `Predicate` level.
-fn fold_and_or_short_circuit(left: &Predicate, is_and: bool, right: &Predicate) -> Option<Predicate> {
+fn fold_and_or_short_circuit(
+    left: &Predicate,
+    is_and: bool,
+    right: &Predicate,
+) -> Option<Predicate> {
     let left_val = predicate_is_bool_literal(left);
     let right_val = predicate_is_bool_literal(right);
 
@@ -267,8 +292,14 @@ fn fold_and_or_short_circuit(left: &Predicate, is_and: bool, right: &Predicate) 
 }
 
 /// Evaluates `NOT (left op right)` where all are literals.
-fn fold_not_comparison(left: &Expression, op: ComparisonOperator, right: &Expression) -> Option<Predicate> {
-    let (Expression::Literal { value: lv, .. }, Expression::Literal { value: rv, .. }) = (left, right) else {
+fn fold_not_comparison(
+    left: &Expression,
+    op: ComparisonOperator,
+    right: &Expression,
+) -> Option<Predicate> {
+    let (Expression::Literal { value: lv, .. }, Expression::Literal { value: rv, .. }) =
+        (left, right)
+    else {
         return None;
     };
     let ordering = compare_values(lv, rv)?;
@@ -280,7 +311,10 @@ fn fold_not_comparison(left: &Expression, op: ComparisonOperator, right: &Expres
         ComparisonOperator::Gte => !ordering.is_ge(),
         ComparisonOperator::Lte => !ordering.is_le(),
         // Non-evaluable comparison operators: keep NOT intact.
-        ComparisonOperator::Like | ComparisonOperator::ILike | ComparisonOperator::In | ComparisonOperator::Between => return None,
+        ComparisonOperator::Like
+        | ComparisonOperator::ILike
+        | ComparisonOperator::In
+        | ComparisonOperator::Between => return None,
     };
     Some(bool_predicate(result))
 }
@@ -299,22 +333,18 @@ fn lit_as_bool(expr: &Expression) -> Option<bool> {
 /// Checks whether a predicate reduces to a boolean constant
 /// (e.g. `true = true` or `1 = 1` for true, `1 = 0` for false).
 fn predicate_is_bool_literal(pred: &Predicate) -> Option<bool> {
-    if let Predicate::Comparison { left, op, right } = pred {
-        if matches!(op, ComparisonOperator::Eq) {
-            if let (
-                Expression::Literal { value: lv, .. },
-                Expression::Literal { value: rv, .. },
-            ) = (left, right)
-            {
-                // true = true, false = false
-                if lv == rv {
-                    return lv.as_bool();
-                }
-                // 1 = 1 is also true, 1 = 0 is false
-                if let (Some(l), Some(r)) = (lv.as_f64(), rv.as_f64()) {
-                    return Some((l - r).abs() < f64::EPSILON);
-                }
-            }
+    if let Predicate::Comparison { left, op, right } = pred
+        && matches!(op, ComparisonOperator::Eq)
+        && let (Expression::Literal { value: lv, .. }, Expression::Literal { value: rv, .. }) =
+            (left, right)
+    {
+        // true = true, false = false
+        if lv == rv {
+            return lv.as_bool();
+        }
+        // 1 = 1 is also true, 1 = 0 is false
+        if let (Some(l), Some(r)) = (lv.as_f64(), rv.as_f64()) {
+            return Some((l - r).abs() < f64::EPSILON);
         }
     }
     None
@@ -466,14 +496,16 @@ mod tests {
 
     #[test]
     fn folds_integer_addition() {
-        let folded = ConstantFolding.fold_expression(&binop(lit_int(1), BinaryOperator::Add, lit_int(2)));
+        let folded =
+            ConstantFolding.fold_expression(&binop(lit_int(1), BinaryOperator::Add, lit_int(2)));
         assert_eq!(folded, lit_int(3));
     }
 
     #[test]
     fn folds_nested_arithmetic() {
         let inner = binop(lit_int(3), BinaryOperator::Add, lit_int(4));
-        let folded = ConstantFolding.fold_expression(&binop(lit_int(2), BinaryOperator::Mul, inner));
+        let folded =
+            ConstantFolding.fold_expression(&binop(lit_int(2), BinaryOperator::Mul, inner));
         assert_eq!(folded, lit_int(14));
     }
 
@@ -509,7 +541,8 @@ mod tests {
 
     #[test]
     fn division_stays_float_when_inexact() {
-        let folded = ConstantFolding.fold_expression(&binop(lit_int(1), BinaryOperator::Div, lit_int(2)));
+        let folded =
+            ConstantFolding.fold_expression(&binop(lit_int(1), BinaryOperator::Div, lit_int(2)));
         assert_eq!(
             folded,
             Expression::Literal {
@@ -597,9 +630,7 @@ mod tests {
 
     #[test]
     fn is_null_on_non_null_literal_is_false() {
-        let pred = Predicate::IsNull {
-            expr: lit_int(42),
-        };
+        let pred = Predicate::IsNull { expr: lit_int(42) };
         assert_eq!(ConstantFolding.fold_predicate(&pred), bool_predicate(false));
     }
 

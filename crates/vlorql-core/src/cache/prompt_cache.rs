@@ -144,18 +144,33 @@ mod tests {
     use std::collections::HashMap;
 
     fn key_v1() -> PromptCacheKey {
-        PromptCacheKey::new("v1", &DialectProfile::default(), hash_policy(&PolicyConfig::default()), 0)
+        PromptCacheKey::new(
+            "v1",
+            &DialectProfile::default(),
+            hash_policy(&PolicyConfig::default()),
+            0,
+        )
     }
 
     fn key_v2() -> PromptCacheKey {
-        PromptCacheKey::new("v2", &DialectProfile::default(), hash_policy(&PolicyConfig::default()), 0)
+        PromptCacheKey::new(
+            "v2",
+            &DialectProfile::default(),
+            hash_policy(&PolicyConfig::default()),
+            0,
+        )
     }
 
     /// Same configuration → same key.
     #[test]
     fn same_config_same_key() {
         let a = key_v1();
-        let b = PromptCacheKey::new("v1", &DialectProfile::default(), hash_policy(&PolicyConfig::default()), 0);
+        let b = PromptCacheKey::new(
+            "v1",
+            &DialectProfile::default(),
+            hash_policy(&PolicyConfig::default()),
+            0,
+        );
         assert_eq!(a, b);
     }
 
@@ -170,7 +185,12 @@ mod tests {
     /// Different dialect → different key.
     #[test]
     fn different_dialect_different_key() {
-        let pg = PromptCacheKey::new("v1", &DialectProfile::default(), hash_policy(&PolicyConfig::default()), 0);
+        let pg = PromptCacheKey::new(
+            "v1",
+            &DialectProfile::default(),
+            hash_policy(&PolicyConfig::default()),
+            0,
+        );
         let sqlite = PromptCacheKey::new(
             "v1",
             &DialectProfile {
@@ -197,8 +217,12 @@ mod tests {
             ..PolicyConfig::default()
         };
 
-        let default_key =
-            PromptCacheKey::new("v1", &DialectProfile::default(), hash_policy(&PolicyConfig::default()), 0);
+        let default_key = PromptCacheKey::new(
+            "v1",
+            &DialectProfile::default(),
+            hash_policy(&PolicyConfig::default()),
+            0,
+        );
         let strict_key =
             PromptCacheKey::new("v1", &DialectProfile::default(), hash_policy(&strict), 0);
         assert_ne!(default_key, strict_key);
@@ -211,7 +235,9 @@ mod tests {
         let key = key_v1();
 
         assert!(cache.get(&key).await.is_none());
-        cache.insert(key.clone(), "SELECT * FROM users".to_owned()).await;
+        cache
+            .insert(key.clone(), "SELECT * FROM users".to_owned())
+            .await;
         let cached = cache.get(&key).await;
         assert_eq!(cached, Some("SELECT * FROM users".to_owned()));
     }

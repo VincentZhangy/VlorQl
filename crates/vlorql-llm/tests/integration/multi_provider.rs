@@ -1,4 +1,4 @@
-use vlorql_llm::{create_llm_client, LlmConfig, LlmProvider};
+use vlorql_llm::{LlmConfig, LlmProvider, create_llm_client};
 
 #[test]
 fn create_llm_client_rejects_missing_api_key_for_hosted_providers() {

@@ -21,11 +21,9 @@ use std::error::Error;
 use std::sync::Arc;
 
 use vlorql::VlorQl;
-use vlorql_core::observability::{init_telemetry, shutdown_telemetry, VlorqMetrics};
+use vlorql_core::observability::{VlorqMetrics, init_telemetry, shutdown_telemetry};
 use vlorql_core::policy::PolicyConfig;
-use vlorql_core::schema::{
-    ColumnSchema, DataType, SchemaMetadata, SchemaSnapshot, TableSchema,
-};
+use vlorql_core::schema::{ColumnSchema, DataType, SchemaMetadata, SchemaSnapshot, TableSchema};
 use vlorql_llm::{LlmConfig, LlmProvider, MockLlmClient};
 
 /// Builds a minimal `users` schema.
@@ -64,8 +62,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
     //    to http://localhost:4317 (the Jaeger endpoint from the Docker
     //    Compose file).  Override with the OTEL_EXPORTER_OTLP_ENDPOINT
     //    environment variable.
-    let otlp_endpoint =
-        std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT").unwrap_or_else(|_| "http://localhost:4317".to_owned());
+    let otlp_endpoint = std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT")
+        .unwrap_or_else(|_| "http://localhost:4317".to_owned());
     let _guard = init_telemetry("vlorql-example", &otlp_endpoint)?;
 
     // 2. Create a metrics handle that uses the global meter.

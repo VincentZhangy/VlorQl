@@ -12,14 +12,14 @@
 //! Each iteration is a fresh `QueryBuilder` so the measured time covers string
 //! allocation, placeholder numbering, and identifier quoting.
 
-use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
+use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use serde_json::json;
 use std::sync::Arc;
 use vlorql_core::compile::QueryBuilder;
 use vlorql_core::schema::{
     BinaryOperator, CommonTableExpression, ComparisonOperator, DataType, Expression, FromClause,
-    IdentifierQuoting, InTarget, JoinClause, JoinType, OrderByTerm, Predicate, Projection, QueryPlan,
-    SqlDialect,
+    IdentifierQuoting, InTarget, JoinClause, JoinType, OrderByTerm, Predicate, Projection,
+    QueryPlan, SqlDialect,
 };
 use vlorql_core::validate::ValidatedPlan;
 
@@ -176,7 +176,11 @@ fn build_complex_plan() -> ValidatedPlan {
             left: Box::new(Predicate::Or {
                 left: Box::new(Predicate::In {
                     expr: column_ref("r", "region"),
-                    target: InTarget::Values(vec![literal_str("us"), literal_str("eu"), literal_str("ap")]),
+                    target: InTarget::Values(vec![
+                        literal_str("us"),
+                        literal_str("eu"),
+                        literal_str("ap"),
+                    ]),
                 }),
                 right: Box::new(Predicate::Between {
                     expr: column_ref("r", "order_id"),

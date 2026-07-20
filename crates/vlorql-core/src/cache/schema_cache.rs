@@ -115,7 +115,8 @@ impl SchemaCache {
     /// cache.
     pub fn invalidate_version(&self, version: &str) {
         let ver = version.to_owned();
-        let _ = self.inner
+        let _ = self
+            .inner
             .invalidate_entries_if(move |k, _| k.version == ver);
     }
 
@@ -194,18 +195,21 @@ mod tests {
         let schema = dummy_schema("users");
 
         // First call — miss, load via f.
-        let loaded = cache.get_or_insert_with(k.clone(), || async { Arc::clone(&schema) }).await;
+        let loaded = cache
+            .get_or_insert_with(k.clone(), || async { Arc::clone(&schema) })
+            .await;
         assert_eq!(loaded.table_count(), 1);
 
         // Second call — hit, returns cached value.  We cannot use
         // unreachable!() here because moka's concurrent cache may still
         // evaluate the future on a hit; instead we verify the returned
         // value is correct.
-        let cached = cache.get_or_insert_with(k.clone(), || async {
-            // If the loader is called again, return a different schema.
-            dummy_schema("other")
-        })
-        .await;
+        let cached = cache
+            .get_or_insert_with(k.clone(), || async {
+                // If the loader is called again, return a different schema.
+                dummy_schema("other")
+            })
+            .await;
         // The cached value should still be "users", not "other".
         assert_eq!(cached.tables[0].name, "users");
     }
@@ -223,8 +227,12 @@ mod tests {
             .get_or_insert_with(k2.clone(), || async { dummy_schema("orders") })
             .await;
 
-        let v1 = cache.get_or_insert_with(k1, || async { dummy_schema("x") }).await;
-        let v2 = cache.get_or_insert_with(k2, || async { dummy_schema("y") }).await;
+        let v1 = cache
+            .get_or_insert_with(k1, || async { dummy_schema("x") })
+            .await;
+        let v2 = cache
+            .get_or_insert_with(k2, || async { dummy_schema("y") })
+            .await;
         assert_eq!(v1.tables[0].name, "users");
         assert_eq!(v2.tables[0].name, "orders");
     }
@@ -281,12 +289,13 @@ mod tests {
 
         cache.clear();
 
-        let reloaded = cache.get_or_insert_with(key("a", "db"), || async {
-            dummy_schema("reloaded")
-        })
-        .await;
-        assert_eq!(reloaded.tables[0].name, "reloaded",
-            "entry should be reloaded after clear");
+        let reloaded = cache
+            .get_or_insert_with(key("a", "db"), || async { dummy_schema("reloaded") })
+            .await;
+        assert_eq!(
+            reloaded.tables[0].name, "reloaded",
+            "entry should be reloaded after clear"
+        );
     }
 
     #[tokio::test]
@@ -322,7 +331,9 @@ mod tests {
 
         // Even after a short wait, the entry should still be present.
         tokio::time::sleep(Duration::from_millis(200)).await;
-        let hit = cache.get_or_insert_with(k, || async { dummy_schema("other") }).await;
+        let hit = cache
+            .get_or_insert_with(k, || async { dummy_schema("other") })
+            .await;
         assert_eq!(hit.tables[0].name, "persist");
     }
 }

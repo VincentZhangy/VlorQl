@@ -33,7 +33,7 @@ use std::env;
 use std::error::Error;
 
 use futures::StreamExt;
-use vlorql_llm::{create_llm_client, LlmConfig, LlmProvider};
+use vlorql_llm::{LlmConfig, LlmProvider, create_llm_client};
 
 const DEFAULT_BASE_URL: &str = "http://localhost:8000/v1";
 const DEFAULT_MODEL: &str = "Qwen/Qwen2.5-7B-Instruct";

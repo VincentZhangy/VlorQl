@@ -10,7 +10,7 @@ pub mod types;
 pub use builder::QueryBuilder;
 pub use mysql::MySQLCompiler;
 pub use postgres::PostgresCompiler;
-pub use registry::{get_compiler, CompilerRegistry};
+pub use registry::{CompilerRegistry, get_compiler};
 pub use sqlite::SQLiteCompiler;
 pub use types::{CompiledQuery, Parameter, SqlCompiler};
 
@@ -205,9 +205,11 @@ mod tests {
             .expect("MySQL should compile");
 
         assert!(postgres.sql.contains("= $1 LIMIT $2 OFFSET $3"));
-        assert!(sqlite
-            .sql
-            .contains("\"users\".\"active\" = ? LIMIT ? OFFSET ?"));
+        assert!(
+            sqlite
+                .sql
+                .contains("\"users\".\"active\" = ? LIMIT ? OFFSET ?")
+        );
         assert!(mysql.sql.contains("`users`.`active` = ? LIMIT ?, ?"));
         assert_eq!(postgres.parameters, sqlite.parameters);
         assert_eq!(postgres.parameters.len(), 3);

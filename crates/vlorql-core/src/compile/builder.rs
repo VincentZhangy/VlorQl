@@ -11,7 +11,7 @@ use crate::schema::{
     InTarget, JoinType, Predicate, Projection, QueryPlan, SqlDialect,
 };
 use crate::validate::ValidatedPlan;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::borrow::Cow;
 use std::fmt::Write;
 
@@ -361,7 +361,11 @@ impl<'a> QueryBuilder<'a> {
         write!(sql, " ORDER BY {}", rendered.join(", ")).map_err(formatting_error)
     }
 
-    fn build_limit_offset(&mut self, plan: &QueryPlan, sql: &mut String) -> Result<(), VlorQLError> {
+    fn build_limit_offset(
+        &mut self,
+        plan: &QueryPlan,
+        sql: &mut String,
+    ) -> Result<(), VlorQLError> {
         match (self.dialect, plan.limit, plan.offset) {
             (SqlDialect::MySql, Some(limit), Some(offset)) => {
                 let offset_ph = self.add_parameter(Value::from(offset), DataType::Int);
@@ -550,12 +554,57 @@ fn validate_unquoted_identifier(identifier: &str) -> Result<(), VlorQLError> {
 
 /// Standard SQL reserved keywords.  Sorted alphabetically for binary search.
 static RESERVED_KEYWORDS: &[&str] = &[
-    "ALL", "AND", "AS", "BETWEEN", "BY", "CASE", "CROSS", "DELETE", "DESC",
-    "DISTINCT", "DROP", "ELSE", "END", "ESCAPE", "EXCEPT", "EXISTS", "FALSE",
-    "FROM", "FULL", "GROUP", "HAVING", "IN", "INDEX", "INNER", "INSERT",
-    "INTERSECT", "INTO", "IS", "JOIN", "LEFT", "LIKE", "LIMIT", "NOT", "NULL",
-    "OFFSET", "ON", "OR", "ORDER", "OUTER", "RIGHT", "SELECT", "SET", "TABLE",
-    "THEN", "TRUE", "UNION", "UNIQUE", "UPDATE", "VALUES", "WHEN", "WHERE",
+    "ALL",
+    "AND",
+    "AS",
+    "BETWEEN",
+    "BY",
+    "CASE",
+    "CROSS",
+    "DELETE",
+    "DESC",
+    "DISTINCT",
+    "DROP",
+    "ELSE",
+    "END",
+    "ESCAPE",
+    "EXCEPT",
+    "EXISTS",
+    "FALSE",
+    "FROM",
+    "FULL",
+    "GROUP",
+    "HAVING",
+    "IN",
+    "INDEX",
+    "INNER",
+    "INSERT",
+    "INTERSECT",
+    "INTO",
+    "IS",
+    "JOIN",
+    "LEFT",
+    "LIKE",
+    "LIMIT",
+    "NOT",
+    "NULL",
+    "OFFSET",
+    "ON",
+    "OR",
+    "ORDER",
+    "OUTER",
+    "RIGHT",
+    "SELECT",
+    "SET",
+    "TABLE",
+    "THEN",
+    "TRUE",
+    "UNION",
+    "UNIQUE",
+    "UPDATE",
+    "VALUES",
+    "WHEN",
+    "WHERE",
     "WITH",
 ];
 

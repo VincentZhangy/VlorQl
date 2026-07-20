@@ -2,7 +2,7 @@
 
 use async_trait::async_trait;
 use futures::stream::Stream;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::time::sleep;
@@ -11,8 +11,8 @@ use vlorql_core::errors::{ConfigErrorKind, LlmErrorKind, VlorQLError};
 use vlorql_core::schema::QueryPlan;
 
 use crate::{
-    compact_query_plan_schema, drive_sse_consumer_with, is_retryable, response_message,
-    retry_backoff, sse_lines, transport_error, truncate, LlmClient, LlmConfig, LlmProvider,
+    LlmClient, LlmConfig, LlmProvider, compact_query_plan_schema, drive_sse_consumer_with,
+    is_retryable, response_message, retry_backoff, sse_lines, transport_error, truncate,
 };
 
 const DEFAULT_API_BASE: &str = "https://api.anthropic.com/v1/messages";

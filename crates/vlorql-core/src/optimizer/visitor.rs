@@ -73,7 +73,11 @@ pub fn default_fold_expression<F: ExpressionFold + ?Sized>(
             op: *op,
             right: Box::new(folder.fold_expression(right)),
         },
-        Expression::FunctionCall { name, args, distinct } => Expression::FunctionCall {
+        Expression::FunctionCall {
+            name,
+            args,
+            distinct,
+        } => Expression::FunctionCall {
             name: name.clone(),
             args: args.iter().map(|a| folder.fold_expression(a)).collect(),
             distinct: *distinct,
@@ -139,7 +143,11 @@ pub fn default_fold_projection<F: ExpressionFold + ?Sized>(
     proj: &Projection,
 ) -> Projection {
     match proj {
-        Projection::Column { table, column, alias } => Projection::Column {
+        Projection::Column {
+            table,
+            column,
+            alias,
+        } => Projection::Column {
             table: table.clone(),
             column: column.clone(),
             alias: alias.clone(),

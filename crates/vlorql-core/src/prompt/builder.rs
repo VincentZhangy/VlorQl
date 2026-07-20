@@ -1,6 +1,6 @@
 //! Context-minimized system prompt construction.
 
-use crate::cache::{hash_policy, PromptCache, PromptCacheKey};
+use crate::cache::{PromptCache, PromptCacheKey, hash_policy};
 use crate::policy::{PolicyConfig, TablePolicy};
 use crate::query::collect_predicate_references;
 use crate::schema::{
@@ -129,12 +129,7 @@ impl PromptBuilder {
         user_question: &str,
         cache: &PromptCache,
     ) -> String {
-        let schema_version = self
-            .schema
-            .metadata
-            .version
-            .as_deref()
-            .unwrap_or("unknown");
+        let schema_version = self.schema.metadata.version.as_deref().unwrap_or("unknown");
 
         // Compute the relevant table set first so it can be included
         // in the cache key — different questions that match different
@@ -148,12 +143,7 @@ impl PromptBuilder {
         }
         let table_hash = hasher.finish();
 
-        let key = PromptCacheKey::new(
-            schema_version,
-            &self.dialect,
-            self.policy_hash,
-            table_hash,
-        );
+        let key = PromptCacheKey::new(schema_version, &self.dialect, self.policy_hash, table_hash);
 
         // Try cache hit.
         if let Some(cached) = cache.get(&key).await {
@@ -580,10 +570,10 @@ impl PromptBuilder {
             // Forward: add FK targets of matched tables.
             if let Some(table) = self.schema.get_table(table_name) {
                 for column in &table.columns {
-                    if let Some(fk) = &column.foreign_key {
-                        if self.schema.get_table(&fk.foreign_table).is_some() {
-                            expanded.insert(fk.foreign_table.clone());
-                        }
+                    if let Some(fk) = &column.foreign_key
+                        && self.schema.get_table(&fk.foreign_table).is_some()
+                    {
+                        expanded.insert(fk.foreign_table.clone());
                     }
                 }
             }

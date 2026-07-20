@@ -1,6 +1,6 @@
 //! Command-line interface for the VlorQl query orchestration framework.
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use clap::{Parser, Subcommand};
 use serde::Deserialize;
 use std::env;
@@ -11,7 +11,7 @@ use vlorql::{CompiledQuery, VlorQl};
 use vlorql_core::errors::ValidationErrors;
 use vlorql_core::policy::PolicyConfig;
 use vlorql_core::schema::{DialectProfile, QueryPlan, SchemaSnapshot};
-use vlorql_llm::{create_llm_client, LlmConfig, LlmProvider};
+use vlorql_llm::{LlmConfig, LlmProvider, create_llm_client};
 
 const DEFAULT_CONFIG_PATH: &str = "vlorql.toml";
 

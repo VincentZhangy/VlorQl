@@ -88,9 +88,11 @@ fn sort_value_with_depth(value: Value, depth: usize) -> Value {
             }
             Value::Object(sorted)
         }
-        Value::Array(arr) => {
-            Value::Array(arr.into_iter().map(|v| sort_value_with_depth(v, next_depth)).collect())
-        }
+        Value::Array(arr) => Value::Array(
+            arr.into_iter()
+                .map(|v| sort_value_with_depth(v, next_depth))
+                .collect(),
+        ),
         other => other,
     }
 }
