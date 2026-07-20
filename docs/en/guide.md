@@ -512,10 +512,16 @@ rewrite rules and one asynchronous join reorderer:
 
 | Rule                | Effect                                                              |
 |---------------------|---------------------------------------------------------------------|
-| Constant folding    | Evaluates constant sub-expressions (`100 + 50` → `150`).            |
-| Predicate pushdown  | Moves `WHERE` conjuncts into CTE bodies for earlier filtering.      |
-| Column pruning      | Removes unreferenced columns from CTE outputs.                      |
-| Join reordering     | Reorders `INNER JOIN` chains to minimise total cost (requires statistics). |
+| Constant folding    | Evaluates constant sub-expressions (`100 + 50` → `150`) and simplifies algebraic identities (`x + 0` → `x`, `true AND x` → `x`). |
+| Predicate pushdown  | Moves `WHERE` conjuncts into CTE bodies for earlier filtering. Supports **multi-layer cascade** through nested CTEs. |
+| Column pruning      | Removes unreferenced columns from CTE outputs. Aggregate arguments are only preserved when the aggregation is referenced. |
+| Join reordering     | Reorders `INNER JOIN` chains to minimise total cost (requires statistics). Uses bitmask-accelerated DP search. |
+
+The pipeline can optionally be run in **fixed-point iteration** mode
+(up to 3 rounds) to capture cascading effects — constant folding may
+expose new pushdown opportunities, and pushdown may enable more
+column pruning. Use `QueryOptimizer::optimize_repeat()` or
+`RewriterPipeline::repeat_until_stable()` directly.
 
 Enable it with `VlorQlBuilder::with_statistics_provider`:
 

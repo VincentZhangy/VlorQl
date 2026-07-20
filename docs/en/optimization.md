@@ -7,9 +7,9 @@ VlorQl includes a built-in **logical query optimizer** that applies semantically
 The optimizer consists of two phases:
 
 1. **Synchronous Rewriter Pipeline** — applies three logical rules:
-   - **Constant Folding**: statically evaluates constant sub-expressions, e.g. `20 + 5` → `25`.
-   - **Predicate Pushdown**: moves `WHERE` conjuncts that reference only a single CTE into that CTE's body, enabling early data filtering.
-   - **Column Pruning**: removes columns from CTE outputs that are not referenced by the outer query, reducing data transfer volume.
+   - **Constant Folding**: statically evaluates constant sub-expressions, e.g. `20 + 5` → `25`, and simplifies algebraic identities (`x + 0` → `x`, `x * 1` → `x`, `true AND x` → `x`).
+   - **Predicate Pushdown**: moves `WHERE` conjuncts that reference only a single CTE into that CTE's body, enabling early data filtering. Supports **multi-layer cascade**: conditions pushed into a CTE whose body references another CTE are automatically translated and pushed further down.
+   - **Column Pruning**: removes columns from CTE outputs that are not referenced by the outer query, reducing data transfer volume. Aggregate arguments are only preserved when the aggregate result is referenced by a consumer.
 2. **Asynchronous Join Reorderer** — estimates row counts and column selectivity for each table based on statistics, and reorders inner join chains to minimize total cost.
 
 ## How It Works
@@ -68,12 +68,46 @@ use vlorql_core::statistics::DummyStatisticsProvider;
 let stats = Arc::new(DummyStatisticsProvider::default());
 let optimizer = QueryOptimizer::new(stats);
 
-// Synchronous rewrite
+// Synchronous rewrite (single pass)
 let optimized = optimizer.optimize(&plan)?;
+
+// Fixed-point iteration (up to 3 rounds until stable)
+let optimized = optimizer.optimize_repeat(&plan, 3)?;
 
 // Async rewrite + join reordering
 let optimized = optimizer.optimize_async(&plan).await?;
 ```
+
+### 4. Fixed-Point Iteration (Repeat Until Stable)
+
+Constant folding may expose new pushdown opportunities, and pushdown may enable more column pruning. The `repeat_until_stable` method applies the pipeline repeatedly (up to a configurable number of rounds) until the plan no longer changes:
+
+```rust
+use vlorql_core::optimizer::RewriterPipeline;
+
+let pipeline = RewriterPipeline::new()
+    .with(ConstantFolding)
+    .with(PredicatePushdown)
+    .with(ColumnPruning::new());
+
+// Run up to 3 rounds, stop early if stable
+let optimized = pipeline.repeat_until_stable(&plan, 3)?;
+```
+
+In practice, 2–3 rounds are sufficient to capture all cascading effects. The method is also exposed via `QueryOptimizer::optimize_repeat()`.
+
+### 5. Multi-Layer CTE Pushdown
+
+When a CTE's body references another CTE, conditions pushed into the outer CTE are automatically translated and pushed further into the inner CTE. For example:
+
+```sql
+WITH
+  cte2 AS (SELECT id, val FROM t2),
+  cte1 AS (SELECT * FROM cte2)
+SELECT * FROM cte1 WHERE cte1.val > 10
+```
+
+The optimizer will push `cte1.val > 10` into `cte1`, then cascade it into `cte2` so the filter is applied as early as possible. This also works when the inner CTE is referenced with an alias (`FROM cte2 AS alias`).
 
 ## Configuring a Statistics Provider
 
@@ -214,3 +248,5 @@ cargo bench -p vlorql-core --bench optimizer_bench
 - `FromClause` is a bare table name, not an inline subquery — pushdown and pruning only operate on CTEs.
 - Join reordering only supports `INNER JOIN` chains, not `LEFT` / `RIGHT` / `FULL` / `CROSS JOIN`.
 - When the number of joined tables exceeds `MAX_DP_RELATIONS` (currently 5), DP search falls back to a greedy algorithm.
+- Multi-layer CTE pushdown cascades at the same CTE definition level; conditions are not pushed across CTE scopes that are defined in different query blocks.
+- Non-equi join conditions (`a.x > b.y`) are reorderable but fall back to default selectivity when column statistics are not available.
