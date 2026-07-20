@@ -20,7 +20,7 @@
 
 use async_trait::async_trait;
 use futures::stream::Stream;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::time::sleep;
@@ -29,9 +29,9 @@ use vlorql_core::errors::{ConfigErrorKind, LlmErrorKind, VlorQLError};
 use vlorql_core::schema::QueryPlan;
 
 use crate::{
+    DEFAULT_MAX_ATTEMPTS, DEFAULT_RETRY_DELAY, LlmClient, LlmConfig, LlmProvider,
     compact_query_plan_schema, drive_sse_consumer, is_retryable, response_message, retry_backoff,
-    sse_lines, transport_error, truncate, LlmClient, LlmConfig, LlmProvider, DEFAULT_MAX_ATTEMPTS,
-    DEFAULT_RETRY_DELAY,
+    sse_lines, transport_error, truncate,
 };
 
 const DEFAULT_API_BASE: &str = "https://open.bigmodel.cn/api/paas/v4/chat/completions";
@@ -139,10 +139,10 @@ impl ZhipuClient {
     /// system prompt to coerce the JSON shape. Operators can also force
     /// the choice via `LlmConfig::extra["strict_json_schema"]` (boolean).
     fn supports_strict_json_schema(&self) -> bool {
-        if let Some(override_value) = self.config.extra.get("strict_json_schema") {
-            if let Some(flag) = override_value.as_bool() {
-                return flag;
-            }
+        if let Some(override_value) = self.config.extra.get("strict_json_schema")
+            && let Some(flag) = override_value.as_bool()
+        {
+            return flag;
         }
         let model = self.config.model.to_ascii_lowercase();
         model.starts_with("glm-4.7")

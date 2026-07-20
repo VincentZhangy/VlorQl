@@ -25,9 +25,7 @@ pub use cost::{
     Cost, CostEstimator, INDEX_SCAN_COST_PER_ROW, JOIN_CPU_COST_PER_PAIR, NETWORK_COST_PER_ROW,
     SORT_CPU_COST_PER_ROW, SORT_MEMORY_PER_ROW, TABLE_SCAN_COST_PER_ROW,
 };
-pub use providers::{
-    ConfigFileStatisticsProvider, DummyStatisticsProvider, StatisticsProvider,
-};
+pub use providers::{ConfigFileStatisticsProvider, DummyStatisticsProvider, StatisticsProvider};
 pub use stats::{ColumnStatistics, StatisticsCatalog, TableStatistics};
 
 #[cfg(test)]
@@ -77,8 +75,7 @@ mod tests {
     fn catalog_round_trips_through_json() {
         let catalog = sample_catalog();
         let value = to_value(&catalog).expect("catalog should serialize");
-        let decoded: StatisticsCatalog =
-            from_value(value).expect("catalog should deserialize");
+        let decoded: StatisticsCatalog = from_value(value).expect("catalog should deserialize");
         assert_eq!(decoded, catalog);
     }
 
@@ -154,16 +151,20 @@ mod tests {
             .expect("email should be present");
         assert_eq!(column.null_fraction, 0.05);
 
-        assert!(provider
-            .get_table_stats("missing")
-            .await
-            .expect("lookup should succeed")
-            .is_none());
-        assert!(provider
-            .get_column_stats("users", "missing")
-            .await
-            .expect("lookup should succeed")
-            .is_none());
+        assert!(
+            provider
+                .get_table_stats("missing")
+                .await
+                .expect("lookup should succeed")
+                .is_none()
+        );
+        assert!(
+            provider
+                .get_column_stats("users", "missing")
+                .await
+                .expect("lookup should succeed")
+                .is_none()
+        );
 
         let catalog = provider
             .get_catalog_stats()

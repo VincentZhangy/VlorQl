@@ -9,6 +9,7 @@
 //!   table order.
 
 use super::common::{base_plan, open_policy, snapshot};
+use std::sync::Arc;
 use vlorql::VlorQl;
 use vlorql_core::schema::{
     BinaryOperator, DataType, Expression, FromClause, JoinClause, JoinType, Predicate, Projection,
@@ -17,7 +18,6 @@ use vlorql_core::schema::{
 use vlorql_core::statistics::{
     ColumnStatistics, DummyStatisticsProvider, StatisticsCatalog, TableStatistics,
 };
-use std::sync::Arc;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -162,8 +162,8 @@ async fn optimized_plan_compiles_to_sql() {
 
 #[tokio::test]
 async fn optimized_plan_still_enforces_policy() {
-    use vlorql_core::policy::{PolicyConfig, TablePolicy};
     use std::collections::HashMap;
+    use vlorql_core::policy::{PolicyConfig, TablePolicy};
 
     let strict_policy = PolicyConfig {
         table_policies: HashMap::from([(

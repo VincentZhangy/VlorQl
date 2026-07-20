@@ -148,9 +148,8 @@ impl ConfigFileStatisticsProvider {
     /// be read or its contents cannot be parsed.
     pub fn load(path: impl AsRef<Path>) -> Result<Self, VlorQLError> {
         let path = path.as_ref().to_path_buf();
-        let contents = std::fs::read_to_string(&path).map_err(|error| {
-            Self::file_error(&path, format!("could not read file: {error}"))
-        })?;
+        let contents = std::fs::read_to_string(&path)
+            .map_err(|error| Self::file_error(&path, format!("could not read file: {error}")))?;
         Self::from_str(path, &contents)
     }
 

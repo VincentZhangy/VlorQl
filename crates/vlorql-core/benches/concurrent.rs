@@ -8,7 +8,7 @@
 //! `criterion::Throughput::Elements(N)` makes `cargo bench` report
 //! `elements/s`, which equals QPS for one element per request.
 
-use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use futures::future::join_all;
 use serde_json::json;
 use std::sync::Arc;

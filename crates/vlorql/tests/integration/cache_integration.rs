@@ -8,8 +8,7 @@
 use super::common::{base_plan, open_policy, snapshot};
 use vlorql::VlorQl;
 use vlorql_core::schema::{
-    ComparisonOperator, DataType, Expression, FromClause, Predicate, Projection,
-    QueryPlan,
+    ComparisonOperator, DataType, Expression, FromClause, Predicate, Projection, QueryPlan,
 };
 use vlorql_llm::MockLlmClient;
 
@@ -117,9 +116,7 @@ async fn compile_cache_invalidation_forces_recompile() {
 
     // Validate the plan so we can pass it to invalidate_compile_cache.
     let plan = plan_with_filter();
-    let validated = vlorql
-        .validate_only(&plan)
-        .expect("plan should validate");
+    let validated = vlorql.validate_only(&plan).expect("plan should validate");
     vlorql.invalidate_compile_cache(&validated).await;
 
     let second = vlorql
@@ -169,10 +166,7 @@ async fn prompt_cache_is_configured() {
 
     // The prompt cache should be accessible.
     let prompt_cache = vlorql.prompt_cache();
-    assert!(
-        prompt_cache.is_some(),
-        "prompt cache should be configured"
-    );
+    assert!(prompt_cache.is_some(), "prompt cache should be configured");
 }
 
 // ---------------------------------------------------------------------------
@@ -198,10 +192,7 @@ async fn clear_all_caches_does_not_break_queries() {
         .query("list users with id > 10")
         .await
         .expect("query after clear should succeed");
-    assert!(
-        !result.sql.is_empty(),
-        "compiled SQL should not be empty"
-    );
+    assert!(!result.sql.is_empty(), "compiled SQL should not be empty");
 }
 
 // ---------------------------------------------------------------------------
@@ -221,10 +212,7 @@ async fn schema_cache_is_configured() {
         .expect("facade with schema cache should build");
 
     let schema_cache = vlorql.schema_cache();
-    assert!(
-        schema_cache.is_some(),
-        "schema cache should be configured"
-    );
+    assert!(schema_cache.is_some(), "schema cache should be configured");
 
     // Invalidating a non-existent version should not panic.
     vlorql.invalidate_schema_cache("nonexistent");

@@ -51,9 +51,7 @@ use std::sync::Arc;
 use vlorql::{SchemaSnapshot, SqlDialect, VlorQl};
 use vlorql_core::policy::PolicyConfig;
 use vlorql_core::prompt::PromptBuilder;
-use vlorql_core::schema::{
-    ColumnSchema, DataType, SchemaMetadata, TableSchema,
-};
+use vlorql_core::schema::{ColumnSchema, DataType, SchemaMetadata, TableSchema};
 use vlorql_core::schema::{
     ComparisonOperator, Expression, FromClause, JoinClause, JoinType, Predicate, Projection,
     QueryPlan,
@@ -141,7 +139,9 @@ fn build_schema() -> Arc<SchemaSnapshot> {
                         name: "status".to_owned(),
                         data_type: DataType::String,
                         nullable: false,
-                        description: Some("订单状态: pending/shipped/completed/cancelled".to_owned()),
+                        description: Some(
+                            "订单状态: pending/shipped/completed/cancelled".to_owned(),
+                        ),
                         is_primary_key: false,
                         foreign_key: None,
                     },
@@ -262,21 +262,24 @@ fn build_schema() -> Arc<SchemaSnapshot> {
 
 fn select_llm_client() -> Box<dyn LlmClient> {
     // 优先使用真实的 OpenAI 兼容 API
-    if let Ok(api_key) = std::env::var("OPENAI_API_KEY") {
-        if !api_key.trim().is_empty() {
-            let model = std::env::var("OPENAI_MODEL").unwrap_or_else(|_| "gpt-4o-mini".to_owned());
-            let api_base = std::env::var("OPENAI_API_BASE").ok();
-            let config = LlmConfig {
-                provider: LlmProvider::OpenAi,
-                api_key: Some(api_key),
-                api_base,
-                model,
-                ..LlmConfig::default()
-            };
-            eprintln!("[INFO] 真实 LLM 模式：使用 OpenAI 兼容客户端 (model={})", config.model);
-            eprintln!("       您只需要输入自然语言，QueryPlan 由 LLM 自动生成\n");
-            return Box::new(OpenAIClient::from_config(config));
-        }
+    if let Ok(api_key) = std::env::var("OPENAI_API_KEY")
+        && !api_key.trim().is_empty()
+    {
+        let model = std::env::var("OPENAI_MODEL").unwrap_or_else(|_| "gpt-4o-mini".to_owned());
+        let api_base = std::env::var("OPENAI_API_BASE").ok();
+        let config = LlmConfig {
+            provider: LlmProvider::OpenAi,
+            api_key: Some(api_key),
+            api_base,
+            model,
+            ..LlmConfig::default()
+        };
+        eprintln!(
+            "[INFO] 真实 LLM 模式：使用 OpenAI 兼容客户端 (model={})",
+            config.model
+        );
+        eprintln!("       您只需要输入自然语言，QueryPlan 由 LLM 自动生成\n");
+        return Box::new(OpenAIClient::from_config(config));
     }
 
     // 也支持其他 Provider
@@ -407,12 +410,15 @@ async fn execute_on_postgres(compiled: &vlorql::CompiledQuery) -> Result<(), Box
         Ok(url) => url,
         Err(_) => {
             eprintln!("[SKIP] 未设置 DATABASE_URL，跳过 PostgreSQL 执行");
-            eprintln!("       设置示例: DATABASE_URL=\"host=localhost user=postgres dbname=test_db\"");
+            eprintln!(
+                "       设置示例: DATABASE_URL=\"host=localhost user=postgres dbname=test_db\""
+            );
             return Ok(());
         }
     };
 
-    let (client, connection) = tokio_postgres::connect(&database_url, tokio_postgres::NoTls).await?;
+    let (client, connection) =
+        tokio_postgres::connect(&database_url, tokio_postgres::NoTls).await?;
     tokio::spawn(async move {
         if let Err(e) = connection.await {
             eprintln!("[ERROR] 数据库连接异常: {e}");
@@ -455,7 +461,10 @@ async fn execute_on_postgres(compiled: &vlorql::CompiledQuery) -> Result<(), Box
     eprintln!("[OK] 测试表已就绪");
 
     // 插入测试数据（如果表空）
-    let count: i64 = client.query_one("SELECT COUNT(*) FROM users", &[]).await?.get(0);
+    let count: i64 = client
+        .query_one("SELECT COUNT(*) FROM users", &[])
+        .await?
+        .get(0);
     if count == 0 {
         eprintln!("[INFO] 插入测试数据...");
         client
@@ -495,7 +504,12 @@ async fn execute_on_postgres(compiled: &vlorql::CompiledQuery) -> Result<(), Box
     } else {
         eprintln!("[EXEC] 参数:");
         for (i, param) in compiled.parameters.iter().enumerate() {
-            eprintln!("       ${}: {} (类型: {:?})", i + 1, param.value, param.data_type);
+            eprintln!(
+                "       ${}: {} (类型: {:?})",
+                i + 1,
+                param.value,
+                param.data_type
+            );
         }
     }
 
@@ -653,7 +667,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
     } else {
         println!("参数:");
         for (i, param) in compiled.parameters.iter().enumerate() {
-            println!("  ${}: value={}, type={:?}", i + 1, param.value, param.data_type);
+            println!(
+                "  ${}: value={}, type={:?}",
+                i + 1,
+                param.value,
+                param.data_type
+            );
         }
     }
     println!();

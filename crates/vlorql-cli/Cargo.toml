@@ -1,14 +1,14 @@
 [package]
 name = "vlorql-cli"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 description = "CLI tool for VlorQl SQL query optimization and natural language querying"
 
 [dependencies]
-vlorql = { path = "../vlorql", version = "0.1.0" }
-vlorql-core = { path = "../vlorql-core", version = "0.1.0" }
-vlorql-llm = { path = "../vlorql-llm", version = "0.1.0" }
+vlorql = { path = "../vlorql", version = "0.2.0" }
+vlorql-core = { path = "../vlorql-core", version = "0.2.0" }
+vlorql-llm = { path = "../vlorql-llm", version = "0.2.0" }
 anyhow.workspace = true
 tokio.workspace = true
 tracing.workspace = true

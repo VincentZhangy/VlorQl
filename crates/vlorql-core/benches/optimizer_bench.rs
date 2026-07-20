@@ -11,10 +11,10 @@
 //! Target: the sync rewrite pipeline should complete in well under 5 ms
 //! for a 10-join plan.
 
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, criterion_group, criterion_main};
 use std::sync::Arc;
 use vlorql_core::optimizer::{
-    ColumnPruning, ConstantFolding, PlanRewriter, PredicatePushdown, QueryOptimizer,
+    ColumnPruning, ConstantFolding, PredicatePushdown, QueryOptimizer,
     RewriterPipeline,
 };
 use vlorql_core::schema::{

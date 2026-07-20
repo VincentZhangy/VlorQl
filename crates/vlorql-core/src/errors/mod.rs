@@ -7,7 +7,7 @@
 mod kinds;
 
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use thiserror::Error;
 
 pub use kinds::{
@@ -271,9 +271,9 @@ impl VlorQLError {
                 ValidationErrorKind::InvalidJson => {
                     Some("Return a JSON object matching the query plan schema.".to_owned())
                 }
-                ValidationErrorKind::MissingField { field } => {
-                    Some(format!("Add the required field `{field}` to the query plan."))
-                }
+                ValidationErrorKind::MissingField { field } => Some(format!(
+                    "Add the required field `{field}` to the query plan."
+                )),
                 ValidationErrorKind::InvalidTable {
                     table,
                     available_tables,
@@ -312,9 +312,9 @@ impl VlorQLError {
                 ValidationErrorKind::AggregationMismatch { message } => Some(format!(
                     "Adjust the selected and grouped expressions to satisfy aggregation rules: {message}"
                 )),
-                ValidationErrorKind::MultipleErrors { .. } => Some(
-                    "Fix each listed validation error and resubmit.".to_owned(),
-                ),
+                ValidationErrorKind::MultipleErrors { .. } => {
+                    Some("Fix each listed validation error and resubmit.".to_owned())
+                }
             },
             Self::Policy { .. } => {
                 Some("Request the required access or remove the unauthorized resource.".to_owned())
@@ -322,16 +322,17 @@ impl VlorQLError {
             Self::Compilation { .. } => {
                 Some("Use only features supported by the selected SQL dialect compiler.".to_owned())
             }
-            Self::Schema { .. } => {
-                Some("Refresh the schema snapshot and reference an existing table or column.".to_owned())
-            }
+            Self::Schema { .. } => Some(
+                "Refresh the schema snapshot and reference an existing table or column.".to_owned(),
+            ),
             Self::Llm { kind, .. } => match kind {
                 LlmErrorKind::ApiError { status, .. } if *status == 401 || *status == 403 => {
                     Some("Check the LLM provider credentials and permissions.".to_owned())
                 }
-                LlmErrorKind::ApiError { .. } => {
-                    Some("Retry the LLM request with backoff, then inspect the provider status.".to_owned())
-                }
+                LlmErrorKind::ApiError { .. } => Some(
+                    "Retry the LLM request with backoff, then inspect the provider status."
+                        .to_owned(),
+                ),
                 LlmErrorKind::Timeout => {
                     Some("Retry the LLM request or increase the request timeout.".to_owned())
                 }
@@ -553,10 +554,12 @@ mod tests {
         assert_eq!(response.code, "V003");
         assert!(response.message.contains("usrers"));
         assert_eq!(response.details["source"], "llm");
-        assert!(response
-            .suggestion
-            .as_deref()
-            .is_some_and(|suggestion| suggestion.contains("users")));
+        assert!(
+            response
+                .suggestion
+                .as_deref()
+                .is_some_and(|suggestion| suggestion.contains("users"))
+        );
     }
 
     #[test]

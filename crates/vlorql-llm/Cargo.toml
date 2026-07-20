@@ -1,12 +1,12 @@
 [package]
 name = "vlorql-llm"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 description = "Multi-provider LLM client for SQL query generation supporting Anthropic, DeepSeek, Zhipu, and local models"
 
 [dependencies]
-vlorql-core = { path = "../vlorql-core", version = "0.1.0" }
+vlorql-core = { path = "../vlorql-core", version = "0.2.0" }
 async-trait.workspace = true
 reqwest.workspace = true
 serde.workspace = true

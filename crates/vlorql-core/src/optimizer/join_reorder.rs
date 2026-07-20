@@ -44,11 +44,9 @@ use std::sync::Arc;
 
 use crate::errors::VlorQLError;
 use crate::schema::{FromClause, JoinClause, JoinType, Predicate, QueryPlan};
-use crate::statistics::{
-    Cost, CostEstimator, StatisticsProvider, DEFAULT_JOIN_SELECTIVITY,
-};
+use crate::statistics::{Cost, CostEstimator, DEFAULT_JOIN_SELECTIVITY, StatisticsProvider};
 
-use super::analyze::{combine_conjuncts, columns_in_predicate, split_conjuncts};
+use super::analyze::{columns_in_predicate, combine_conjuncts, split_conjuncts};
 
 /// The largest relation count for which [`JoinReorderer`] uses exact
 /// dynamic programming; above this it falls back to the greedy heuristic.
@@ -239,7 +237,12 @@ impl JoinGraph {
 
     /// Combines the given conjuncts into a single `AND` predicate.
     fn combine(&self, indices: &[usize]) -> Option<Predicate> {
-        combine_conjuncts(indices.iter().map(|&i| self.conjuncts[i].pred.clone()).collect())
+        combine_conjuncts(
+            indices
+                .iter()
+                .map(|&i| self.conjuncts[i].pred.clone())
+                .collect(),
+        )
     }
 
     /// Assigns every conjunct to a step of the final left-deep `order`.
@@ -440,8 +443,9 @@ impl JoinReorderer {
                     if connected_only && connections.is_empty() {
                         continue;
                     }
-                    let card =
-                        self.step_cardinality(graph, in_set, running_card, base_card[j], j).await?;
+                    let card = self
+                        .step_cardinality(graph, in_set, running_card, base_card[j], j)
+                        .await?;
                     let candidate = self.cost.estimate_join(running_cost, scan_cost[j], card);
                     let score = candidate.total();
                     if best.is_none_or(|(best_score, ..)| score < best_score) {
@@ -644,7 +648,6 @@ fn true_predicate() -> Predicate {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashSet;
     use crate::schema::{
         ComparisonOperator, Expression, FromClause, JoinClause, JoinType, Predicate, Projection,
         QueryPlan,
@@ -652,6 +655,7 @@ mod tests {
     use crate::statistics::{
         ColumnStatistics, DummyStatisticsProvider, StatisticsCatalog, TableStatistics,
     };
+    use std::collections::HashSet;
 
     // --- builders -------------------------------------------------------
 
@@ -812,9 +816,10 @@ mod tests {
         catalog
             .tables
             .insert("a".to_owned(), table(100, &[("x", 100)]));
-        catalog
-            .tables
-            .insert("b".to_owned(), table(50_000, &[("x", 40_000), ("y", 50_000)]));
+        catalog.tables.insert(
+            "b".to_owned(),
+            table(50_000, &[("x", 40_000), ("y", 50_000)]),
+        );
         catalog
             .tables
             .insert("c".to_owned(), table(10_000, &[("y", 10_000)]));
@@ -822,7 +827,10 @@ mod tests {
         let plan = plan_with_joins(
             "c",
             vec![
-                inner_join("b", cmp(col("b", "y"), ComparisonOperator::Gt, col("c", "y"))),
+                inner_join(
+                    "b",
+                    cmp(col("b", "y"), ComparisonOperator::Gt, col("c", "y")),
+                ),
                 inner_join("a", eq(col("a", "x"), col("b", "x"))),
             ],
         );
@@ -893,7 +901,10 @@ mod tests {
         let plan = plan_with_joins(
             "users",
             vec![
-                inner_join("accounts", eq(col("users", "id"), col("accounts", "user_id"))),
+                inner_join(
+                    "accounts",
+                    eq(col("users", "id"), col("accounts", "user_id")),
+                ),
                 inner_join("orders", eq(col("orders", "a"), col("orders", "b"))),
             ],
         );

@@ -88,8 +88,12 @@ mod tests {
     #[test]
     fn error_counter_does_not_panic() {
         let m = setup_metrics();
-        m.error_counter.add(1, &[opentelemetry::KeyValue::new("error_type", "validation")]);
-        m.error_counter.add(1, &[opentelemetry::KeyValue::new("error_type", "llm")]);
+        m.error_counter.add(
+            1,
+            &[opentelemetry::KeyValue::new("error_type", "validation")],
+        );
+        m.error_counter
+            .add(1, &[opentelemetry::KeyValue::new("error_type", "llm")]);
     }
 
     #[test]

@@ -63,27 +63,25 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .with_schema(build_schema())
         .with_dialect_name("postgres")
         .with_policy(PolicyConfig::default())
-        .with_llm_client(MockLlmClient::success(
-            vlorql_core::schema::QueryPlan {
-                select: vec![vlorql_core::schema::Projection::Column {
-                    table: Some("users".to_owned()),
-                    column: "id".to_owned(),
-                    alias: None,
-                }],
-                from: vlorql_core::schema::FromClause {
-                    table: "users".to_owned(),
-                    alias: None,
-                },
-                r#where: None,
-                group_by: None,
-                having: None,
-                order_by: None,
-                limit: None,
-                offset: None,
-                joins: None,
-                ctes: None,
+        .with_llm_client(MockLlmClient::success(vlorql_core::schema::QueryPlan {
+            select: vec![vlorql_core::schema::Projection::Column {
+                table: Some("users".to_owned()),
+                column: "id".to_owned(),
+                alias: None,
+            }],
+            from: vlorql_core::schema::FromClause {
+                table: "users".to_owned(),
+                alias: None,
             },
-        ))
+            r#where: None,
+            group_by: None,
+            having: None,
+            order_by: None,
+            limit: None,
+            offset: None,
+            joins: None,
+            ctes: None,
+        }))
         // Enable all three caches.
         .with_schema_cache(10, 3600)
         .with_compile_cache(1024, 60)

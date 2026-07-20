@@ -52,20 +52,20 @@ impl BoundDialectValidator<'_> {
         }
 
         let join_count = plan.joins.as_ref().map_or(0, Vec::len);
-        if let Some(max) = self.profile.max_joins {
-            if join_count > max {
-                errors.push(VlorQLError::validation(
-                    ValidationErrorKind::TooManyJoins {
-                        actual: join_count,
-                        max,
-                    },
-                    json!({
-                        "actual": join_count,
-                        "max": max,
-                        "dialect": self.profile.dialect,
-                    }),
-                ));
-            }
+        if let Some(max) = self.profile.max_joins
+            && join_count > max
+        {
+            errors.push(VlorQLError::validation(
+                ValidationErrorKind::TooManyJoins {
+                    actual: join_count,
+                    max,
+                },
+                json!({
+                    "actual": join_count,
+                    "max": max,
+                    "dialect": self.profile.dialect,
+                }),
+            ));
         }
 
         if let Some(joins) = &plan.joins {
