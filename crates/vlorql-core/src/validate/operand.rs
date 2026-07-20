@@ -140,7 +140,10 @@ impl<'a> OperandValidator<'a> {
                 }
             }
             Expression::Star => None,
-            Expression::SubQuery { .. } => None,
+            Expression::SubQuery { query } => {
+                self.validate_plan_inner(query, errors);
+                None
+            }
         }
     }
 
@@ -185,14 +188,13 @@ impl<'a> OperandValidator<'a> {
                             }
                         }
                     }
-                    InTarget::SubQuery(_) => {
-                        // Subquery type checking is deferred; no expression-level type
-                        // validation needed here.
+                    InTarget::SubQuery(query) => {
+                        self.validate_plan_inner(query, errors);
                     }
                 }
             }
-            Predicate::Exists { .. } => {
-                // EXISTS is a boolean check; no expression-level validation needed.
+            Predicate::Exists { query } => {
+                self.validate_plan_inner(query, errors);
             }
             Predicate::Like { expr, .. } => {
                 if let Some(data_type) = self.validate_expression_inner(expr, scope, errors) {
@@ -211,91 +213,84 @@ impl<'a> OperandValidator<'a> {
         argument_types: &[Option<DataType>],
         errors: &mut Vec<VlorQLError>,
     ) -> DataType {
-        let normalized = name.to_ascii_lowercase();
-        match normalized.as_str() {
-            "count" => {
-                require_arity_range(name, argument_types.len(), 0, 1, errors);
-                DataType::Int
+        // Match case-insensitively without allocating a lowercased copy.
+        if name.eq_ignore_ascii_case("count") {
+            require_arity_range(name, argument_types.len(), 0, 1, errors);
+            DataType::Int
+        } else if is_any_of_ignore_case(name, &["sum", "avg", "abs"]) {
+            require_arity(name, argument_types.len(), 1, errors);
+            if let Some(Some(argument_type)) = argument_types.first() {
+                require_numeric(
+                    &format!("function `{name}` argument"),
+                    *argument_type,
+                    errors,
+                );
             }
-            "sum" | "avg" | "abs" => {
-                require_arity(name, argument_types.len(), 1, errors);
-                if let Some(Some(argument_type)) = argument_types.first() {
-                    require_numeric(
-                        &format!("function `{name}` argument"),
-                        *argument_type,
-                        errors,
-                    );
-                }
-                if normalized == "avg" {
-                    DataType::Float
-                } else {
-                    argument_types
-                        .first()
-                        .copied()
-                        .flatten()
-                        .unwrap_or(DataType::Null)
-                }
-            }
-            "min" | "max" => {
-                require_arity(name, argument_types.len(), 1, errors);
+            if name.eq_ignore_ascii_case("avg") {
+                DataType::Float
+            } else {
                 argument_types
                     .first()
                     .copied()
                     .flatten()
                     .unwrap_or(DataType::Null)
             }
-            "lower" | "upper" => {
-                require_arity(name, argument_types.len(), 1, errors);
-                if let Some(Some(argument_type)) = argument_types.first() {
-                    require_string(
-                        &format!("function `{name}` argument"),
-                        *argument_type,
-                        errors,
-                    );
-                }
-                DataType::String
+        } else if is_any_of_ignore_case(name, &["min", "max"]) {
+            require_arity(name, argument_types.len(), 1, errors);
+            argument_types
+                .first()
+                .copied()
+                .flatten()
+                .unwrap_or(DataType::Null)
+        } else if is_any_of_ignore_case(name, &["lower", "upper"]) {
+            require_arity(name, argument_types.len(), 1, errors);
+            if let Some(Some(argument_type)) = argument_types.first() {
+                require_string(
+                    &format!("function `{name}` argument"),
+                    *argument_type,
+                    errors,
+                );
             }
-            "length" => {
-                require_arity(name, argument_types.len(), 1, errors);
-                if let Some(Some(argument_type)) = argument_types.first() {
-                    require_string(
-                        &format!("function `{name}` argument"),
-                        *argument_type,
-                        errors,
-                    );
-                }
-                DataType::Int
+            DataType::String
+        } else if name.eq_ignore_ascii_case("length") {
+            require_arity(name, argument_types.len(), 1, errors);
+            if let Some(Some(argument_type)) = argument_types.first() {
+                require_string(
+                    &format!("function `{name}` argument"),
+                    *argument_type,
+                    errors,
+                );
             }
-            "concat" => {
-                require_min_arity(name, argument_types.len(), 1, errors);
-                for argument_type in argument_types.iter().flatten() {
-                    require_string(
-                        &format!("function `{name}` argument"),
-                        *argument_type,
-                        errors,
-                    );
-                }
-                DataType::String
+            DataType::Int
+        } else if name.eq_ignore_ascii_case("concat") {
+            require_min_arity(name, argument_types.len(), 1, errors);
+            for argument_type in argument_types.iter().flatten() {
+                require_string(
+                    &format!("function `{name}` argument"),
+                    *argument_type,
+                    errors,
+                );
             }
-            "coalesce" => {
-                require_min_arity(name, argument_types.len(), 1, errors);
-                let result = argument_types
-                    .iter()
-                    .flatten()
-                    .copied()
-                    .find(|data_type| *data_type != DataType::Null)
-                    .unwrap_or(DataType::Null);
-                for argument_type in argument_types.iter().flatten() {
-                    validate_compatible_types(
-                        &format!("function `{name}` argument"),
-                        result,
-                        *argument_type,
-                        errors,
-                    );
-                }
-                result
+            DataType::String
+        } else if name.eq_ignore_ascii_case("coalesce") {
+            require_min_arity(name, argument_types.len(), 1, errors);
+            let result = argument_types
+                .iter()
+                .flatten()
+                .copied()
+                .find(|data_type| *data_type != DataType::Null)
+                .unwrap_or(DataType::Null);
+            for argument_type in argument_types.iter().flatten() {
+                validate_compatible_types(
+                    &format!("function `{name}` argument"),
+                    result,
+                    *argument_type,
+                    errors,
+                );
             }
-            _ => DataType::Null,
+            result
+        } else {
+            DataType::Null
         }
     }
 }
@@ -603,4 +598,9 @@ fn numeric_result_type(left: DataType, right: DataType) -> DataType {
     } else {
         DataType::Null
     }
+}
+
+/// Returns `true` when `name` matches any candidate case-insensitively.
+fn is_any_of_ignore_case(name: &str, candidates: &[&str]) -> bool {
+    candidates.iter().any(|candidate| candidate.eq_ignore_ascii_case(name))
 }

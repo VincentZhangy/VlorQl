@@ -102,14 +102,6 @@ pub enum PolicyErrorKind {
         /// Name of the denied column.
         column: String,
     },
-    /// A required row filter could not be applied to the query.
-    #[error("row filter for table `{table}` could not be applied: {reason}")]
-    RowFilterMismatch {
-        /// Owning table of the unsatisfied filter.
-        table: String,
-        /// Human-readable description of why the filter could not be applied.
-        reason: String,
-    },
 }
 
 /// Errors raised while compiling a validated plan into SQL.

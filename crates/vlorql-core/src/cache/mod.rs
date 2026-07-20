@@ -25,6 +25,7 @@ mod traits;
 pub use compile_cache::CompileCache;
 pub use key::{CompileCacheKey, SchemaCacheKey};
 pub use normalize::normalize_plan;
+pub(crate) use prompt_cache::hash_policy;
 pub use prompt_cache::{PromptCache, PromptCacheKey};
 pub use schema_cache::SchemaCache;
 pub use traits::{Cache, MemoryCache, NoopCache};

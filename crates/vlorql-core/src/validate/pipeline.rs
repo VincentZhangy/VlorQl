@@ -6,7 +6,7 @@ use super::schema::validate_schema;
 use crate::errors::{ValidationErrors, VlorQLError};
 use crate::optimizer::QueryOptimizer;
 use crate::policy::PolicyEngine;
-use crate::schema::{ArcSchemaSnapshot, DialectProfile, QueryPlan, SchemaSnapshot};
+use crate::schema::{ArcSchemaSnapshot, DialectProfile, Predicate, QueryPlan, SchemaSnapshot};
 use std::ops::Deref;
 use std::sync::Arc;
 
@@ -184,6 +184,10 @@ impl ValidationPipeline {
     }
 
     /// Executes every validation stage and aggregates all returned errors.
+    ///
+    /// After successful validation, mandatory policy row filters are
+    /// injected into the plan's `WHERE` clause so they are enforced
+    /// at the SQL level.
     pub fn validate(&self, plan: &QueryPlan) -> Result<ValidatedPlan, ValidationErrors> {
         let mut errors = Vec::new();
 
@@ -200,11 +204,33 @@ impl ValidationPipeline {
             extend_unique(&mut errors, stage_errors);
         }
 
-        if errors.is_empty() {
-            Ok(ValidatedPlan(Arc::new(plan.clone())))
-        } else {
-            Err(ValidationErrors(errors))
+        if !errors.is_empty() {
+            return Err(ValidationErrors(errors));
         }
+
+        // Inject mandatory policy row filters into the plan's WHERE clause.
+        // These are AND-ed with any existing WHERE predicate so they are
+        // enforced at the SQL level and cannot be bypassed.
+        let mut plan = plan.clone();
+        if let Some(row_filter) = self.policy.apply_row_filters(&plan) {
+            plan.r#where = Some(match plan.r#where {
+                Some(existing) => Predicate::And {
+                    left: Box::new(existing),
+                    right: Box::new(row_filter),
+                },
+                None => row_filter,
+            });
+        }
+
+        // Re-validate schema on the modified plan to catch any invalid
+        // table/column references introduced by the policy row filters.
+        // The original plan already passed schema validation, so only
+        // the injected predicates are checked here.
+        if let Err(stage_errors) = self.validate_schema(&plan) {
+            return Err(ValidationErrors(stage_errors));
+        }
+
+        Ok(ValidatedPlan(Arc::new(plan)))
     }
 
     /// Validates a plan and, when an optimizer is configured, applies

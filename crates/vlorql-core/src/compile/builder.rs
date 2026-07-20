@@ -12,6 +12,7 @@ use crate::schema::{
 };
 use crate::validate::ValidatedPlan;
 use serde_json::{json, Value};
+use std::borrow::Cow;
 use std::fmt::Write;
 
 /// Builds SQL while preserving the exact textual order of bind parameters.
@@ -48,12 +49,25 @@ impl<'a> QueryBuilder<'a> {
 
     /// Renders one expression and appends any literal parameters to this builder.
     pub fn render_expression(&mut self, expression: &Expression) -> Result<String, VlorQLError> {
+        let mut buf = String::new();
+        self.render_expression_to(expression, &mut buf)?;
+        Ok(buf)
+    }
+
+    /// Renders one expression into `buf`, avoiding intermediate allocations.
+    pub fn render_expression_to(
+        &mut self,
+        expression: &Expression,
+        buf: &mut String,
+    ) -> Result<(), VlorQLError> {
         match expression {
             Expression::Literal { value, data_type } => {
-                Ok(self.add_parameter(value.clone(), *data_type))
+                buf.push_str(&self.add_parameter(value.clone(), *data_type));
+                Ok(())
             }
             Expression::ColumnRef { table, column } => {
-                self.render_qualified_identifier(table.as_deref(), column)
+                buf.push_str(&self.render_qualified_identifier(table.as_deref(), column)?);
+                Ok(())
             }
             Expression::FunctionCall {
                 name,
@@ -61,64 +75,92 @@ impl<'a> QueryBuilder<'a> {
                 distinct,
             } => {
                 let function = self.render_function_name(name)?;
-                let mut rendered_args = Vec::with_capacity(args.len());
-                for argument in args {
-                    rendered_args.push(self.render_expression(argument)?);
+                buf.push_str(&function);
+                buf.push('(');
+                if *distinct {
+                    buf.push_str("DISTINCT ");
                 }
-                let distinct = if *distinct { "DISTINCT " } else { "" };
-                Ok(format!(
-                    "{function}({distinct}{})",
-                    rendered_args.join(", ")
-                ))
+                for (i, argument) in args.iter().enumerate() {
+                    if i > 0 {
+                        buf.push_str(", ");
+                    }
+                    self.render_expression_to(argument, buf)?;
+                }
+                buf.push(')');
+                Ok(())
             }
             Expression::BinaryOp { left, op, right } => {
-                let left = self.render_expression(left)?;
-                let right = self.render_expression(right)?;
-                Ok(format!(
-                    "({left} {} {right})",
-                    self.render_binary_operator(*op)
-                ))
+                buf.push('(');
+                self.render_expression_to(left, buf)?;
+                write!(buf, " {} ", self.render_binary_operator(*op)).map_err(formatting_error)?;
+                self.render_expression_to(right, buf)?;
+                buf.push(')');
+                Ok(())
             }
-            Expression::Star => Ok("*".to_owned()),
+            Expression::Star => {
+                buf.push('*');
+                Ok(())
+            }
             Expression::SubQuery { query } => {
-                let mut sub_sql = String::new();
-                self.build_query(query, &mut sub_sql)?;
-                Ok(format!("({sub_sql})"))
+                buf.push('(');
+                self.build_query(query, buf)?;
+                buf.push(')');
+                Ok(())
             }
         }
     }
 
     /// Renders one predicate and appends literal values as bind parameters.
     pub fn render_predicate(&mut self, predicate: &Predicate) -> Result<String, VlorQLError> {
+        let mut buf = String::new();
+        self.render_predicate_to(predicate, &mut buf)?;
+        Ok(buf)
+    }
+
+    /// Renders one predicate into `buf`, avoiding intermediate allocations.
+    pub fn render_predicate_to(
+        &mut self,
+        predicate: &Predicate,
+        buf: &mut String,
+    ) -> Result<(), VlorQLError> {
         match predicate {
             Predicate::Comparison { left, op, right } => {
-                let left = self.render_expression(left)?;
-                let right = self.render_expression(right)?;
-                let operator = self.render_comparison_operator(*op)?;
-                Ok(format!("{left} {operator} {right}"))
+                self.render_expression_to(left, buf)?;
+                write!(buf, " {} ", self.render_comparison_operator(*op)?)
+                    .map_err(formatting_error)?;
+                self.render_expression_to(right, buf)
             }
             Predicate::And { left, right } => {
-                let left = self.render_predicate(left)?;
-                let right = self.render_predicate(right)?;
-                Ok(format!("({left}) AND ({right})"))
+                buf.push('(');
+                self.render_predicate_to(left, buf)?;
+                buf.push_str(") AND (");
+                self.render_predicate_to(right, buf)?;
+                buf.push(')');
+                Ok(())
             }
             Predicate::Or { left, right } => {
-                let left = self.render_predicate(left)?;
-                let right = self.render_predicate(right)?;
-                Ok(format!("({left}) OR ({right})"))
+                buf.push('(');
+                self.render_predicate_to(left, buf)?;
+                buf.push_str(") OR (");
+                self.render_predicate_to(right, buf)?;
+                buf.push(')');
+                Ok(())
             }
             Predicate::Not { child } => {
-                let child = self.render_predicate(child)?;
-                Ok(format!("NOT ({child})"))
+                buf.push_str("NOT (");
+                self.render_predicate_to(child, buf)?;
+                buf.push(')');
+                Ok(())
             }
             Predicate::Between { expr, low, high } => {
-                let expression = self.render_expression(expr)?;
-                let low = self.render_expression(low)?;
-                let high = self.render_expression(high)?;
-                Ok(format!("{expression} BETWEEN {low} AND {high}"))
+                self.render_expression_to(expr, buf)?;
+                buf.push_str(" BETWEEN ");
+                self.render_expression_to(low, buf)?;
+                buf.push_str(" AND ");
+                self.render_expression_to(high, buf)
             }
             Predicate::In { expr, target } => {
-                let expression = self.render_expression(expr)?;
+                self.render_expression_to(expr, buf)?;
                 match target {
                     InTarget::Values(values) => {
                         if values.is_empty() {
@@ -127,33 +169,40 @@ impl<'a> QueryBuilder<'a> {
                                 json!({"predicate": "in"}),
                             ));
                         }
-                        let mut rendered_values = Vec::with_capacity(values.len());
-                        for value in values {
-                            rendered_values.push(self.render_expression(value)?);
+                        buf.push_str(" IN (");
+                        for (i, value) in values.iter().enumerate() {
+                            if i > 0 {
+                                buf.push_str(", ");
+                            }
+                            self.render_expression_to(value, buf)?;
                         }
-                        Ok(format!("{expression} IN ({})", rendered_values.join(", ")))
+                        buf.push(')');
+                        Ok(())
                     }
                     InTarget::SubQuery(query) => {
-                        let mut sub_sql = String::new();
-                        self.build_query(query, &mut sub_sql)?;
-                        Ok(format!("{expression} IN ({sub_sql})"))
+                        buf.push_str(" IN (");
+                        self.build_query(query, buf)?;
+                        buf.push(')');
+                        Ok(())
                     }
                 }
             }
             Predicate::Exists { query } => {
-                let mut sub_sql = String::new();
-                self.build_query(query, &mut sub_sql)?;
-                Ok(format!("EXISTS ({sub_sql})"))
+                buf.push_str("EXISTS (");
+                self.build_query(query, buf)?;
+                buf.push(')');
+                Ok(())
             }
             Predicate::Like { expr, pattern } => {
-                let expression = self.render_expression(expr)?;
+                self.render_expression_to(expr, buf)?;
                 let placeholder =
                     self.add_parameter(Value::String(pattern.clone()), DataType::String);
-                Ok(format!("{expression} LIKE {placeholder}"))
+                write!(buf, " LIKE {placeholder}").map_err(formatting_error)
             }
             Predicate::IsNull { expr } => {
-                let expression = self.render_expression(expr)?;
-                Ok(format!("{expression} IS NULL"))
+                self.render_expression_to(expr, buf)?;
+                buf.push_str(" IS NULL");
+                Ok(())
             }
         }
     }
@@ -403,7 +452,7 @@ impl<'a> QueryBuilder<'a> {
         }
     }
 
-    fn render_function_name(&self, function: &str) -> Result<String, VlorQLError> {
+    fn render_function_name<'b>(&self, function: &'b str) -> Result<Cow<'b, str>, VlorQLError> {
         if function.is_empty() {
             return Err(compilation_error(
                 "empty_function_name",
@@ -413,7 +462,7 @@ impl<'a> QueryBuilder<'a> {
         for segment in function.split('.') {
             validate_unquoted_identifier(segment)?;
         }
-        Ok(function.to_owned())
+        Ok(Cow::Borrowed(function))
     }
 
     fn render_binary_operator(&self, operator: BinaryOperator) -> &'static str {

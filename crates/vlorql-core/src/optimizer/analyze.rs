@@ -5,9 +5,11 @@
 //! tree splits into independent conjuncts, and how to recombine
 //! predicates with `AND`.
 
-use std::collections::BTreeSet;
+use std::collections::HashSet;
 
-use crate::schema::{Expression, InTarget, OrderByTerm, Predicate, Projection, QueryPlan};
+use crate::schema::{Expression, OrderByTerm, Predicate, Projection};
+
+use super::visitor::ExpressionVisit;
 
 /// A column reference as it appears in a plan: an optional table
 /// qualifier plus the column name.
@@ -16,9 +18,7 @@ pub type ColumnRef = (Option<String>, String);
 /// Splits a predicate into its top-level `AND` conjuncts.
 ///
 /// `a AND (b AND c)` flattens to `[a, b, c]`. Any non-`And` predicate
-/// yields a single-element vector. This is the canonical form the
-/// pushdown rule reasons about, since each conjunct can be relocated
-/// independently.
+/// yields a single-element vector.
 pub fn split_conjuncts(pred: &Predicate) -> Vec<Predicate> {
     let mut out = Vec::new();
     collect_conjuncts(pred, &mut out);
@@ -46,16 +46,18 @@ pub fn combine_conjuncts(mut conjuncts: Vec<Predicate>) -> Option<Predicate> {
 }
 
 /// Collects every column referenced anywhere in a predicate.
-pub fn columns_in_predicate(pred: &Predicate) -> BTreeSet<ColumnRef> {
-    let mut set = BTreeSet::new();
-    walk_predicate(pred, &mut set);
+pub fn columns_in_predicate(pred: &Predicate) -> HashSet<ColumnRef> {
+    let mut set = HashSet::new();
+    let mut visitor = ColumnCollector;
+    visitor.visit_predicate(pred, &mut set);
     set
 }
 
 /// Collects every column referenced anywhere in an expression.
-pub fn columns_in_expression(expr: &Expression) -> BTreeSet<ColumnRef> {
-    let mut set = BTreeSet::new();
-    walk_expression(expr, &mut set);
+pub fn columns_in_expression(expr: &Expression) -> HashSet<ColumnRef> {
+    let mut set = HashSet::new();
+    let mut visitor = ColumnCollector;
+    visitor.visit_expression(expr, &mut set);
     set
 }
 
@@ -63,10 +65,10 @@ pub fn columns_in_expression(expr: &Expression) -> BTreeSet<ColumnRef> {
 ///
 /// A `Star` projection returns `None`, signalling "every column" — the
 /// caller must treat that as "cannot prune".
-pub fn columns_in_projection(projection: &Projection) -> Option<BTreeSet<ColumnRef>> {
+pub fn columns_in_projection(projection: &Projection) -> Option<HashSet<ColumnRef>> {
     match projection {
         Projection::Column { table, column, .. } => {
-            Some(BTreeSet::from([(table.clone(), column.clone())]))
+            Some(HashSet::from([(table.clone(), column.clone())]))
         }
         Projection::Expr { expression, .. } => Some(columns_in_expression(expression)),
         Projection::Star { .. } => None,
@@ -74,10 +76,11 @@ pub fn columns_in_projection(projection: &Projection) -> Option<BTreeSet<ColumnR
 }
 
 /// Collects the columns referenced by an `ORDER BY` term list.
-pub fn columns_in_order_by(terms: &[OrderByTerm]) -> BTreeSet<ColumnRef> {
-    let mut set = BTreeSet::new();
+pub fn columns_in_order_by(terms: &[OrderByTerm]) -> HashSet<ColumnRef> {
+    let mut set = HashSet::new();
+    let mut visitor = ColumnCollector;
     for term in terms {
-        walk_expression(&term.expr, &mut set);
+        visitor.visit_expression(&term.expr, &mut set);
     }
     set
 }
@@ -88,106 +91,23 @@ pub fn columns_in_order_by(terms: &[OrderByTerm]) -> BTreeSet<ColumnRef> {
 /// `None` entry in the set, so a caller can detect "this conjunct has
 /// an unqualified column and therefore cannot be safely attributed to a
 /// single relation".
-pub fn referenced_tables(pred: &Predicate) -> BTreeSet<Option<String>> {
+pub fn referenced_tables(pred: &Predicate) -> HashSet<Option<String>> {
     columns_in_predicate(pred)
         .into_iter()
         .map(|(table, _)| table)
         .collect()
 }
 
-fn walk_predicate(pred: &Predicate, out: &mut BTreeSet<ColumnRef>) {
-    match pred {
-        Predicate::Comparison { left, right, .. } => {
-            walk_expression(left, out);
-            walk_expression(right, out);
-        }
-        Predicate::And { left, right } | Predicate::Or { left, right } => {
-            walk_predicate(left, out);
-            walk_predicate(right, out);
-        }
-        Predicate::Not { child } => walk_predicate(child, out),
-        Predicate::Between {
-            expr, low, high, ..
-        } => {
-            walk_expression(expr, out);
-            walk_expression(low, out);
-            walk_expression(high, out);
-        }
-        Predicate::In { expr, target } => {
-            walk_expression(expr, out);
-            match target {
-                InTarget::Values(values) => {
-                    for value in values {
-                        walk_expression(value, out);
-                    }
-                }
-                InTarget::SubQuery(query) => {
-                    walk_plan(query, out);
-                }
-            }
-        }
-        Predicate::Exists { query } => {
-            walk_plan(query, out);
-        }
-        Predicate::Like { expr, .. } | Predicate::IsNull { expr } => walk_expression(expr, out),
-    }
-}
+// -- visitor implementation ------------------------------------------------
 
-fn walk_expression(expr: &Expression, out: &mut BTreeSet<ColumnRef>) {
-    match expr {
-        Expression::ColumnRef { table, column } => {
-            out.insert((table.clone(), column.clone()));
-        }
-        Expression::BinaryOp { left, right, .. } => {
-            walk_expression(left, out);
-            walk_expression(right, out);
-        }
-        Expression::FunctionCall { args, .. } => {
-            for arg in args {
-                walk_expression(arg, out);
-            }
-        }
-        Expression::Literal { .. } | Expression::Star => {}
-        Expression::SubQuery { query } => walk_plan(query, out),
-    }
-}
+struct ColumnCollector;
 
-fn walk_plan(plan: &QueryPlan, out: &mut BTreeSet<ColumnRef>) {
-    for projection in &plan.select {
-        match projection {
-            Projection::Column { table, column, .. } => {
-                out.insert((table.clone(), column.clone()));
-            }
-            Projection::Expr { expression, .. } => {
-                walk_expression(expression, out);
-            }
-            Projection::Star { .. } => {}
-        }
-    }
-    if let Some(predicate) = &plan.r#where {
-        walk_predicate(predicate, out);
-    }
-    if let Some(expressions) = &plan.group_by {
-        for expression in expressions {
-            walk_expression(expression, out);
-        }
-    }
-    if let Some(predicate) = &plan.having {
-        walk_predicate(predicate, out);
-    }
-    if let Some(terms) = &plan.order_by {
-        for term in terms {
-            walk_expression(&term.expr, out);
-        }
-    }
-    if let Some(joins) = &plan.joins {
-        for join in joins {
-            walk_predicate(&join.on, out);
-        }
-    }
-    if let Some(ctes) = &plan.ctes {
-        for cte in ctes {
-            walk_plan(&cte.query, out);
+impl ExpressionVisit for ColumnCollector {
+    type Ctx = HashSet<ColumnRef>;
+
+    fn visit_expression(&mut self, expr: &Expression, ctx: &mut Self::Ctx) {
+        if let Expression::ColumnRef { table, column } = expr {
+            ctx.insert((table.clone(), column.clone()));
         }
     }
 }
@@ -232,8 +152,6 @@ mod tests {
         assert_eq!(conjuncts.len(), 3);
 
         let recombined = combine_conjuncts(conjuncts).unwrap();
-        // Recombination is left-associated but semantically equivalent;
-        // splitting it again yields the same three conjuncts.
         assert_eq!(split_conjuncts(&recombined).len(), 3);
     }
 

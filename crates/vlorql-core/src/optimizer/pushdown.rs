@@ -25,18 +25,19 @@
 //! doing so would change the join's semantics (it would suppress the
 //! null-extended rows the outer join is meant to keep).
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{HashMap, HashSet};
 
 use crate::errors::VlorQLError;
-use crate::schema::{JoinType, Predicate, QueryPlan};
+use crate::schema::{Expression, JoinType, Predicate, QueryPlan};
 
 use super::analyze::{combine_conjuncts, referenced_tables, split_conjuncts};
 use super::rules::PlanRewriter;
+use super::visitor::ExpressionFold;
 
 /// Pushes single-relation `WHERE` conjuncts down into the CTEs they
 /// filter.
 ///
-/// See the [module documentation](self) for the exact rules and the
+/// See the [module documentation](super) for the exact rules and the
 /// limitations imposed by the plan model.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct PredicatePushdown;
@@ -80,7 +81,7 @@ fn push_plan(plan: &QueryPlan) -> QueryPlan {
     // Map every relation alias visible in this query to the CTE it
     // resolves to. A relation whose table name is not a CTE (i.e. a base
     // table) is intentionally absent, so conjuncts over it never move.
-    let cte_names: BTreeSet<&str> = plan
+    let cte_names: HashSet<&str> = plan
         .ctes
         .as_ref()
         .into_iter()
@@ -111,11 +112,83 @@ fn push_plan(plan: &QueryPlan) -> QueryPlan {
     // Rebuild the outer WHERE from the conjuncts that stayed.
     plan.r#where = combine_conjuncts(kept);
 
-    // Inject each pushed conjunct into its CTE's WHERE.
+    // Inject each pushed conjunct into its CTE's WHERE. For CTEs whose
+    // body's FROM clause references another CTE at the same level, try to
+    // cascade the pushdown further (multi-layer CTE support).
+    //
+    // We use a two-phase approach to avoid borrow conflicts:
+    // Phase 1: collect cascade targets (inner CTE → conditions).
+    // Phase 2: apply cascades and local injections.
     if let Some(ctes) = plan.ctes.as_mut() {
+        let cte_names_set: HashSet<&str> =
+            ctes.iter().map(|cte| cte.name.as_str()).collect();
+
+        // Phase 1: decide what goes where.
+        let mut cascade_targets: Vec<(String, Vec<Predicate>)> = Vec::new();
+        // Phase 1b: conditions that stay in the outer CTE, keyed by CTE name.
+        let mut local_injections: Vec<(String, Vec<Predicate>)> = Vec::new();
+
+        for cte in ctes.iter() {
+            let Some(conjuncts) = pushed.get(&cte.name) else {
+                continue;
+            };
+
+            let inner_table = cte.query.from.table.as_str();
+            if cte_names_set.contains(inner_table) {
+                let inner_alias = cte
+                    .query
+                    .from
+                    .alias
+                    .as_deref()
+                    .unwrap_or(inner_table);
+
+                let mut cascade: Vec<Predicate> = Vec::new();
+                let mut local: Vec<Predicate> = Vec::new();
+
+                for conjunct in conjuncts {
+                    let translated =
+                        translate_qualifier(conjunct, &cte.name, inner_alias);
+
+                    let mut inner_alias_map = HashMap::new();
+                    inner_alias_map
+                        .insert(inner_alias.to_owned(), inner_table.to_owned());
+                    let inner_protected =
+                        outer_join_protected_aliases(&cte.query);
+
+                    if single_cte_target(
+                        &translated,
+                        &inner_alias_map,
+                        &inner_protected,
+                    )
+                    .is_some()
+                    {
+                        cascade.push(translated);
+                    } else {
+                        local.push(conjunct.clone());
+                    }
+                }
+
+                if !cascade.is_empty() {
+                    cascade_targets.push((inner_table.to_owned(), cascade));
+                }
+                if !local.is_empty() {
+                    local_injections.push((cte.name.clone(), local));
+                }
+            } else {
+                // Normal case: all conditions stay in this CTE.
+                local_injections.push((cte.name.clone(), conjuncts.clone()));
+            }
+        }
+
+        // Phase 2: apply injections.
         for cte in ctes.iter_mut() {
-            if let Some(conjuncts) = pushed.remove(&cte.name) {
-                inject_into_cte(&mut cte.query, conjuncts);
+            // First, apply cascaded conditions from outer CTEs targeting this one.
+            if let Some((_, conds)) = cascade_targets.iter().find(|(name, _)| name == &cte.name) {
+                inject_into_cte(&mut cte.query, conds.clone());
+            }
+            // Then, apply local conditions (conditions that target this CTE directly).
+            if let Some((_, conds)) = local_injections.iter().find(|(name, _)| name == &cte.name) {
+                inject_into_cte(&mut cte.query, conds.clone());
             }
         }
     }
@@ -152,7 +225,7 @@ fn inject_into_cte(cte_query: &mut QueryPlan, conjuncts: Vec<Predicate>) {
 fn single_cte_target(
     conjunct: &Predicate,
     alias_to_cte: &HashMap<String, String>,
-    protected: &BTreeSet<String>,
+    protected: &HashSet<String>,
 ) -> Option<String> {
     let tables = referenced_tables(conjunct);
 
@@ -178,7 +251,7 @@ fn single_cte_target(
 /// The key is the identifier a `WHERE` column would use to qualify
 /// itself: the alias when present, otherwise the table name. Only
 /// relations whose underlying table is a CTE are included.
-fn cte_relation_aliases(plan: &QueryPlan, cte_names: &BTreeSet<&str>) -> HashMap<String, String> {
+fn cte_relation_aliases(plan: &QueryPlan, cte_names: &HashSet<&str>) -> HashMap<String, String> {
     let mut map = HashMap::new();
 
     let mut record = |table: &str, alias: &Option<String>| {
@@ -204,8 +277,8 @@ fn cte_relation_aliases(plan: &QueryPlan, cte_names: &BTreeSet<&str>) -> HashMap
 /// For a `LEFT` join the right side is null-supplying; for a `RIGHT`
 /// join the left side (`FROM` and every preceding relation) is; a `FULL`
 /// join protects both. `INNER`/`CROSS` joins protect nothing.
-fn outer_join_protected_aliases(plan: &QueryPlan) -> BTreeSet<String> {
-    let mut protected = BTreeSet::new();
+fn outer_join_protected_aliases(plan: &QueryPlan) -> HashSet<String> {
+    let mut protected = HashSet::new();
     let Some(joins) = plan.joins.as_ref() else {
         return protected;
     };
@@ -263,75 +336,54 @@ fn outer_join_protected_aliases(plan: &QueryPlan) -> BTreeSet<String> {
 /// predicate, so a conjunct written against the outer CTE alias resolves
 /// against the CTE body's own relations.
 fn strip_qualifiers(pred: &Predicate) -> Predicate {
-    use crate::schema::{Expression, InTarget};
+    QualifierStripper.fold_predicate(pred)
+}
 
-    fn strip_expr(expr: &Expression) -> Expression {
+/// Replaces the table qualifier on every column reference in a predicate,
+/// translating from `from_qualifier` to `to_qualifier`. This is used for
+/// multi-layer CTE pushdown: when a condition qualified with the outer CTE
+/// name is pushed into a CTE whose FROM clause references another CTE, the
+/// qualifier is translated to the inner CTE's alias so the condition can be
+/// pushed further.
+fn translate_qualifier(pred: &Predicate, from_qualifier: &str, to_qualifier: &str) -> Predicate {
+    QualifierTranslator {
+        from: from_qualifier.to_owned(),
+        to: to_qualifier.to_owned(),
+    }
+    .fold_predicate(pred)
+}
+
+struct QualifierStripper;
+
+impl ExpressionFold for QualifierStripper {
+    fn fold_expression(&mut self, expr: &Expression) -> Expression {
         match expr {
             Expression::ColumnRef { column, .. } => Expression::ColumnRef {
                 table: None,
                 column: column.clone(),
             },
-            Expression::BinaryOp { left, op, right } => Expression::BinaryOp {
-                left: Box::new(strip_expr(left)),
-                op: *op,
-                right: Box::new(strip_expr(right)),
-            },
-            Expression::FunctionCall {
-                name,
-                args,
-                distinct,
-            } => Expression::FunctionCall {
-                name: name.clone(),
-                args: args.iter().map(strip_expr).collect(),
-                distinct: *distinct,
-            },
-            Expression::Literal { .. } | Expression::Star | Expression::SubQuery { .. } => {
-                expr.clone()
-            }
+            other => super::visitor::default_fold_expression(self, other),
         }
     }
+}
 
-    match pred {
-        Predicate::Comparison { left, op, right } => Predicate::Comparison {
-            left: strip_expr(left),
-            op: *op,
-            right: strip_expr(right),
-        },
-        Predicate::And { left, right } => Predicate::And {
-            left: Box::new(strip_qualifiers(left)),
-            right: Box::new(strip_qualifiers(right)),
-        },
-        Predicate::Or { left, right } => Predicate::Or {
-            left: Box::new(strip_qualifiers(left)),
-            right: Box::new(strip_qualifiers(right)),
-        },
-        Predicate::Not { child } => Predicate::Not {
-            child: Box::new(strip_qualifiers(child)),
-        },
-        Predicate::Between { expr, low, high } => Predicate::Between {
-            expr: strip_expr(expr),
-            low: strip_expr(low),
-            high: strip_expr(high),
-        },
-        Predicate::In { expr, target } => Predicate::In {
-            expr: strip_expr(expr),
-            target: match target {
-                InTarget::Values(values) => {
-                    InTarget::Values(values.iter().map(strip_expr).collect())
+/// A fold that replaces a specific table qualifier with another.
+struct QualifierTranslator {
+    from: String,
+    to: String,
+}
+
+impl ExpressionFold for QualifierTranslator {
+    fn fold_expression(&mut self, expr: &Expression) -> Expression {
+        match expr {
+            Expression::ColumnRef { table: Some(t), column } if t == &self.from => {
+                Expression::ColumnRef {
+                    table: Some(self.to.clone()),
+                    column: column.clone(),
                 }
-                InTarget::SubQuery(query) => InTarget::SubQuery(query.clone()),
-            },
-        },
-        Predicate::Exists { query } => Predicate::Exists {
-            query: query.clone(),
-        },
-        Predicate::Like { expr, pattern } => Predicate::Like {
-            expr: strip_expr(expr),
-            pattern: pattern.clone(),
-        },
-        Predicate::IsNull { expr } => Predicate::IsNull {
-            expr: strip_expr(expr),
-        },
+            }
+            other => super::visitor::default_fold_expression(self, other),
+        }
     }
 }
 

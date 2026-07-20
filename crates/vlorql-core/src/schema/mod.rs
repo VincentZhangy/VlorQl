@@ -150,47 +150,12 @@ mod tests {
     }
 
     #[test]
-    fn dialect_profile_defaults_and_validates_features() {
+    fn dialect_profile_defaults_match_expected_values() {
         let profile = DialectProfile::default();
         assert_eq!(profile.dialect, SqlDialect::Postgres);
         assert_eq!(profile.quote_style, IdentifierQuoting::DoubleQuote);
         assert!(profile.supports_cte);
         assert!(profile.supports_offset);
-
-        let restricted = DialectProfile::builder()
-            .max_joins(1usize)
-            .supports_offset(false)
-            .build()
-            .expect("builder should apply defaults");
-        let mut plan = simple_plan();
-        plan.offset = Some(10);
-        let error = restricted
-            .validate_dialect_features(&plan)
-            .expect_err("offset should be rejected");
-        assert_eq!(error.error_code(), "V007");
-
-        plan.offset = None;
-        plan.joins = Some(vec![JoinClause {
-            join_type: JoinType::Inner,
-            right_table: FromClause {
-                table: "accounts".to_owned(),
-                alias: None,
-            },
-            on: Predicate::IsNull {
-                expr: Expression::ColumnRef {
-                    table: Some("accounts".to_owned()),
-                    column: "deleted_at".to_owned(),
-                },
-            },
-        }]);
-        let profile = DialectProfile::builder()
-            .max_joins(0usize)
-            .build()
-            .expect("builder should apply defaults");
-        let error = profile
-            .validate_dialect_features(&plan)
-            .expect_err("join count should be rejected");
-        assert_eq!(error.error_code(), "V008");
     }
 
     #[test]

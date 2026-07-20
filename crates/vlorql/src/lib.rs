@@ -616,7 +616,7 @@ impl VlorQlBuilder {
     /// Supplies a statistics provider used for cost-based query optimisation.
     ///
     /// When set, the built [`VlorQl`] facade will run the
-    /// [`QueryOptimizer`](vlorql_core::optimizer::QueryOptimizer) after
+    /// [`QueryOptimizer`] after
     /// validation succeeds, applying constant folding, predicate pushdown,
     /// column pruning, and (when statistics are available) cost-based join
     /// reordering.

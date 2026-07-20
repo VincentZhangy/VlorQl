@@ -181,7 +181,6 @@ impl VlorQLError {
             Self::Policy { kind, .. } => match kind {
                 PolicyErrorKind::TableDenied { .. } => "P001",
                 PolicyErrorKind::ColumnDenied { .. } => "P002",
-                PolicyErrorKind::RowFilterMismatch { .. } => "P003",
             },
             Self::Compilation { kind, .. } => match kind {
                 CompilationErrorKind::UnsupportedDialectFeature { .. } => "C001",
@@ -232,6 +231,9 @@ impl VlorQLError {
                 kind,
                 ValidationErrorKind::InvalidJson
                     | ValidationErrorKind::MissingField { .. }
+                    | ValidationErrorKind::InvalidTable { .. }
+                    | ValidationErrorKind::InvalidColumn { .. }
+                    | ValidationErrorKind::InvalidFunction { .. }
                     | ValidationErrorKind::TypeMismatch { .. }
             ),
             Self::Llm { .. } => true,
@@ -802,15 +804,6 @@ mod tests {
             json!({}),
         );
         assert_code_and_suggestion(&column, "P002", Some(shared_suggestion));
-
-        let row = VlorQLError::policy(
-            PolicyErrorKind::RowFilterMismatch {
-                table: "users".to_owned(),
-                reason: "missing predicate".to_owned(),
-            },
-            json!({}),
-        );
-        assert_code_and_suggestion(&row, "P003", Some(shared_suggestion));
     }
 
     #[test]

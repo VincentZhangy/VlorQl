@@ -39,7 +39,7 @@
 //! [`DEFAULT_JOIN_SELECTIVITY`](crate::statistics::DEFAULT_JOIN_SELECTIVITY)
 //! when their selectivity cannot be derived from column statistics.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::errors::VlorQLError;
@@ -81,9 +81,11 @@ impl Relation {
 struct Conjunct {
     /// The predicate itself, re-emitted verbatim when rewriting.
     pred: Predicate,
-    /// Indices (into [`JoinGraph::relations`]) of every relation this
-    /// conjunct references through a qualified column.
-    tables: BTreeSet<usize>,
+    /// Bitmask of relation indices (into [`JoinGraph::relations`]) that this
+    /// conjunct references through a qualified column. Bit `i` is set when
+    /// relation `i` is referenced. Using a `u32` bitmask instead of a
+    /// `HashSet` makes [`JoinGraph::connecting`] a pure bitwise operation.
+    tables: u32,
     /// `true` when the conjunct has a column that could not be attributed
     /// to a known relation (an unqualified reference, or a qualifier that
     /// matches no relation key). Such a conjunct is placed on the final
@@ -96,7 +98,7 @@ struct Conjunct {
 ///
 /// Build one from a plan with [`JoinGraph::build`]. The graph only
 /// exists for plans that are safe to reorder; [`JoinGraph::build`]
-/// returns `None` for everything else (see the [module docs](self)).
+/// returns `None` for everything else (see the [module docs](super)).
 #[derive(Debug, Clone)]
 pub struct JoinGraph {
     /// The relations to be joined, in the plan's original order
@@ -145,12 +147,12 @@ impl JoinGraph {
         let mut conjuncts = Vec::new();
         for join in joins {
             for pred in split_conjuncts(&join.on) {
-                let mut tables = BTreeSet::new();
+                let mut tables: u32 = 0;
                 let mut ambiguous = false;
                 for (qualifier, _column) in columns_in_predicate(&pred) {
                     match qualifier.and_then(|q| key_index.get(&q).copied()) {
                         Some(index) => {
-                            tables.insert(index);
+                            tables |= 1u32 << index;
                         }
                         None => ambiguous = true,
                     }
@@ -193,13 +195,15 @@ impl JoinGraph {
         }
 
         for conjunct in conjuncts {
-            if conjunct.ambiguous || conjunct.tables.len() != 2 {
+            if conjunct.ambiguous || conjunct.tables.count_ones() != 2 {
                 continue;
             }
-            let mut it = conjunct.tables.iter();
-            let a = find(&mut parent, *it.next().expect("two elements"));
-            let b = find(&mut parent, *it.next().expect("two elements"));
-            parent[a] = b;
+            let bits = conjunct.tables;
+            let a = bits.trailing_zeros() as usize;
+            let b = (bits & !(1u32 << a)).trailing_zeros() as usize;
+            let ra = find(&mut parent, a);
+            let rb = find(&mut parent, b);
+            parent[ra] = rb;
         }
 
         let root = find(&mut parent, 0);
@@ -207,24 +211,27 @@ impl JoinGraph {
     }
 
     /// Returns the conjunct indices that connect `j` to the relations
-    /// already in `in_set` — i.e. conjuncts fully covered by
-    /// `in_set ∪ {j}` that reference `j` (either as a join edge to the
+    /// already in `in_set_mask` — i.e. conjuncts fully covered by
+    /// `in_set_mask ∪ {j}` that reference `j` (either as a join edge to the
     /// set, or as a single-table filter on `j`).
-    fn connecting(&self, in_set: &[bool], j: usize) -> Vec<usize> {
+    fn connecting(&self, in_set_mask: u32, j: usize) -> Vec<usize> {
+        let j_bit = 1u32 << j;
+        let needed = in_set_mask | j_bit;
         self.conjuncts
             .iter()
             .enumerate()
             .filter(|(_, conjunct)| {
-                if conjunct.ambiguous || !conjunct.tables.contains(&j) {
+                if conjunct.ambiguous || conjunct.tables & j_bit == 0 {
                     return false;
                 }
                 // Every referenced relation must already be available.
-                if !conjunct.tables.iter().all(|&t| t == j || in_set[t]) {
+                let remaining = conjunct.tables & !needed;
+                if remaining != 0 {
                     return false;
                 }
                 // Either a single-table filter on `j`, or it touches the
                 // existing set (a genuine join edge).
-                conjunct.tables.len() == 1 || conjunct.tables.iter().any(|&t| in_set[t])
+                conjunct.tables == j_bit || (conjunct.tables & in_set_mask) != 0
             })
             .map(|(index, _)| index)
             .collect()
@@ -253,16 +260,23 @@ impl JoinGraph {
 
         let mut steps = vec![Vec::new(); n];
         for (index, conjunct) in self.conjuncts.iter().enumerate() {
-            let step = if conjunct.ambiguous || conjunct.tables.is_empty() {
+            let step = if conjunct.ambiguous || conjunct.tables == 0 {
                 n - 1
+            } else if conjunct.tables.count_ones() == 1 {
+                // Single-table filter: apply at the step that introduces
+                // the table. For the seed (step 0) this means the first
+                // join step (step 1), since there is no ON clause on the
+                // `from` relation itself.
+                let t = conjunct.tables.trailing_zeros() as usize;
+                position[t].max(1)
             } else {
-                conjunct
-                    .tables
-                    .iter()
-                    .map(|&t| position[t])
+                // Multi-table conjunct: place on the latest-introduced
+                // relation's step.
+                (0..n)
+                    .filter(|&i| conjunct.tables & (1u32 << i) != 0)
+                    .map(|t| position[t])
                     .max()
                     .expect("non-empty table set")
-                    .max(1)
             };
             steps[step].push(index);
         }
@@ -274,7 +288,7 @@ impl JoinGraph {
 ///
 /// Holds a [`CostEstimator`] (a cheap `Arc` handle to a statistics
 /// provider) and rewrites a [`QueryPlan`]'s join order to minimize
-/// estimated cost. See the [module docs](self) for the algorithm and the
+/// estimated cost. See the [module docs](super) for the algorithm and the
 /// safety guarantees.
 #[derive(Debug, Clone)]
 pub struct JoinReorderer {
@@ -408,8 +422,7 @@ impl JoinReorderer {
             .min_by(|&a, &b| base_card[a].cmp(&base_card[b]).then(a.cmp(&b)))
             .unwrap_or(0);
 
-        let mut in_set = vec![false; n];
-        in_set[seed] = true;
+        let mut in_set: u32 = 1u32 << seed;
         let mut order = vec![seed];
         let mut running_cost = scan_cost[seed];
         let mut running_card = base_card[seed];
@@ -420,15 +433,15 @@ impl JoinReorderer {
             // back to unconnected candidates if none are connected.
             for connected_only in [true, false] {
                 for j in 0..n {
-                    if in_set[j] {
+                    if in_set & (1u32 << j) != 0 {
                         continue;
                     }
-                    let connections = graph.connecting(&in_set, j);
+                    let connections = graph.connecting(in_set, j);
                     if connected_only && connections.is_empty() {
                         continue;
                     }
                     let card =
-                        self.step_cardinality(graph, &in_set, running_card, base_card[j], j).await?;
+                        self.step_cardinality(graph, in_set, running_card, base_card[j], j).await?;
                     let candidate = self.cost.estimate_join(running_cost, scan_cost[j], card);
                     let score = candidate.total();
                     if best.is_none_or(|(best_score, ..)| score < best_score) {
@@ -442,10 +455,10 @@ impl JoinReorderer {
 
             let Some((_, j, cost, card)) = best else {
                 // No candidate found — append remaining relations and stop.
-                order.extend((0..n).filter(|&j| !in_set[j]));
+                order.extend((0..n).filter(|&j| in_set & (1u32 << j) == 0));
                 break;
             };
-            in_set[j] = true;
+            in_set |= 1u32 << j;
             order.push(j);
             running_cost = cost;
             running_card = card;
@@ -487,18 +500,17 @@ impl JoinReorderer {
             let Some(entry) = dp.get(&mask).cloned() else {
                 continue;
             };
-            let in_set: Vec<bool> = (0..n).map(|i| mask & (1u32 << i) != 0).collect();
 
             for j in 0..n {
                 if mask & (1u32 << j) != 0 {
                     continue;
                 }
-                let connections = graph.connecting(&in_set, j);
+                let connections = graph.connecting(mask, j);
                 if connections.is_empty() {
                     continue; // keep growth connected
                 }
                 let card = self
-                    .step_cardinality(graph, &in_set, entry.card, base_card[j], j)
+                    .step_cardinality(graph, mask, entry.card, base_card[j], j)
                     .await?;
                 let cost = self.cost.estimate_join(entry.cost, scan_cost[j], card);
                 let new_mask = mask | (1u32 << j);
@@ -546,36 +558,34 @@ impl JoinReorderer {
         base_card: &[u64],
         scan_cost: &[Cost],
     ) -> Result<(Cost, u64), VlorQLError> {
-        let n = graph.relation_count();
-        let mut in_set = vec![false; n];
         let seed = order[0];
-        in_set[seed] = true;
+        let mut in_set: u32 = 1u32 << seed;
         let mut cost = scan_cost[seed];
         let mut card = base_card[seed];
 
         for &j in &order[1..] {
             let step_card = self
-                .step_cardinality(graph, &in_set, card, base_card[j], j)
+                .step_cardinality(graph, in_set, card, base_card[j], j)
                 .await?;
             cost = self.cost.estimate_join(cost, scan_cost[j], step_card);
             card = step_card;
-            in_set[j] = true;
+            in_set |= 1u32 << j;
         }
         Ok((cost, card))
     }
 
     /// Estimates the cardinality of joining relation `j` onto the set in
-    /// `in_set`, using the conjuncts that connect them (or a default
+    /// `in_set_mask`, using the conjuncts that connect them (or a default
     /// selectivity when none apply).
     async fn step_cardinality(
         &self,
         graph: &JoinGraph,
-        in_set: &[bool],
+        in_set_mask: u32,
         running_card: u64,
         base_j: u64,
         j: usize,
     ) -> Result<u64, VlorQLError> {
-        let connections = graph.connecting(in_set, j);
+        let connections = graph.connecting(in_set_mask, j);
         match graph.combine(&connections) {
             Some(pred) => {
                 self.cost
@@ -634,6 +644,7 @@ fn true_predicate() -> Predicate {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashSet;
     use crate::schema::{
         ComparisonOperator, Expression, FromClause, JoinClause, JoinType, Predicate, Projection,
         QueryPlan,
@@ -727,8 +738,8 @@ mod tests {
         out
     }
 
-    fn relation_names(plan: &QueryPlan) -> BTreeSet<String> {
-        let mut names = BTreeSet::new();
+    fn relation_names(plan: &QueryPlan) -> HashSet<String> {
+        let mut names = HashSet::new();
         names.insert(plan.from.table.clone());
         if let Some(joins) = &plan.joins {
             for join in joins {

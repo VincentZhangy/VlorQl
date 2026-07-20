@@ -33,6 +33,7 @@ mod join_reorder;
 mod prune;
 mod pushdown;
 mod rules;
+pub(crate) mod visitor;
 
 pub use fold::ConstantFolding;
 pub use join_reorder::{JoinGraph, JoinReorderer, MAX_DP_RELATIONS};
@@ -128,6 +129,13 @@ impl QueryOptimizer {
     /// pushdown, column pruning) to the plan.
     pub fn optimize(&self, plan: &QueryPlan) -> Result<QueryPlan, VlorQLError> {
         self.pipeline.rewrite(plan)
+    }
+
+    /// Applies the rewrite pipeline in fixed-point iteration (up to
+    /// `max_rounds`) until the plan stabilizes. See
+    /// [`RewriterPipeline::repeat_until_stable`].
+    pub fn optimize_repeat(&self, plan: &QueryPlan, max_rounds: usize) -> Result<QueryPlan, VlorQLError> {
+        self.pipeline.repeat_until_stable(plan, max_rounds)
     }
 
     /// Applies all rewrite rules **and**, if enabled, cost-based join
@@ -867,6 +875,208 @@ mod tests {
         assert!(
             cte_cols.contains(&"status"),
             "selected column `status` must be preserved: got {cte_cols:?}"
+        );
+    }
+
+    #[test]
+    fn repeat_until_stable_converges_in_one_round_when_already_stable() {
+        // A plan with no CTEs and no foldable expressions reaches fixpoint
+        // immediately.
+        let plan = QueryPlan {
+            select: vec![column_projection(None, "id")],
+            from: FromClause { table: "t".to_owned(), alias: None },
+            r#where: None, group_by: None, having: None,
+            order_by: None, limit: None, offset: None, joins: None, ctes: None,
+        };
+        let pipeline = RewriterPipeline::new()
+            .with(ConstantFolding)
+            .with(PredicatePushdown)
+            .with(ColumnPruning::new());
+        let result = pipeline.repeat_until_stable(&plan, 5).unwrap();
+        assert_eq!(result.select.len(), 1);
+    }
+
+    #[test]
+    fn repeat_until_stable_preserves_equivalence() {
+        // A plan with a foldable expression should still fold correctly
+        // under repeat_until_stable.
+        let plan = QueryPlan {
+            select: vec![Projection::Expr {
+                expression: Expression::BinaryOp {
+                    left: Box::new(Expression::Literal { value: 10.into(), data_type: DataType::Int }),
+                    op: BinaryOperator::Add,
+                    right: Box::new(Expression::Literal { value: 20.into(), data_type: DataType::Int }),
+                },
+                alias: Some("total".to_owned()),
+            }],
+            from: FromClause { table: "t".to_owned(), alias: None },
+            r#where: None, group_by: None, having: None,
+            order_by: None, limit: None, offset: None, joins: None, ctes: None,
+        };
+        let pipeline = RewriterPipeline::new().with(ConstantFolding);
+        let result = pipeline.repeat_until_stable(&plan, 3).unwrap();
+        assert_eq!(
+            result.select[0],
+            Projection::Expr {
+                expression: Expression::Literal { value: 30.into(), data_type: DataType::Int },
+                alias: Some("total".to_owned()),
+            },
+        );
+    }
+
+    #[test]
+    fn optimize_repeat_exposes_fixpoint_method() {
+        let plan = QueryPlan {
+            select: vec![column_projection(None, "id")],
+            from: FromClause { table: "t".to_owned(), alias: None },
+            r#where: None, group_by: None, having: None,
+            order_by: None, limit: None, offset: None, joins: None, ctes: None,
+        };
+        let optimizer = QueryOptimizer::rewrites_only();
+        let result = optimizer.optimize_repeat(&plan, 3).unwrap();
+        assert_eq!(result.select.len(), 1);
+    }
+
+    #[test]
+    fn multi_layer_cte_pushdown_cascades_through_nested_ctes() {
+        // Two CTEs where the outer one references the inner one:
+        //   WITH
+        //     cte2 AS (SELECT id, val FROM t2),
+        //     cte1 AS (SELECT * FROM cte2)
+        //   SELECT * FROM cte1 WHERE cte1.val > 10
+        // The condition `cte1.val > 10` should be pushed into cte2.
+        let cte2_body = QueryPlan {
+            select: vec![
+                column_projection(None, "id"),
+                column_projection(None, "val"),
+            ],
+            from: FromClause { table: "t2".to_owned(), alias: None },
+            r#where: None, group_by: None, having: None,
+            order_by: None, limit: None, offset: None, joins: None, ctes: None,
+        };
+        let cte1_body = QueryPlan {
+            select: vec![Projection::Star { table: None }],
+            from: FromClause { table: "cte2".to_owned(), alias: None },
+            r#where: None, group_by: None, having: None,
+            order_by: None, limit: None, offset: None, joins: None, ctes: None,
+        };
+        let plan = QueryPlan {
+            select: vec![Projection::Star { table: None }],
+            from: FromClause { table: "cte1".to_owned(), alias: None },
+            r#where: Some(compare(
+                col(Some("cte1"), "val"),
+                ComparisonOperator::Gt,
+                int(10),
+            )),
+            group_by: None, having: None,
+            order_by: None, limit: None, offset: None, joins: None,
+            ctes: Some(vec![
+                CommonTableExpression {
+                    name: "cte2".to_owned(),
+                    query: Box::new(cte2_body),
+                },
+                CommonTableExpression {
+                    name: "cte1".to_owned(),
+                    query: Box::new(cte1_body),
+                },
+            ]),
+        };
+
+        let pipeline = RewriterPipeline::new().with(PredicatePushdown);
+        let result = pipeline.rewrite(&plan).unwrap();
+
+        // The outer WHERE should be empty (condition was pushed down).
+        assert!(result.r#where.is_none(), "outer WHERE should be empty after pushdown");
+
+        // cte1's WHERE should be empty (condition was further pushed into cte2).
+        let cte1 = result.ctes.as_ref().unwrap().iter()
+            .find(|cte| cte.name == "cte1")
+            .expect("cte1 should exist");
+        assert!(
+            cte1.query.r#where.is_none(),
+            "cte1 WHERE should be empty after cascade pushdown: {:?}",
+            cte1.query.r#where
+        );
+
+        // cte2 should have the condition in its WHERE.
+        let cte2 = result.ctes.as_ref().unwrap().iter()
+            .find(|cte| cte.name == "cte2")
+            .expect("cte2 should exist");
+        assert!(
+            cte2.query.r#where.is_some(),
+            "cte2 should have the pushed condition: {:?}",
+            cte2.query.r#where
+        );
+    }
+
+    #[test]
+    fn multi_layer_cte_pushdown_with_alias() {
+        // Same as above but cte1 uses an alias for cte2:
+        //   WITH
+        //     cte2 AS (SELECT id, val FROM t2),
+        //     cte1 AS (SELECT * FROM cte2 AS inner_c)
+        //   SELECT * FROM cte1 WHERE cte1.val > 10
+        let cte2_body = QueryPlan {
+            select: vec![
+                column_projection(None, "id"),
+                column_projection(None, "val"),
+            ],
+            from: FromClause { table: "t2".to_owned(), alias: None },
+            r#where: None, group_by: None, having: None,
+            order_by: None, limit: None, offset: None, joins: None, ctes: None,
+        };
+        let cte1_body = QueryPlan {
+            select: vec![Projection::Star { table: None }],
+            from: FromClause { table: "cte2".to_owned(), alias: Some("inner_c".to_owned()) },
+            r#where: None, group_by: None, having: None,
+            order_by: None, limit: None, offset: None, joins: None, ctes: None,
+        };
+        let plan = QueryPlan {
+            select: vec![Projection::Star { table: None }],
+            from: FromClause { table: "cte1".to_owned(), alias: None },
+            r#where: Some(compare(
+                col(Some("cte1"), "val"),
+                ComparisonOperator::Gt,
+                int(10),
+            )),
+            group_by: None, having: None,
+            order_by: None, limit: None, offset: None, joins: None,
+            ctes: Some(vec![
+                CommonTableExpression {
+                    name: "cte2".to_owned(),
+                    query: Box::new(cte2_body),
+                },
+                CommonTableExpression {
+                    name: "cte1".to_owned(),
+                    query: Box::new(cte1_body),
+                },
+            ]),
+        };
+
+        let pipeline = RewriterPipeline::new().with(PredicatePushdown);
+        let result = pipeline.rewrite(&plan).unwrap();
+
+        // The outer WHERE should be empty.
+        assert!(result.r#where.is_none(), "outer WHERE should be empty");
+
+        // cte1's WHERE should be empty.
+        let cte1 = result.ctes.as_ref().unwrap().iter()
+            .find(|cte| cte.name == "cte1")
+            .expect("cte1 should exist");
+        assert!(
+            cte1.query.r#where.is_none(),
+            "cte1 WHERE should be empty after cascade: {:?}",
+            cte1.query.r#where
+        );
+
+        // cte2 should have the condition.
+        let cte2 = result.ctes.as_ref().unwrap().iter()
+            .find(|cte| cte.name == "cte2")
+            .expect("cte2 should exist");
+        assert!(
+            cte2.query.r#where.is_some(),
+            "cte2 should have the pushed condition: {:?}",
+            cte2.query.r#where
         );
     }
 }

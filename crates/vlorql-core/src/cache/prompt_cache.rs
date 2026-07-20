@@ -13,9 +13,10 @@ use xxhash_rust::xxh3::Xxh3;
 
 /// Key used to identify a cached system prompt.
 ///
-/// The key captures the schema version, the SQL dialect, and a hash of
-/// the policy configuration.  Two `PromptBuilder` instances with the
-/// same key produce the same prompt string.
+/// The key captures the schema version, the SQL dialect, a hash of
+/// the policy configuration, and a hash of the relevant table set.
+/// Two `PromptBuilder` instances with the same key produce the same
+/// prompt string.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct PromptCacheKey {
     /// Schema version string (e.g. `"v1.2.3"`).
@@ -24,32 +25,36 @@ pub struct PromptCacheKey {
     pub dialect: SqlDialect,
     /// 64-bit hash of the policy configuration.
     pub policy_hash: u64,
+    /// 64-bit hash of the relevant table names selected for this question.
+    pub table_hash: u64,
 }
 
 impl PromptCacheKey {
     /// Creates a new key from the builder's parameters.
     ///
-    /// The policy hash is computed from the JSON representation of
-    /// [`PolicyConfig`] so that any change to the policy (table
-    /// allowlists, denied columns, row filters) produces a different
-    /// key.
+    /// `policy_hash` should be computed with `hash_policy` so that any
+    /// change to the policy (table allowlists, denied columns, row filters)
+    /// produces a different key.  `table_hash` captures which tables are
+    /// relevant to the user question, so different questions that match
+    /// different table sets produce different cache entries.
     pub fn new(
         schema_version: &str,
         dialect: &DialectProfile,
-        policy: &PolicyConfig,
+        policy_hash: u64,
+        table_hash: u64,
     ) -> Self {
-        let policy_hash = hash_policy(policy);
         Self {
             schema_version: schema_version.to_owned(),
             dialect: dialect.dialect,
             policy_hash,
+            table_hash,
         }
     }
 }
 
 /// Computes a 64-bit hash of a [`PolicyConfig`] by serialising it to
 /// JSON and hashing the bytes with xxh3.
-fn hash_policy(policy: &PolicyConfig) -> u64 {
+pub(crate) fn hash_policy(policy: &PolicyConfig) -> u64 {
     let json = serde_json::to_value(policy).expect("PolicyConfig should serialize to JSON");
     let canonical = serde_json::to_string(&json).expect("JSON should serialize to string");
     let mut hasher = Xxh3::new();
@@ -139,18 +144,18 @@ mod tests {
     use std::collections::HashMap;
 
     fn key_v1() -> PromptCacheKey {
-        PromptCacheKey::new("v1", &DialectProfile::default(), &PolicyConfig::default())
+        PromptCacheKey::new("v1", &DialectProfile::default(), hash_policy(&PolicyConfig::default()), 0)
     }
 
     fn key_v2() -> PromptCacheKey {
-        PromptCacheKey::new("v2", &DialectProfile::default(), &PolicyConfig::default())
+        PromptCacheKey::new("v2", &DialectProfile::default(), hash_policy(&PolicyConfig::default()), 0)
     }
 
     /// Same configuration → same key.
     #[test]
     fn same_config_same_key() {
         let a = key_v1();
-        let b = PromptCacheKey::new("v1", &DialectProfile::default(), &PolicyConfig::default());
+        let b = PromptCacheKey::new("v1", &DialectProfile::default(), hash_policy(&PolicyConfig::default()), 0);
         assert_eq!(a, b);
     }
 
@@ -165,14 +170,15 @@ mod tests {
     /// Different dialect → different key.
     #[test]
     fn different_dialect_different_key() {
-        let pg = PromptCacheKey::new("v1", &DialectProfile::default(), &PolicyConfig::default());
+        let pg = PromptCacheKey::new("v1", &DialectProfile::default(), hash_policy(&PolicyConfig::default()), 0);
         let sqlite = PromptCacheKey::new(
             "v1",
             &DialectProfile {
                 dialect: SqlDialect::Sqlite,
                 ..DialectProfile::default()
             },
-            &PolicyConfig::default(),
+            hash_policy(&PolicyConfig::default()),
+            0,
         );
         assert_ne!(pg, sqlite);
     }
@@ -192,9 +198,9 @@ mod tests {
         };
 
         let default_key =
-            PromptCacheKey::new("v1", &DialectProfile::default(), &PolicyConfig::default());
+            PromptCacheKey::new("v1", &DialectProfile::default(), hash_policy(&PolicyConfig::default()), 0);
         let strict_key =
-            PromptCacheKey::new("v1", &DialectProfile::default(), &strict);
+            PromptCacheKey::new("v1", &DialectProfile::default(), hash_policy(&strict), 0);
         assert_ne!(default_key, strict_key);
     }
 

@@ -12,7 +12,7 @@ use serde_json::Value;
 ///
 /// The normalisation rules are:
 ///
-/// 1. Serialise the [`QueryPlan`] to a [`serde_json::Value`] (field
+/// 1. Serialise the [`QueryPlan`](crate::schema::QueryPlan) to a [`serde_json::Value`] (field
 ///    order follows the struct definition — `serde_json` uses `BTreeMap`
 ///    internally for `Value::Object`, so keys are already sorted).
 /// 2. Recursively sort the keys of every JSON object (defensive —
@@ -58,20 +58,39 @@ pub fn normalize_plan(plan: &ValidatedPlan) -> String {
     serde_json::to_string(&sorted).expect("sorted JSON should serialize")
 }
 
-/// Recursively sorts the keys of every JSON object in `value`.
+/// Maximum nesting depth for key sorting. Beyond this, `sort_value` returns
+/// the value as-is to prevent stack overflow from deeply nested JSON
+/// (e.g. plans with deeply nested CTEs).
+const MAX_SORT_DEPTH: usize = 64;
+
+/// Recursively sorts the keys of every JSON object in `value`, up to
+/// [`MAX_SORT_DEPTH`] levels deep.
 fn sort_value(value: Value) -> Value {
+    sort_value_with_depth(value, 0)
+}
+
+fn sort_value_with_depth(value: Value, depth: usize) -> Value {
+    if depth >= MAX_SORT_DEPTH {
+        return value;
+    }
+    let next_depth = depth + 1;
     match value {
-        Value::Object(map) => {
+        Value::Object(mut map) => {
             let mut sorted = serde_json::Map::with_capacity(map.len());
             let mut keys: Vec<String> = map.keys().cloned().collect();
             keys.sort();
             for key in keys {
-                let val = map.get(&key).expect("key exists");
-                sorted.insert(key, sort_value(val.clone()));
+                // Use `remove` to move the value out of the map, avoiding a clone
+                // of the entire subtree for every key.
+                if let Some(val) = map.remove(&key) {
+                    sorted.insert(key, sort_value_with_depth(val, next_depth));
+                }
             }
             Value::Object(sorted)
         }
-        Value::Array(arr) => Value::Array(arr.into_iter().map(sort_value).collect()),
+        Value::Array(arr) => {
+            Value::Array(arr.into_iter().map(|v| sort_value_with_depth(v, next_depth)).collect())
+        }
         other => other,
     }
 }
