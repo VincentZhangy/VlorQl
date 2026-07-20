@@ -294,10 +294,26 @@ fn select_llm_client() -> Box<dyn LlmClient> {
             "ollama" => LlmProvider::Ollama,
             _ => LlmProvider::OpenAi,
         };
+        let api_base = match provider.to_lowercase().as_str() {
+            "ollama" => std::env::var("OLLAMA_BASE_URL").ok(),
+            "vllm" => std::env::var("VLLM_API_BASE").ok(),
+            _ => None,
+        };
+        // Ollama 的 Qwen 3.5/3.6 等模型不支持严格 JSON Schema 的 format 参数，
+        // 需关闭严格模式，回退到 format = "json"（宽松模式）。
+        let extra = if provider.to_lowercase().as_str() == "ollama" {
+            [("strict_json_schema".to_owned(), serde_json::json!(false))]
+                .into_iter()
+                .collect()
+        } else {
+            std::collections::HashMap::new()
+        };
         let config = LlmConfig {
             provider: provider_enum,
             api_key,
+            api_base,
             model,
+            extra,
             ..LlmConfig::default()
         };
         eprintln!("[INFO] 真实 LLM 模式：使用 {provider} 客户端\n");
