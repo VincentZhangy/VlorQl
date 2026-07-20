@@ -24,6 +24,8 @@ tracing-subscriber.workspace = true
 opentelemetry.workspace = true
 opentelemetry_sdk.workspace = true
 tokio-postgres = "0.7"
+tokio-postgres-rustls = "0.12"
+rustls = "0.23"
 
 [[test]]
 name = "integration"

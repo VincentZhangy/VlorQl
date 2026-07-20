@@ -433,8 +433,13 @@ async fn execute_on_postgres(compiled: &vlorql::CompiledQuery) -> Result<(), Box
         }
     };
 
+    let tls = tokio_postgres_rustls::MakeRustlsConnect::new(
+        rustls::ClientConfig::builder()
+            .with_root_certificates(rustls::RootCertStore::empty())
+            .with_no_client_auth(),
+    );
     let (client, connection) =
-        tokio_postgres::connect(&database_url, tokio_postgres::NoTls).await?;
+        tokio_postgres::connect(&database_url, tls).await?;
     tokio::spawn(async move {
         if let Err(e) = connection.await {
             eprintln!("[ERROR] 数据库连接异常: {e}");
