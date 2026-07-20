@@ -56,7 +56,7 @@ use vlorql_core::schema::{
     ComparisonOperator, Expression, FromClause, JoinClause, JoinType, Predicate, Projection,
     QueryPlan,
 };
-use vlorql_llm::{LlmClient, LlmConfig, LlmProvider, MockLlmClient, OpenAIClient};
+use vlorql_llm::{create_llm_client, LlmClient, LlmConfig, LlmProvider, MockLlmClient};
 
 // ============================================================================
 // 1. 定义数据库 Schema
@@ -279,7 +279,7 @@ fn select_llm_client() -> Box<dyn LlmClient> {
             config.model
         );
         eprintln!("       您只需要输入自然语言，QueryPlan 由 LLM 自动生成\n");
-        return Box::new(OpenAIClient::from_config(config));
+        return create_llm_client(config).expect("创建 OpenAI 客户端失败");
     }
 
     // 也支持其他 Provider
@@ -301,7 +301,7 @@ fn select_llm_client() -> Box<dyn LlmClient> {
             ..LlmConfig::default()
         };
         eprintln!("[INFO] 真实 LLM 模式：使用 {provider} 客户端\n");
-        return Box::new(OpenAIClient::from_config(config));
+        return create_llm_client(config).expect("创建 LLM 客户端失败");
     }
 
     // 未设置 API Key → 离线演示模式
