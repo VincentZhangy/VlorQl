@@ -110,6 +110,7 @@ impl PromptBuilder {
         self.push_policy_constraints(&mut prompt, relevant_tables);
         self.push_dialect_constraints(&mut prompt);
         self.push_output_schema(&mut prompt);
+        self.push_type_guidance(&mut prompt);
         if self.include_examples {
             self.push_example(&mut prompt, relevant_tables);
         }
@@ -539,6 +540,65 @@ impl PromptBuilder {
         });
         let _ = writeln!(prompt, "Example JSON: {example_json}");
         prompt.push_str("The real response must still obey the current schema, policy, and dialect constraints.\n");
+    }
+
+    /// Pushes guidance on the `type` tag field used by every enum variant.
+    ///
+    /// When strict JSON Schema is disabled (e.g. for local Ollama models),
+    /// the model may omit the required `type` discriminator. This section
+    /// explicitly lists every allowed value so the prompt alone is enough
+    /// to produce valid output.
+    fn push_type_guidance(&self, prompt: &mut String) {
+        prompt.push_str(
+            "## JSON Type Tags\n\
+             Every JSON object in the plan must carry a `\"type\"` field.\n\
+             \n\
+             Allowed values for `Expression`:\n\
+             - `\"literal\"`       — a literal value (`{ \"value\": ..., \"data_type\": \"...\" }`)\n\
+             - `\"column_ref\"`    — a column reference (`{ \"table\": \"...\", \"column\": \"...\" }`)\n\
+             - `\"function_call\"` — function call (`{ \"name\": \"...\", \"args\": [...] }`)\n\
+             - `\"binary_op\"`     — binary operation (`{ \"left\": ..., \"op\": \"...\", \"right\": ... }`)\n\
+             - `\"star\"`          — wildcard `*`\n\
+             - `\"sub_query\"`     — scalar subquery\n\
+             \n\
+             Allowed values for `Predicate`:\n\
+             - `\"comparison\"` — comparison (`{ \"left\": ..., \"op\": \"eq|neq|gt|gte|lt|lte|like|not_like|is|is_not\", \"right\": ... }`)\n\
+             - `\"and\"`        — logical AND\n\
+             - `\"or\"`         — logical OR\n\
+             - `\"not\"`        — logical NOT\n\
+             - `\"between\"`    — range check\n\
+             - `\"in\"`         — set membership\n\
+             - `\"like\"`       — pattern match\n\
+             - `\"is_null\"`    — null check\n\
+             - `\"exists\"`     — subquery existence\n\
+             \n\
+             Allowed values for `Projection`:\n\
+             - `\"column\"` — a bare column reference\n\
+             - `\"expr\"`   — a computed expression\n\
+             - `\"star\"`   — `*` (or `table.*`)\n\
+             \n\
+             Example of a complete `WHERE` with nested predicates:\n\
+             ```json\n\
+             {\n\
+               \"where\": {\n\
+                 \"type\": \"and\",\n\
+                 \"left\": {\n\
+                   \"type\": \"comparison\",\n\
+                   \"left\": {\"type\": \"column_ref\", \"table\": \"orders\", \"column\": \"total\"},\n\
+                   \"op\": \"gt\",\n\
+                   \"right\": {\"type\": \"literal\", \"value\": 150, \"data_type\": \"float\"}\n\
+                 },\n\
+                 \"right\": {\n\
+                   \"type\": \"comparison\",\n\
+                   \"left\": {\"type\": \"column_ref\", \"table\": \"orders\", \"column\": \"status\"},\n\
+                   \"op\": \"eq\",\n\
+                   \"right\": {\"type\": \"literal\", \"value\": \"completed\", \"data_type\": \"string\"}\n\
+                 }\n\
+               }\n\
+             }\n\
+             ```\n\
+             \n",
+        );
     }
 
     fn column_visible(
