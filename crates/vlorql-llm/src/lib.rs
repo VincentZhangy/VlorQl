@@ -1630,7 +1630,56 @@ fn repair_query_plan_object(obj: &mut serde_json::Map<String, serde_json::Value>
         }
     }
 
+    // --- 10. Normalize data_type strings (e.g. "integer" → "int") ---
+    let mut plan_value = serde_json::Value::Object(std::mem::take(obj));
+    changed |= normalize_data_types(&mut plan_value);
+    if let serde_json::Value::Object(map) = plan_value {
+        *obj = map;
+    }
+
     changed
+}
+
+/// Normalizes common LLM data_type aliases to the canonical serde form.
+fn normalize_data_types(val: &mut serde_json::Value) -> bool {
+    let mut changed = false;
+    normalize_data_types_inner(val, &mut changed);
+    changed
+}
+
+fn normalize_data_types_inner(val: &mut serde_json::Value, changed: &mut bool) {
+    match val {
+        serde_json::Value::Object(map) => {
+            if let Some(dt) = map.get("data_type").and_then(|v| v.as_str()) {
+                let normalized = match dt {
+                    "integer" | "int4" | "int8" | "bigint" | "smallint" | "tinyint" => "int",
+                    "varchar" | "text" | "char" | "character" | "character varying" => "string",
+                    "decimal" | "numeric" | "real" | "double" | "double precision" => "float",
+                    "bool" | "boolean" => "boolean",
+                    "timestampz" | "timestamptz" | "datetime" | "timestamp with time zone" | "timestamp without time zone" | "date" => "timestamp",
+                    "NULL" | "Null" => "null",
+                    _ => dt,
+                };
+                if normalized != dt {
+                    map.insert("data_type".to_owned(), serde_json::Value::String(normalized.to_owned()));
+                    *changed = true;
+                }
+            }
+            // Recurse into all child values (but don't recurse from null/empty Vec entries).
+            let keys: Vec<String> = map.keys().cloned().collect();
+            for key in &keys {
+                if let Some(v) = map.get_mut(key) {
+                    normalize_data_types_inner(v, changed);
+                }
+            }
+        }
+        serde_json::Value::Array(arr) => {
+            for v in arr.iter_mut() {
+                normalize_data_types_inner(v, changed);
+            }
+        }
+        _ => {}
+    }
 }
 
 /// Adds missing `"type"` tags to Expression-like JSON objects.
@@ -2779,5 +2828,18 @@ mod tests {
                 .and_then(|t| t.as_str()),
             Some("column_ref")
         );
+    }
+
+    #[test]
+    fn repair_normalizes_data_type_variants() {
+        let input = r#"{"select":[{"type":"star","table":"products"}],"from":{"table":"products","alias":null},"where":{"type":"not","child":{"type":"comparison","left":{"type":"column_ref","column":"id","table":"order_items"},"op":"eq","right":{"type":"literal","value":0,"data_type":"integer"}}}}"#;
+        let repaired = repair_query_plan_json(input);
+        let parsed: serde_json::Value = serde_json::from_str(&repaired).unwrap();
+
+        let dt = parsed["where"]["child"]["right"]["data_type"].as_str().unwrap();
+        assert_eq!(dt, "int", "data_type should be normalized from 'integer' to 'int', got: {dt}");
+
+        let plan: Result<QueryPlan, _> = serde_json::from_str(&repaired);
+        assert!(plan.is_ok(), "repaired should be a valid QueryPlan: {:?}", plan.err());
     }
 }
