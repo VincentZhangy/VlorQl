@@ -170,7 +170,10 @@ impl LocalClient {
         {
             return flag;
         }
-        true
+        // Ollama 的本地小模型（4B-7B）对完整 JSON Schema 支持不佳，
+        // 默认关闭严格模式，回退到 format = "json"（宽松模式）。
+        // 可通过 extra["strict_json_schema"] = true 手动开启。
+        self.backend != LocalBackend::Ollama
     }
 
     /// Builds the JSON body sent to a vLLM `/chat/completions` endpoint.
@@ -1071,8 +1074,14 @@ mod tests {
             .create_async()
             .await;
 
+        let mut extra = std::collections::HashMap::new();
+        extra.insert(
+            "strict_json_schema".to_owned(),
+            serde_json::Value::Bool(true),
+        );
         let config = LlmConfig {
             api_base: Some(server.url()),
+            extra,
             ..local_config(LlmProvider::Ollama, "llama3.2")
         };
         let client = LocalClient::new(config).expect("client should build");

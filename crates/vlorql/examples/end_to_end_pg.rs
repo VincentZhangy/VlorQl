@@ -56,7 +56,60 @@ use vlorql_core::schema::{
     ComparisonOperator, Expression, FromClause, JoinClause, JoinType, Predicate, Projection,
     QueryPlan,
 };
-use vlorql_llm::{create_llm_client, LlmClient, LlmConfig, LlmProvider, MockLlmClient};
+use vlorql_llm::{LlmClient, LlmConfig, LlmProvider, MockLlmClient, create_llm_client};
+
+use rustls::SignatureScheme;
+use rustls::client::danger::{ServerCertVerified, ServerCertVerifier};
+use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
+
+/// 跳过所有证书验证（仅用于开发测试，等同于 sslmode=require）
+#[derive(Debug)]
+struct SkipVerify;
+
+impl ServerCertVerifier for SkipVerify {
+    fn verify_server_cert(
+        &self,
+        _end_entity: &CertificateDer<'_>,
+        _intermediates: &[CertificateDer<'_>],
+        _server_name: &ServerName<'_>,
+        _ocsp: &[u8],
+        _now: UnixTime,
+    ) -> Result<ServerCertVerified, rustls::Error> {
+        Ok(ServerCertVerified::assertion())
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        _message: &[u8],
+        _cert: &CertificateDer<'_>,
+        _dss: &rustls::DigitallySignedStruct,
+    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        Ok(rustls::client::danger::HandshakeSignatureValid::assertion())
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        _message: &[u8],
+        _cert: &CertificateDer<'_>,
+        _dss: &rustls::DigitallySignedStruct,
+    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        Ok(rustls::client::danger::HandshakeSignatureValid::assertion())
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
+        vec![
+            SignatureScheme::RSA_PKCS1_SHA256,
+            SignatureScheme::RSA_PKCS1_SHA384,
+            SignatureScheme::RSA_PKCS1_SHA512,
+            SignatureScheme::ECDSA_NISTP256_SHA256,
+            SignatureScheme::ECDSA_NISTP384_SHA384,
+            SignatureScheme::RSA_PSS_SHA256,
+            SignatureScheme::RSA_PSS_SHA384,
+            SignatureScheme::RSA_PSS_SHA512,
+            SignatureScheme::ED25519,
+        ]
+    }
+}
 
 // ============================================================================
 // 1. 定义数据库 Schema
@@ -294,10 +347,26 @@ fn select_llm_client() -> Box<dyn LlmClient> {
             "ollama" => LlmProvider::Ollama,
             _ => LlmProvider::OpenAi,
         };
+        let api_base = match provider.to_lowercase().as_str() {
+            "ollama" => std::env::var("OLLAMA_BASE_URL").ok(),
+            "vllm" => std::env::var("VLLM_API_BASE").ok(),
+            _ => None,
+        };
+        // Ollama 的 Qwen 3.5/3.6 等模型不支持严格 JSON Schema 的 format 参数，
+        // 需关闭严格模式，回退到 format = "json"（宽松模式）。
+        let extra = if provider.to_lowercase().as_str() == "ollama" {
+            [("strict_json_schema".to_owned(), serde_json::json!(false))]
+                .into_iter()
+                .collect()
+        } else {
+            std::collections::HashMap::new()
+        };
         let config = LlmConfig {
             provider: provider_enum,
             api_key,
+            api_base,
             model,
+            extra,
             ..LlmConfig::default()
         };
         eprintln!("[INFO] 真实 LLM 模式：使用 {provider} 客户端\n");
@@ -417,8 +486,13 @@ async fn execute_on_postgres(compiled: &vlorql::CompiledQuery) -> Result<(), Box
         }
     };
 
-    let (client, connection) =
-        tokio_postgres::connect(&database_url, tokio_postgres::NoTls).await?;
+    let tls = tokio_postgres_rustls::MakeRustlsConnect::new(
+        rustls::ClientConfig::builder()
+            .dangerous()
+            .with_custom_certificate_verifier(Arc::new(SkipVerify))
+            .with_no_client_auth(),
+    );
+    let (client, connection) = tokio_postgres::connect(&database_url, tls).await?;
     tokio::spawn(async move {
         if let Err(e) = connection.await {
             eprintln!("[ERROR] 数据库连接异常: {e}");
@@ -520,12 +594,33 @@ async fn execute_on_postgres(compiled: &vlorql::CompiledQuery) -> Result<(), Box
         .map(|p| {
             let val: Box<dyn tokio_postgres::types::ToSql + Sync> = match &p.value {
                 serde_json::Value::Number(n) => {
-                    if let Some(i) = n.as_i64() {
-                        Box::new(i) as Box<dyn tokio_postgres::types::ToSql + Sync>
-                    } else if let Some(f) = n.as_f64() {
-                        Box::new(f) as Box<dyn tokio_postgres::types::ToSql + Sync>
-                    } else {
-                        Box::new(0i64) as Box<dyn tokio_postgres::types::ToSql + Sync>
+                    // 根据参数声明的类型决定转换
+                    match p.data_type {
+                        DataType::Float => {
+                            if let Some(f) = n.as_f64() {
+                                Box::new(f) as Box<dyn tokio_postgres::types::ToSql + Sync>
+                            } else {
+                                Box::new(0.0) as Box<dyn tokio_postgres::types::ToSql + Sync>
+                            }
+                        }
+                        DataType::Int => {
+                            if let Some(i) = n.as_i64() {
+                                Box::new(i) as Box<dyn tokio_postgres::types::ToSql + Sync>
+                            } else {
+                                // 如果整数超出 i64 范围，回退
+                                Box::new(0i64) as Box<dyn tokio_postgres::types::ToSql + Sync>
+                            }
+                        }
+                        _ => {
+                            // 未知类型，尝试 f64
+                            if let Some(f) = n.as_f64() {
+                                Box::new(f) as Box<dyn tokio_postgres::types::ToSql + Sync>
+                            } else if let Some(i) = n.as_i64() {
+                                Box::new(i) as Box<dyn tokio_postgres::types::ToSql + Sync>
+                            } else {
+                                Box::new(0i64) as Box<dyn tokio_postgres::types::ToSql + Sync>
+                            }
+                        }
                     }
                 }
                 serde_json::Value::String(s) => {
@@ -565,8 +660,16 @@ async fn execute_on_postgres(compiled: &vlorql::CompiledQuery) -> Result<(), Box
     for row in &rows {
         let values: Vec<String> = (0..row.len())
             .map(|i| {
-                let val: Option<String> = row.get(i);
-                val.unwrap_or_else(|| "NULL".to_owned())
+                // 按顺序尝试：i64 -> f64 -> String -> 最后回退到 "NULL"
+                if let Ok(v) = row.try_get::<_, i64>(i) {
+                    v.to_string()
+                } else if let Ok(v) = row.try_get::<_, f64>(i) {
+                    v.to_string()
+                } else if let Ok(v) = row.try_get::<_, String>(i) {
+                    v
+                } else {
+                    "NULL".to_string()
+                }
             })
             .collect();
         println!("  │ {} │", values.join(" │ "));

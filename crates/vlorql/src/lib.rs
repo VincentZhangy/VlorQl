@@ -207,7 +207,14 @@ impl VlorQl {
 
             let mut llm_question = question.to_owned();
             for attempt in 0..=self.max_retries {
-                let plan = client.generate_plan(&llm_question, &system_prompt).await?;
+                let plan = match client.generate_plan(&llm_question, &system_prompt).await {
+                    Ok(plan) => plan,
+                    Err(e) if e.is_retryable() && attempt < self.max_retries => {
+                        llm_question = format_retry_question_str(&llm_question, &e);
+                        continue;
+                    }
+                    Err(e) => return Err(e),
+                };
                 match self.validate_only(&plan) {
                     Ok(validated_plan) => {
                         // Optimize when an optimizer is configured, then compile.

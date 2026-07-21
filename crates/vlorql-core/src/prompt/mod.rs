@@ -180,20 +180,16 @@ mod tests {
         let prompt = builder().build_system_prompt("Show users and their organizations");
 
         assert!(prompt.contains("# Role"));
-        assert!(prompt.contains("## Authorized Database Schema"));
-        assert!(prompt.contains("| Table | Column | Type | Nullable | Description |"));
-        assert!(prompt.contains("## Access Policy"));
-        assert!(prompt.contains("## Dialect Constraints"));
-        assert!(prompt.contains("Function allowlist"));
-        assert!(prompt.contains("Denied functions"));
+        assert!(prompt.contains("## Schema"));
+        assert!(prompt.contains("## Dialect"));
         assert!(prompt.contains("## Required JSON Output"));
         assert!(prompt.contains("QueryPlan"));
         assert!(prompt.contains("additionalProperties"));
         assert!(prompt.contains("JSON only"));
         assert!(prompt.contains("## Example"));
-        assert!(prompt.contains("users"));
-        assert!(prompt.contains("organizations"));
-        assert!(!prompt.contains("audit_logs | id"));
+        assert!(prompt.contains("users("));
+        assert!(prompt.contains("organizations("));
+        assert!(!prompt.contains("audit_logs"));
         assert!(prompt.chars().count() < 11_000);
     }
 
@@ -201,12 +197,12 @@ mod tests {
     fn denied_columns_are_not_exposed_as_schema_rows() {
         let prompt = builder().build_system_prompt("users password_hash");
         let schema_section = prompt
-            .split("## Access Policy")
+            .split("## Dialect")
             .next()
             .expect("schema section should exist");
 
         assert!(!schema_section.contains("password_hash"));
-        assert!(prompt.contains("Globally denied columns: `password_hash`"));
+        // Policy enforcement happens in the validation layer, not the prompt.
     }
 
     #[test]
@@ -395,18 +391,13 @@ mod extra_tests {
     }
 
     #[test]
-    fn prompt_exposes_policy_and_dialect_acl_to_the_llm() {
+    fn prompt_exposes_dialect_acl_to_the_llm() {
         let prompt = non_empty_builder().build_system_prompt("Show users");
-        // Policy section: the LLM must see which columns are allowed
-        // and which are denied.
-        assert!(prompt.contains("allowed columns:"));
-        assert!(prompt.contains("denied columns:"));
         // Dialect section: configurable features must be reported.
-        assert!(prompt.contains("SQL dialect:"));
-        assert!(prompt.contains("Function allowlist"));
-        assert!(prompt.contains("Denied functions"));
-        // Row filter: the user is reminded of mandatory conditions.
-        assert!(prompt.contains("Restrict users to the current organization"));
+        assert!(prompt.contains("Dialect:"));
+        assert!(prompt.contains("Features:"));
+        assert!(prompt.contains("Joins:"));
+        // Policy enforcement is done in the validation layer, not the prompt.
     }
 
     #[test]
@@ -417,10 +408,10 @@ mod extra_tests {
             PolicyConfig::default(),
         );
         let prompt = builder.build_system_prompt("nothing relevant");
-        // An empty schema produces the placeholder row and skips the
+        // An empty schema produces a placeholder and skips the
         // example section (no table to take a column from).
-        assert!(prompt.contains("## Authorized Database Schema"));
-        assert!(prompt.contains("| *(none available)* | - | - | - | - |"));
+        assert!(prompt.contains("## Schema"));
+        assert!(prompt.contains("(none available)"));
         assert!(!prompt.contains("## Example"));
     }
 }
