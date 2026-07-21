@@ -1382,7 +1382,23 @@ fn repair_query_plan_object(obj: &mut serde_json::Map<String, serde_json::Value>
         }
     }
 
-    // --- 5. Remove null / invalid elements from array fields ---
+    // --- 5. Wrap top-level `descending` + `expr` into `order_by` ---
+    // The LLM sometimes emits `descending` and `expr` at the top level of the
+    // QueryPlan instead of inside an `OrderByTerm` within the `order_by` array.
+    if !obj.contains_key("order_by") {
+        if let (Some(expr), Some(descending)) = (obj.remove("expr"), obj.remove("descending"))
+            && descending.is_boolean()
+        {
+            let term = serde_json::json!({
+                "expr": expr,
+                "descending": descending,
+            });
+            obj.insert("order_by".to_owned(), serde_json::json!([term]));
+            changed = true;
+        }
+    }
+
+    // --- 6. Remove null / invalid elements from array fields ---
     for array_field in &["group_by", "order_by"] {
         if let Some(arr) = obj.get_mut(*array_field).and_then(|v| v.as_array_mut()) {
             let len_before = arr.len();
@@ -1397,7 +1413,7 @@ fn repair_query_plan_object(obj: &mut serde_json::Map<String, serde_json::Value>
         }
     }
 
-    // --- 6. Collapse `where` from array to single predicate ---
+    // --- 7. Collapse `where` from array to single predicate ---
     //     llama3.2 sometimes emits `"where": [{...}, "garbage string"]`
     let where_array_pred: Option<serde_json::Value> =
         obj.get("where").and_then(|v| v.as_array()).map(|arr| {
@@ -1418,7 +1434,7 @@ fn repair_query_plan_object(obj: &mut serde_json::Map<String, serde_json::Value>
         changed = true;
     }
 
-    // --- 7. Remove invalid elements from `select` ---
+    // --- 8. Remove invalid elements from `select` ---
     //     Only `column_ref`, `expr`, `star` are valid Projection types.
     const VALID_PROJECTION_TYPES: &[&str] = &["column_ref", "expr", "star"];
     if let Some(arr) = obj.get_mut("select").and_then(|v| v.as_array_mut()) {
