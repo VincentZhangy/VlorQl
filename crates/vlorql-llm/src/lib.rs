@@ -1434,6 +1434,13 @@ fn repair_query_plan_object(obj: &mut serde_json::Map<String, serde_json::Value>
         changed = true;
     }
 
+    // --- 7b. Recursively repair the collapsed `where` predicate ---
+    //     The collapsed object may still have array-valued `left`/`right`/`child`
+    //     fields (e.g. `"left": [{...}]`), which `repair_predicate_object` fixes.
+    if let Some(where_val) = obj.get_mut("where") {
+        changed |= repair_predicate_object(where_val);
+    }
+
     // --- 8. Remove invalid elements from `select` ---
     //     Only `column_ref`, `expr`, `star` are valid Projection types.
     const VALID_PROJECTION_TYPES: &[&str] = &["column_ref", "expr", "star"];
