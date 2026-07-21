@@ -1364,6 +1364,21 @@ fn repair_query_plan_object(obj: &mut serde_json::Map<String, serde_json::Value>
         }
     }
 
+    // --- 1b. Strip unknown top-level fields that `QueryPlan` rejects ---
+    //     `QueryPlan` uses `#[serde(deny_unknown_fields)]`, so fields like
+    //     `right`, `left`, `op`, `child`, `expr` at the plan level cause an
+    //     immediate deserialization error.  Remove them so the repair below
+    //     can at least attempt to make `where` valid.
+    const PLAN_FIELDS: &[&str] = &[
+        "select", "from", "where", "group_by", "having",
+        "order_by", "limit", "offset", "joins", "ctes",
+    ];
+    let before = obj.len();
+    obj.retain(|key, _| PLAN_FIELDS.contains(&key.as_str()));
+    if obj.len() != before {
+        changed = true;
+    }
+
     // --- 3. Recursively repair predicates inside `having` ---
     //     Also handles `"having": [null]` or `"having": [Predicate]` emitted by
     //     the LLM when it mistakenly wraps the predicate in an array.
@@ -1607,7 +1622,7 @@ fn repair_predicate_object(pred: &mut serde_json::Value) -> bool {
     };
 
     let mut changed = false;
-    let pred_type = obj
+    let mut pred_type_str = obj
         .get("type")
         .and_then(|t| t.as_str())
         .unwrap_or("")
@@ -1615,10 +1630,8 @@ fn repair_predicate_object(pred: &mut serde_json::Value) -> bool {
 
     // If the object has no `type` tag but has `left` and `op` fields,
     // it is a comparison predicate missing the type discriminator.
-    // Also immediately fix expression type tags inside it so the
-    // rest of the repair (see blocks below) doesn't need to re-check
-    // based on pred_type (which was captured before this injection).
-    if pred_type.is_empty() && obj.contains_key("left") && obj.contains_key("op") {
+    // Immediately fix expression type tags inside it too.
+    if pred_type_str.is_empty() && obj.contains_key("left") && obj.contains_key("op") {
         obj.insert(
             "type".to_owned(),
             serde_json::Value::String("comparison".to_owned()),
@@ -1629,6 +1642,7 @@ fn repair_predicate_object(pred: &mut serde_json::Value) -> bool {
                 changed |= repair_expression_value(val);
             }
         }
+        pred_type_str = "comparison".to_owned();
     }
 
     // If the object has no `type` tag but looks like a bare Expression
@@ -1636,7 +1650,7 @@ fn repair_predicate_object(pred: &mut serde_json::Value) -> bool {
     // can deserialize as a `Predicate`. NULL is used because it is type-
     // compatible with all DataTypes (numeric, string, boolean, etc.)
     // in the validator's `types_compatible` check.
-    if pred_type.is_empty() && obj.contains_key("column") {
+    if pred_type_str.is_empty() && obj.contains_key("column") {
         let mut expr = pred.clone();
         repair_expression_value(&mut expr);
         *pred = serde_json::json!({
@@ -1649,7 +1663,7 @@ fn repair_predicate_object(pred: &mut serde_json::Value) -> bool {
     }
 
     // Fix array-valued sides in and/or
-    if pred_type == "and" || pred_type == "or" {
+    if pred_type_str == "and" || pred_type_str == "or" {
         for side in &["left", "right"] {
             if let Some(arr) = obj.get(*side).and_then(|v| v.as_array()) {
                 if arr.is_empty() {
@@ -1668,7 +1682,7 @@ fn repair_predicate_object(pred: &mut serde_json::Value) -> bool {
     }
 
     // Fix array-valued `child` in `not`
-    if pred_type == "not" {
+    if pred_type_str == "not" {
         if let Some(arr) = obj.get("child").and_then(|v| v.as_array()) {
             if !arr.is_empty() {
                 let mut first = arr[0].clone();
@@ -1684,14 +1698,14 @@ fn repair_predicate_object(pred: &mut serde_json::Value) -> bool {
     // Recursively repair subquery plans inside `exists` / `in` predicates.
     // Small models (qwen2.5-coder, llama3.2) often emit subqueries without
     // a `select` field or with missing expression type tags.
-    if pred_type == "exists" {
+    if pred_type_str == "exists" {
         if let Some(query) = obj.get_mut("query")
             && let Some(query_obj) = query.as_object_mut()
         {
             changed |= repair_query_plan_object(query_obj);
         }
     }
-    if pred_type == "in" {
+    if pred_type_str == "in" {
         if let Some(target) = obj.get_mut("target") {
             if let Some(target_obj) = target.as_object_mut() {
                 // InTarget::SubQuery — repair the inner plan
@@ -1706,7 +1720,7 @@ fn repair_predicate_object(pred: &mut serde_json::Value) -> bool {
     }
 
     // Fix array-valued expression fields
-    if pred_type == "comparison" || pred_type == "between" || pred_type == "in" || pred_type == "like" || pred_type == "is_null" {
+    if pred_type_str == "comparison" || pred_type_str == "between" || pred_type_str == "in" || pred_type_str == "like" || pred_type_str == "is_null" {
         for field in &["left", "right", "expr", "low", "high"] {
             if let Some(arr) = obj.get(*field).and_then(|v| v.as_array())
                 && !arr.is_empty()
@@ -1720,7 +1734,7 @@ fn repair_predicate_object(pred: &mut serde_json::Value) -> bool {
     // Fix missing `type` tags on expression fields nested within predicates.
     // The LLM often emits bare `{"column":"x","table":"t"}` objects without
     // the `"type":"column_ref"` discriminator that serde needs.
-    if pred_type == "comparison" || pred_type == "between" || pred_type == "in" || pred_type == "like" || pred_type == "is_null" {
+    if pred_type_str == "comparison" || pred_type_str == "between" || pred_type_str == "in" || pred_type_str == "like" || pred_type_str == "is_null" {
         for field in &["left", "right", "expr", "low", "high"] {
             if let Some(val) = obj.get_mut(*field) {
                 changed |= repair_expression_value(val);
@@ -1728,9 +1742,22 @@ fn repair_predicate_object(pred: &mut serde_json::Value) -> bool {
         }
     }
 
+    // Safety net: inject missing `right` field on comparison predicates.
+    // The LLM sometimes emits `{"left": ..., "op": "in"}` (or other ops)
+    // without `right`.  Serde rejects the missing field with a parse error
+    // that does not trigger a retry, so we inject a null literal to let
+    // it deserialize; the validator will catch the semantic problem.
+    if pred_type_str == "comparison" && !obj.contains_key("right") {
+        obj.insert(
+            "right".to_owned(),
+            serde_json::json!({"type": "literal", "value": null, "data_type": "null"}),
+        );
+        changed = true;
+    }
+
     // Simplify single-child `and`/`or`: if only `left` exists and no `right`,
     // replace the entire predicate with `left`.
-    if (pred_type == "and" || pred_type == "or")
+    if (pred_type_str == "and" || pred_type_str == "or")
         && obj.contains_key("left")
         && !obj.contains_key("right")
         && let Some(left_val) = obj.remove("left")
