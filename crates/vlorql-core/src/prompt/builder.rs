@@ -346,9 +346,18 @@ impl PromptBuilder {
             });
         prompt.push_str(
             "## Required JSON Output\n\
-             Top-level fields: select (required), from (required), where?, joins?, group_by?, having?, order_by?, limit?, offset?, ctes?.\n\
-             Each object must have a `\"type\"` field. Return a data instance matching the JSON Schema below — do not output schema metadata.\n\
-             Output JSON only: no fences, comments, or raw SQL.\n\
+             Structure:\n\
+             - select: [{\"type\":\"column|star|expr\", \"table\", \"column\", \"alias\"}]\n\
+             - from: {\"table\", \"alias\"}\n\
+             - where: optional Predicate (recursive, see schema below)\n\
+             - joins: optional [{\"join_type\", \"table\", \"on\": Predicate, \"alias\"}]\n\
+             - group_by: optional [Expression]\n\
+             - having: optional Predicate\n\
+             - order_by: optional [{\"expr\": Expression, \"descending\": bool}]\n\
+             - limit, offset: optional int\n\
+             - ctes: optional [{\"name\", \"query\": QueryPlan}]\n\
+             \n\
+             Return a data instance matching the JSON Schema below. Output JSON only: no fences, comments, or raw SQL.\n\
              \n\
              ```json\n",
         );
@@ -389,9 +398,15 @@ impl PromptBuilder {
             prompt,
             "## Example\n\
              Q: Select {} from {}\n\
-             A: {example_json}\n\
-             The real response must obey the current schema and dialect.\n",
+             A: {example_json}\n",
             column.name, table.name
+        );
+        let _ = writeln!(
+            prompt,
+            "Q: Orders with total > 150, sorted by total desc\n\
+             A: {{\"select\":[{{\"type\":\"column\",\"table\":\"orders\",\"column\":\"id\",\"alias\":null}},{{\"type\":\"column\",\"table\":\"orders\",\"column\":\"total\",\"alias\":null}}],\"from\":{{\"table\":\"orders\",\"alias\":null}},\"where\":{{\"type\":\"comparison\",\"left\":{{\"type\":\"column_ref\",\"column\":\"total\",\"table\":\"orders\"}},\"op\":\"gt\",\"right\":{{\"type\":\"literal\",\"value\":150,\"data_type\":\"float\"}}}},\"order_by\":[{{\"expr\":{{\"type\":\"column_ref\",\"column\":\"total\",\"table\":\"orders\"}},\"descending\":true}}],\"limit\":10}}\n\
+             \n\
+             The real response must obey the current schema and dialect.\n",
         );
     }
 
