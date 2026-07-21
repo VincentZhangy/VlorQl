@@ -53,9 +53,10 @@ use vlorql_core::policy::PolicyConfig;
 use vlorql_core::prompt::PromptBuilder;
 use vlorql_core::schema::{ColumnSchema, DataType, SchemaMetadata, TableSchema};
 use vlorql_core::schema::{
-    ComparisonOperator, Expression, FromClause, JoinClause, JoinType, Predicate, Projection,
-    QueryPlan,
+    ComparisonOperator, Expression, FromClause, InTarget, JoinClause, JoinType, OrderByTerm,
+    Predicate, Projection, QueryPlan,
 };
+use vlorql_core::validate::ValidatedPlan;
 use vlorql_llm::{LlmClient, LlmConfig, LlmProvider, MockLlmClient, create_llm_client};
 
 use rustls::SignatureScheme;
@@ -471,10 +472,249 @@ fn build_demo_plan() -> QueryPlan {
 }
 
 // ============================================================================
-// 4. 在 PostgreSQL 上执行（可选）
+// 4. 更多自然语言查询（手动构建的 QueryPlan 示例）
 // ============================================================================
 
-async fn execute_on_postgres(compiled: &vlorql::CompiledQuery) -> Result<(), Box<dyn Error>> {
+/// 返回更多的自然语言查询及其对应的 QueryPlan，
+/// 覆盖更多 SQL 特性（IN、IS NULL、LEFT JOIN、GROUP BY + 聚合）。
+fn build_additional_plans() -> Vec<(&'static str, QueryPlan)> {
+    vec![
+        (
+            "查询状态为已完成或已发货的订单，显示订单号、金额、状态和客户名",
+            build_in_predicate_plan(),
+        ),
+        (
+            "哪些商品从未被购买过？",
+            build_is_null_plan(),
+        ),
+        (
+            "每种产品卖了多少件？",
+            build_aggregate_plan(),
+        ),
+    ]
+}
+
+/// Plan 2: IN 谓词 —— 查询状态为 completed 或 shipped 的订单
+///
+/// 对应的 SQL:
+/// ```sql
+/// SELECT "orders"."id", "orders"."total", "orders"."status", "users"."name"
+/// FROM "orders"
+/// INNER JOIN "users" ON "orders"."user_id" = "users"."id"
+/// WHERE "orders"."status" IN ('completed', 'shipped')
+/// ORDER BY "orders"."created_at" DESC
+/// ```
+fn build_in_predicate_plan() -> QueryPlan {
+    QueryPlan {
+        select: vec![
+            Projection::Column {
+                table: Some("orders".to_owned()),
+                column: "id".to_owned(),
+                alias: None,
+            },
+            Projection::Column {
+                table: Some("orders".to_owned()),
+                column: "total".to_owned(),
+                alias: None,
+            },
+            Projection::Column {
+                table: Some("orders".to_owned()),
+                column: "status".to_owned(),
+                alias: None,
+            },
+            Projection::Column {
+                table: Some("users".to_owned()),
+                column: "name".to_owned(),
+                alias: None,
+            },
+        ],
+        from: FromClause {
+            table: "orders".to_owned(),
+            alias: Some("o".to_owned()),
+        },
+        joins: Some(vec![JoinClause {
+            join_type: JoinType::Inner,
+            right_table: FromClause {
+                table: "users".to_owned(),
+                alias: Some("u".to_owned()),
+            },
+            on: Predicate::Comparison {
+                left: Expression::ColumnRef {
+                    table: Some("orders".to_owned()),
+                    column: "user_id".to_owned(),
+                },
+                op: ComparisonOperator::Eq,
+                right: Expression::ColumnRef {
+                    table: Some("users".to_owned()),
+                    column: "id".to_owned(),
+                },
+            },
+        }]),
+        r#where: Some(Predicate::In {
+            expr: Expression::ColumnRef {
+                table: Some("orders".to_owned()),
+                column: "status".to_owned(),
+            },
+            target: InTarget::Values(vec![
+                Expression::Literal {
+                    value: serde_json::json!("completed"),
+                    data_type: DataType::String,
+                },
+                Expression::Literal {
+                    value: serde_json::json!("shipped"),
+                    data_type: DataType::String,
+                },
+            ]),
+        }),
+        group_by: None,
+        having: None,
+        order_by: Some(vec![OrderByTerm {
+            expr: Expression::ColumnRef {
+                table: Some("orders".to_owned()),
+                column: "created_at".to_owned(),
+            },
+            descending: true,
+        }]),
+        limit: None,
+        offset: None,
+        ctes: None,
+    }
+}
+
+/// Plan 3: IS NULL + LEFT JOIN —— 查找从未被购买过的商品
+///
+/// 对应的 SQL:
+/// ```sql
+/// SELECT "products"."id", "products"."name", "products"."price"
+/// FROM "products"
+/// LEFT JOIN "order_items" ON "products"."id" = "order_items"."product_id"
+/// WHERE "order_items"."id" IS NULL
+/// ```
+fn build_is_null_plan() -> QueryPlan {
+    QueryPlan {
+        select: vec![
+            Projection::Column {
+                table: Some("products".to_owned()),
+                column: "id".to_owned(),
+                alias: None,
+            },
+            Projection::Column {
+                table: Some("products".to_owned()),
+                column: "name".to_owned(),
+                alias: None,
+            },
+            Projection::Column {
+                table: Some("products".to_owned()),
+                column: "price".to_owned(),
+                alias: None,
+            },
+        ],
+        from: FromClause {
+            table: "products".to_owned(),
+            alias: Some("p".to_owned()),
+        },
+        joins: Some(vec![JoinClause {
+            join_type: JoinType::Left,
+            right_table: FromClause {
+                table: "order_items".to_owned(),
+                alias: Some("oi".to_owned()),
+            },
+            on: Predicate::Comparison {
+                left: Expression::ColumnRef {
+                    table: Some("products".to_owned()),
+                    column: "id".to_owned(),
+                },
+                op: ComparisonOperator::Eq,
+                right: Expression::ColumnRef {
+                    table: Some("order_items".to_owned()),
+                    column: "product_id".to_owned(),
+                },
+            },
+        }]),
+        r#where: Some(Predicate::IsNull {
+            expr: Expression::ColumnRef {
+                table: Some("order_items".to_owned()),
+                column: "id".to_owned(),
+            },
+        }),
+        group_by: None,
+        having: None,
+        order_by: None,
+        limit: None,
+        offset: None,
+        ctes: None,
+    }
+}
+
+/// Plan 4: GROUP BY + 聚合函数 —— 每种产品的累计销售量
+///
+/// 对应的 SQL:
+/// ```sql
+/// SELECT "products"."name", SUM("order_items"."quantity") AS "total_sold"
+/// FROM "products"
+/// INNER JOIN "order_items" ON "products"."id" = "order_items"."product_id"
+/// GROUP BY "products"."name"
+/// ```
+fn build_aggregate_plan() -> QueryPlan {
+    QueryPlan {
+        select: vec![
+            Projection::Column {
+                table: Some("products".to_owned()),
+                column: "name".to_owned(),
+                alias: None,
+            },
+            Projection::Expr {
+                expression: Expression::FunctionCall {
+                    name: "SUM".to_owned(),
+                    args: vec![Expression::ColumnRef {
+                        table: Some("order_items".to_owned()),
+                        column: "quantity".to_owned(),
+                    }],
+                    distinct: false,
+                },
+                alias: Some("total_sold".to_owned()),
+            },
+        ],
+        from: FromClause {
+            table: "products".to_owned(),
+            alias: Some("p".to_owned()),
+        },
+        joins: Some(vec![JoinClause {
+            join_type: JoinType::Inner,
+            right_table: FromClause {
+                table: "order_items".to_owned(),
+                alias: Some("oi".to_owned()),
+            },
+            on: Predicate::Comparison {
+                left: Expression::ColumnRef {
+                    table: Some("products".to_owned()),
+                    column: "id".to_owned(),
+                },
+                op: ComparisonOperator::Eq,
+                right: Expression::ColumnRef {
+                    table: Some("order_items".to_owned()),
+                    column: "product_id".to_owned(),
+                },
+            },
+        }]),
+        r#where: None,
+        group_by: Some(vec![Expression::ColumnRef {
+            table: Some("products".to_owned()),
+            column: "name".to_owned(),
+        }]),
+        having: None,
+        order_by: None,
+        limit: None,
+        offset: None,
+        ctes: None,
+    }
+}
+
+// ============================================================================
+// 5. 在 PostgreSQL 上执行（可选）
+// ============================================================================
+
+async fn execute_on_postgres(queries: &[vlorql::CompiledQuery]) -> Result<(), Box<dyn Error>> {
     let database_url = match std::env::var("DATABASE_URL") {
         Ok(url) => url,
         Err(_) => {
@@ -571,110 +811,121 @@ async fn execute_on_postgres(compiled: &vlorql::CompiledQuery) -> Result<(), Box
         eprintln!("[OK] 测试数据已插入");
     }
 
-    // 执行编译后的参数化 SQL
-    eprintln!("\n[EXEC] 执行 SQL: {}", compiled.sql);
-    if compiled.parameters.is_empty() {
-        eprintln!("[EXEC] 参数: (无)");
-    } else {
-        eprintln!("[EXEC] 参数:");
-        for (i, param) in compiled.parameters.iter().enumerate() {
-            eprintln!(
-                "       ${}: {} (类型: {:?})",
-                i + 1,
-                param.value,
-                param.data_type
-            );
+    // 依次执行所有编译后的参数化 SQL
+    for (qidx, compiled) in queries.iter().enumerate() {
+        eprintln!("\n═══════════════════════════════════════════════");
+        eprintln!("  查询 {} / {}", qidx + 1, queries.len());
+        eprintln!("═══════════════════════════════════════════════");
+        eprintln!("[EXEC] SQL: {}", compiled.sql);
+        if compiled.parameters.is_empty() {
+            eprintln!("[EXEC] 参数: (无)");
+        } else {
+            eprintln!("[EXEC] 参数:");
+            for (i, param) in compiled.parameters.iter().enumerate() {
+                eprintln!(
+                    "       ${}: {} (类型: {:?})",
+                    i + 1,
+                    param.value,
+                    param.data_type
+                );
+            }
         }
-    }
 
-    // 将参数转换为 tokio-postgres 可接受的类型
-    let param_values: Vec<Box<dyn tokio_postgres::types::ToSql + Sync>> = compiled
-        .parameters
-        .iter()
-        .map(|p| {
-            let val: Box<dyn tokio_postgres::types::ToSql + Sync> = match &p.value {
-                serde_json::Value::Number(n) => {
-                    // 根据参数声明的类型决定转换
-                    match p.data_type {
-                        DataType::Float => {
-                            if let Some(f) = n.as_f64() {
-                                Box::new(f) as Box<dyn tokio_postgres::types::ToSql + Sync>
-                            } else {
-                                Box::new(0.0) as Box<dyn tokio_postgres::types::ToSql + Sync>
+        // 将参数转换为 tokio-postgres 可接受的类型
+        let param_values: Vec<Box<dyn tokio_postgres::types::ToSql + Sync>> = compiled
+            .parameters
+            .iter()
+            .map(|p| {
+                let val: Box<dyn tokio_postgres::types::ToSql + Sync> = match &p.value {
+                    serde_json::Value::Number(n) => {
+                        // 根据参数声明的类型决定转换
+                        match p.data_type {
+                            DataType::Float => {
+                                if let Some(f) = n.as_f64() {
+                                    Box::new(f) as Box<dyn tokio_postgres::types::ToSql + Sync>
+                                } else {
+                                    Box::new(0.0) as Box<dyn tokio_postgres::types::ToSql + Sync>
+                                }
                             }
-                        }
-                        DataType::Int => {
-                            if let Some(i) = n.as_i64() {
-                                Box::new(i) as Box<dyn tokio_postgres::types::ToSql + Sync>
-                            } else {
-                                // 如果整数超出 i64 范围，回退
-                                Box::new(0i64) as Box<dyn tokio_postgres::types::ToSql + Sync>
+                            DataType::Int => {
+                                if let Some(i) = n.as_i64() {
+                                    Box::new(i) as Box<dyn tokio_postgres::types::ToSql + Sync>
+                                } else {
+                                    // 如果整数超出 i64 范围，回退
+                                    Box::new(0i64) as Box<dyn tokio_postgres::types::ToSql + Sync>
+                                }
                             }
-                        }
-                        _ => {
-                            // 未知类型，尝试 f64
-                            if let Some(f) = n.as_f64() {
-                                Box::new(f) as Box<dyn tokio_postgres::types::ToSql + Sync>
-                            } else if let Some(i) = n.as_i64() {
-                                Box::new(i) as Box<dyn tokio_postgres::types::ToSql + Sync>
-                            } else {
-                                Box::new(0i64) as Box<dyn tokio_postgres::types::ToSql + Sync>
+                            _ => {
+                                // 未知类型，尝试 f64
+                                if let Some(f) = n.as_f64() {
+                                    Box::new(f) as Box<dyn tokio_postgres::types::ToSql + Sync>
+                                } else if let Some(i) = n.as_i64() {
+                                    Box::new(i) as Box<dyn tokio_postgres::types::ToSql + Sync>
+                                } else {
+                                    Box::new(0i64) as Box<dyn tokio_postgres::types::ToSql + Sync>
+                                }
                             }
                         }
                     }
-                }
-                serde_json::Value::String(s) => {
-                    Box::new(s.clone()) as Box<dyn tokio_postgres::types::ToSql + Sync>
-                }
-                serde_json::Value::Bool(b) => {
-                    Box::new(*b) as Box<dyn tokio_postgres::types::ToSql + Sync>
-                }
-                _ => Box::new(String::new()) as Box<dyn tokio_postgres::types::ToSql + Sync>,
-            };
-            val
-        })
-        .collect::<Vec<_>>();
-
-    let params: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> =
-        param_values.iter().map(|v| v.as_ref()).collect();
-
-    let rows = client.query(&compiled.sql, &params).await?;
-    println!("\n========== 查询结果 ==========");
-    println!("返回 {} 行数据:", rows.len());
-    println!();
-
-    if !rows.is_empty() {
-        let columns = rows[0].columns();
-        let col_names: Vec<&str> = columns.iter().map(|c| c.name()).collect();
-        println!("  │ {} │", col_names.join(" │ "));
-        println!(
-            "  ├{}┤",
-            col_names
-                .iter()
-                .map(|_| "───────")
-                .collect::<Vec<_>>()
-                .join("─┼─")
-        );
-    }
-
-    for row in &rows {
-        let values: Vec<String> = (0..row.len())
-            .map(|i| {
-                // 按顺序尝试：i64 -> f64 -> String -> 最后回退到 "NULL"
-                if let Ok(v) = row.try_get::<_, i64>(i) {
-                    v.to_string()
-                } else if let Ok(v) = row.try_get::<_, f64>(i) {
-                    v.to_string()
-                } else if let Ok(v) = row.try_get::<_, String>(i) {
-                    v
-                } else {
-                    "NULL".to_string()
-                }
+                    serde_json::Value::String(s) => {
+                        Box::new(s.clone()) as Box<dyn tokio_postgres::types::ToSql + Sync>
+                    }
+                    serde_json::Value::Bool(b) => {
+                        Box::new(*b) as Box<dyn tokio_postgres::types::ToSql + Sync>
+                    }
+                    _ => Box::new(String::new()) as Box<dyn tokio_postgres::types::ToSql + Sync>,
+                };
+                val
             })
-            .collect();
-        println!("  │ {} │", values.join(" │ "));
+            .collect::<Vec<_>>();
+
+        let params: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> =
+            param_values.iter().map(|v| v.as_ref()).collect();
+
+        match client.query(&compiled.sql, &params).await {
+            Ok(rows) => {
+                println!("\n========== 查询 {} 结果 ==========", qidx + 1);
+                println!("返回 {} 行数据:", rows.len());
+                println!();
+
+                if !rows.is_empty() {
+                    let columns = rows[0].columns();
+                    let col_names: Vec<&str> = columns.iter().map(|c| c.name()).collect();
+                    println!("  │ {} │", col_names.join(" │ "));
+                    println!(
+                        "  ├{}┤",
+                        col_names
+                            .iter()
+                            .map(|_| "───────")
+                            .collect::<Vec<_>>()
+                            .join("─┼─")
+                    );
+                }
+
+                for row in &rows {
+                    let values: Vec<String> = (0..row.len())
+                        .map(|i| {
+                            // 按顺序尝试：i64 -> f64 -> String -> 最后回退到 "NULL"
+                            if let Ok(v) = row.try_get::<_, i64>(i) {
+                                v.to_string()
+                            } else if let Ok(v) = row.try_get::<_, f64>(i) {
+                                v.to_string()
+                            } else if let Ok(v) = row.try_get::<_, String>(i) {
+                                v
+                            } else {
+                                "NULL".to_string()
+                            }
+                        })
+                        .collect();
+                    println!("  │ {} │", values.join(" │ "));
+                }
+                println!("===============================");
+            }
+            Err(e) => {
+                eprintln!("[ERROR] 查询 {} 执行失败: {}", qidx + 1, e);
+            }
+        }
     }
-    println!("===============================");
 
     Ok(())
 }
@@ -781,13 +1032,48 @@ async fn main() -> Result<(), Box<dyn Error>> {
     println!();
 
     // ──────────────────────────────────────────────────────────────
-    // E. 在 PostgreSQL 上执行（可选）
+    // E. 编译更多自然语言查询
     // ──────────────────────────────────────────────────────────────
-    println!("─── 步骤 E: 在 PostgreSQL 上执行 ───\n");
-    execute_on_postgres(&compiled).await?;
+    println!("─── 步骤 E: 编译更多自然语言查询 ───\n");
+    println!("以下查询使用 compile_only() 直接编译手动构建的 QueryPlan，");
+    println!("演示更多 SQL 特性的编译输出。\n");
+
+    let mut all_compiled = vec![compiled];
+    let additional = build_additional_plans();
+    for (i, (question, plan)) in additional.iter().enumerate() {
+        let validated = ValidatedPlan(Arc::new(plan.clone()));
+        let c = vlorql.compile_only(&validated)?;
+        all_compiled.push(c);
+        println!("查询 {}: \"{}\"", i + 2, question);
+        println!();
+        println!("  SQL:");
+        println!("  ─────────────────────────────────────────────");
+        println!("  {}", all_compiled.last().unwrap().sql);
+        println!("  ─────────────────────────────────────────────");
+        if all_compiled.last().unwrap().parameters.is_empty() {
+            println!("  参数: (无)");
+        } else {
+            println!("  参数:");
+            for (j, param) in all_compiled.last().unwrap().parameters.iter().enumerate() {
+                println!(
+                    "    ${}: value={}, type={:?}",
+                    j + 1,
+                    param.value,
+                    param.data_type
+                );
+            }
+        }
+        println!();
+    }
+
+    // ──────────────────────────────────────────────────────────────
+    // F. 在 PostgreSQL 上执行（可选）
+    // ──────────────────────────────────────────────────────────────
+    println!("─── 步骤 F: 在 PostgreSQL 上执行全部查询 ───\n");
+    execute_on_postgres(&all_compiled).await?;
 
     println!("\n═══════════════════════════════════════════════════════");
-    println!("  示例运行完毕");
+    println!("  示例运行完毕，共编译 {} 条查询", all_compiled.len());
     println!("═══════════════════════════════════════════════════════");
 
     Ok(())
