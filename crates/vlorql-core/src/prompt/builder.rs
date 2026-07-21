@@ -349,12 +349,13 @@ impl PromptBuilder {
              Structure:\n\
              - select: [Projection] (type: column → {table?, column, alias?} | expr → {expression, alias?} | star → {table?})\n\
              - from: {table, alias?}\n\
-             - where: optional Predicate (type: comparison/and/or/not/between/in/like/is_null/exists)\n\
+             - where: optional Predicate — type and|or: {left: Predicate, right: Predicate}; comparison: {left: Expression, op, right: Expression}; not: {operand: Predicate}; between: {left, low, high: Expression}; is_null: {expr: Expression}; exists: {query: QueryPlan}\n\
              - joins: optional [{join_type, right_table: FromClause, on: Predicate}]\n\
              - group_by: optional [Expression] | having: optional Predicate\n\
              - order_by: optional [{expr: Expression, descending: bool}]\n\
              - limit, offset: optional integer | ctes: optional [{name, query: QueryPlan}]\n\
              \n\
+             CRITICAL: `where` must contain ONLY a Predicate object (no joins, order_by, limit, group_by, having, offset, ctes — those go at the top level).\n\
              Use the tagged type variants. Return a data instance — not a schema definition.\n\
              Output JSON only: no fences, comments, or raw SQL.\n\
              \n\

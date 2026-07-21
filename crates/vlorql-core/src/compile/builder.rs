@@ -13,6 +13,7 @@ use crate::schema::{
 use crate::validate::ValidatedPlan;
 use serde_json::{Value, json};
 use std::borrow::Cow;
+use std::collections::HashMap;
 use std::fmt::Write;
 
 /// Builds SQL while preserving the exact textual order of bind parameters.
@@ -21,6 +22,9 @@ pub struct QueryBuilder<'a> {
     dialect: SqlDialect,
     parameters: Vec<Parameter>,
     quote_style: IdentifierQuoting,
+    /// Stack of alias maps for each query level (outermost first).
+    /// Each map resolves table names (and aliases) to effective aliases.
+    alias_stack: Vec<HashMap<String, String>>,
 }
 
 impl<'a> QueryBuilder<'a> {
@@ -30,12 +34,43 @@ impl<'a> QueryBuilder<'a> {
         dialect: SqlDialect,
         quote_style: IdentifierQuoting,
     ) -> Self {
-        Self {
+        let mut builder = Self {
             plan,
             dialect,
             parameters: Vec::new(),
             quote_style,
+            alias_stack: Vec::new(),
+        };
+        builder.push_alias_scope(plan.as_plan());
+        builder
+    }
+
+    fn push_alias_scope(&mut self, plan: &QueryPlan) {
+        let mut map = HashMap::new();
+        Self::collect_aliases(&plan.from, &mut map);
+        if let Some(joins) = &plan.joins {
+            for join in joins {
+                Self::collect_aliases(&join.right_table, &mut map);
+            }
         }
+        self.alias_stack.push(map);
+    }
+
+    fn collect_aliases(from: &FromClause, map: &mut HashMap<String, String>) {
+        let effective = from.alias.clone().unwrap_or_else(|| from.table.clone());
+        map.insert(from.table.clone(), effective.clone());
+        if let Some(ref alias) = from.alias {
+            map.insert(alias.clone(), effective);
+        }
+    }
+
+    fn resolve_alias<'b>(&self, qualifier: &'b str) -> Cow<'b, str> {
+        self.alias_stack
+            .iter()
+            .rev()
+            .find_map(|map| map.get(qualifier))
+            .map(|s| Cow::Owned(s.clone()))
+            .unwrap_or(Cow::Borrowed(qualifier))
     }
 
     /// Builds a SQL string and returns its parameters in placeholder order.
@@ -222,6 +257,7 @@ impl<'a> QueryBuilder<'a> {
     }
 
     fn build_query(&mut self, plan: &QueryPlan, sql: &mut String) -> Result<(), VlorQLError> {
+        self.push_alias_scope(plan);
         self.build_with(plan, sql)?;
         self.build_select(plan, sql)?;
         self.build_from(plan, sql)?;
@@ -230,6 +266,7 @@ impl<'a> QueryBuilder<'a> {
         self.build_having(plan, sql)?;
         self.build_order_by(plan, sql)?;
         self.build_limit_offset(plan, sql)?;
+        self.alias_stack.pop();
         Ok(())
     }
 
@@ -268,7 +305,9 @@ impl<'a> QueryBuilder<'a> {
             match projection {
                 Projection::Star { table: None } => sql.push('*'),
                 Projection::Star { table: Some(table) } => {
-                    write!(sql, "{}.*", self.quote_identifier(table)?).map_err(formatting_error)?;
+                    let resolved = self.resolve_alias(table);
+                    write!(sql, "{}.*", self.quote_identifier(&resolved)?)
+                        .map_err(formatting_error)?;
                 }
                 Projection::Column {
                     table,
@@ -413,11 +452,14 @@ impl<'a> QueryBuilder<'a> {
     ) -> Result<String, VlorQLError> {
         let identifier = self.quote_identifier(identifier)?;
         match qualifier {
-            Some(qualifier) => Ok(format!(
-                "{}.{}",
-                self.quote_identifier(qualifier)?,
-                identifier
-            )),
+            Some(qualifier) => {
+                let resolved = self.resolve_alias(qualifier);
+                Ok(format!(
+                    "{}.{}",
+                    self.quote_identifier(&resolved)?,
+                    identifier
+                ))
+            }
             None => Ok(identifier),
         }
     }
