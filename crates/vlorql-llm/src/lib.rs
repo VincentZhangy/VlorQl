@@ -1567,6 +1567,78 @@ fn repair_query_plan_object(obj: &mut serde_json::Map<String, serde_json::Value>
         }
     }
 
+    // --- 10. Auto-inject missing LEFT JOINs for column-ref tables not in scope ---
+    //     Small models often reference `{"table": "users", "column": "name"}`
+    //     without adding a JOIN for `users`.  If a column-ref uses a table
+    //     qualifier that is not present in the FROM clause or any existing
+    //     JOIN, inject a LEFT JOIN with a best-effort ON clause.
+    let from_table: Option<String> = obj
+        .get("from")
+        .and_then(|v| {
+            v.as_str().map(|s| s.to_owned())
+                .or_else(|| v.as_object().and_then(|o| o.get("table").and_then(|t| t.as_str()).map(|s| s.to_owned())))
+        });
+    if let Some(ref from_tbl) = from_table {
+        // Collect table names already in scope.
+        let mut in_scope = vec![from_tbl.clone()];
+        if let Some(joins) = obj.get("joins").and_then(|v| v.as_array()) {
+            for join in joins {
+                if let Some(join_obj) = join.as_object() {
+                    if let Some(rt) = join_obj.get("right_table") {
+                        let tbl = rt.as_str()
+                            .or_else(|| rt.as_object().and_then(|o| o.get("table").and_then(|t| t.as_str())));
+                        if let Some(t) = tbl {
+                            in_scope.push(t.to_owned());
+                        }
+                    }
+                }
+            }
+        }
+
+        // Walk the plan tree and collect all table qualifiers from column_refs.
+        let plan_value = serde_json::Value::Object(obj.clone());
+        let all_refs = collect_column_ref_tables(&plan_value);
+
+        // Deduplicate and skip tables already in scope.
+        let mut missing: Vec<String> = all_refs
+            .into_iter()
+            .filter(|t| !in_scope.contains(t))
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect();
+        missing.sort();
+
+        if !missing.is_empty() {
+            let joins = obj.entry("joins").or_insert_with(|| serde_json::Value::Array(vec![]));
+            let joins_arr = joins.as_array_mut().unwrap();
+
+            for table in &missing {
+                // Generate a best-effort ON clause.
+                // Convention: <from_table>.<table>_id = <table>.id
+                let on = serde_json::json!({
+                    "type": "comparison",
+                    "left": {
+                        "type": "column_ref",
+                        "table": from_tbl,
+                        "column": format!("{table}_id"),
+                    },
+                    "op": "eq",
+                    "right": {
+                        "type": "column_ref",
+                        "table": table,
+                        "column": "id",
+                    },
+                });
+                joins_arr.push(serde_json::json!({
+                    "join_type": "left",
+                    "right_table": table,
+                    "on": on,
+                }));
+                changed = true;
+            }
+        }
+    }
+
     changed
 }
 
@@ -1611,6 +1683,35 @@ fn repair_expression_value(val: &mut serde_json::Value) -> bool {
     }
 
     false
+}
+
+/// Recursively walks a JSON value and collects all `table` qualifier
+/// values from objects that have `"type": "column_ref"`.
+fn collect_column_ref_tables(val: &serde_json::Value) -> Vec<String> {
+    let mut result = Vec::new();
+    collect_column_ref_tables_inner(val, &mut result);
+    result
+}
+
+fn collect_column_ref_tables_inner(val: &serde_json::Value, acc: &mut Vec<String>) {
+    match val {
+        serde_json::Value::Object(map) => {
+            if map.get("type").and_then(|t| t.as_str()) == Some("column_ref") {
+                if let Some(table) = map.get("table").and_then(|t| t.as_str()) {
+                    acc.push(table.to_owned());
+                }
+            }
+            for v in map.values() {
+                collect_column_ref_tables_inner(v, acc);
+            }
+        }
+        serde_json::Value::Array(arr) => {
+            for v in arr {
+                collect_column_ref_tables_inner(v, acc);
+            }
+        }
+        _ => {}
+    }
 }
 
 /// Repairs a single `Predicate` value (may be `and`/`or` with array sides).
