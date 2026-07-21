@@ -1402,6 +1402,48 @@ fn repair_query_plan_object(obj: &mut serde_json::Map<String, serde_json::Value>
         }
     }
 
+    // --- 3.5. Extract misplaced plan-level fields from inside JOINs ---
+    //     The LLM sometimes nests `where`, `order_by`, `limit` etc. inside a
+    //     join object instead of at the top level.  Extract them back to the
+    //     plan level before step 4 strips them as unknown join fields.
+    const PLAN_LEVEL_FIELDS: &[&str] = &[
+        "select", "from", "where", "group_by", "having",
+        "order_by", "limit", "offset", "ctes",
+    ];
+    // Collect first (read-only borrow of joins), then apply (mutable borrow of obj).
+    let mut extracted_from_joins: Vec<(String, serde_json::Value)> = Vec::new();
+    if let Some(joins) = obj.get("joins").and_then(|v| v.as_array()) {
+        for join in joins {
+            if let Some(join_obj) = join.as_object() {
+                for &field in PLAN_LEVEL_FIELDS {
+                    if let Some(val) = join_obj.get(field) {
+                        if !val.is_null() && !is_empty_array(val) {
+                            extracted_from_joins.push((field.to_owned(), val.clone()));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    for (field, val) in &extracted_from_joins {
+        if !obj.contains_key(field) {
+            obj.insert(field.clone(), val.clone());
+            changed = true;
+        }
+    }
+    // Also remove the extracted fields from the join objects themselves.
+    if let Some(joins) = obj.get_mut("joins").and_then(|v| v.as_array_mut()) {
+        for join in joins.iter_mut() {
+            if let Some(join_obj) = join.as_object_mut() {
+                for &field in PLAN_LEVEL_FIELDS {
+                    if join_obj.remove(field).is_some() {
+                        changed = true;
+                    }
+                }
+            }
+        }
+    }
+
     // --- 4. Recursively repair predicates inside joins ---
     //     Also strips `left_table` (not a field on JoinClause) and any other
     //     unknown join-level fields the LLM may hallucinate.
@@ -1412,6 +1454,27 @@ fn repair_query_plan_object(obj: &mut serde_json::Map<String, serde_json::Value>
         for join in joins_arr.iter_mut() {
             if let Some(join_obj) = join.as_object_mut() {
                 join_obj.retain(|key, _| VALID_JOIN_FIELDS.contains(&key.as_str()));
+
+                // Convert bare-string `right_table` to FromClause object.
+                if let Some(rt) = join_obj.get("right_table").and_then(|v| v.as_str()) {
+                    join_obj.insert("right_table".to_owned(), serde_json::json!({"table": rt}));
+                    changed = true;
+                }
+
+                // Infer missing `right_table` from the ON clause when possible.
+                if !join_obj.contains_key("right_table") && join_obj.contains_key("on") {
+                    if let Some(on_obj) = join_obj.get("on").and_then(|v| v.as_object()) {
+                        let on_table = on_obj.get("right")
+                            .and_then(|r| r.as_object())
+                            .and_then(|r| r.get("table"))
+                            .and_then(|t| t.as_str());
+                        if let Some(table) = on_table {
+                            join_obj.insert("right_table".to_owned(), serde_json::json!({"table": table}));
+                            changed = true;
+                        }
+                    }
+                }
+
                 let right_table_name = join_obj
                     .get("right_table")
                     .and_then(|rt| rt.as_object())
@@ -1631,7 +1694,7 @@ fn repair_query_plan_object(obj: &mut serde_json::Map<String, serde_json::Value>
                 });
                 joins_arr.push(serde_json::json!({
                     "join_type": "left",
-                    "right_table": table,
+                    "right_table": {"table": table},
                     "on": on,
                 }));
                 changed = true;
