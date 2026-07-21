@@ -597,10 +597,16 @@ fn parse_completion_payload(body: &str, backend: LocalBackend) -> Result<QueryPl
         ));
     }
     let cleaned = crate::extract_json_content(content);
-    serde_json::from_str::<QueryPlan>(cleaned).map_err(|error| {
+    let repaired = crate::repair_query_plan_json(cleaned);
+    serde_json::from_str::<QueryPlan>(&repaired).map_err(|error| {
         let raw_content = truncate(content, 4096);
         let cleaned_for_debug = if cleaned != content {
             Some(truncate(cleaned, 4096))
+        } else {
+            None
+        };
+        let repaired_for_debug = if &*repaired != cleaned {
+            Some(truncate(&repaired, 4096))
         } else {
             None
         };
@@ -613,6 +619,7 @@ fn parse_completion_payload(body: &str, backend: LocalBackend) -> Result<QueryPl
                 "backend": backend.label(),
                 "content": raw_content,
                 "cleaned": cleaned_for_debug,
+                "repaired": repaired_for_debug,
             }),
         )
     })

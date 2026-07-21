@@ -39,6 +39,7 @@ pub use vlorql_core::schema::{DialectProfile, SchemaSnapshot, SqlDialect};
 pub use vlorql_core::validate::{OptimizedPlan, ValidatedPlan};
 pub use vlorql_llm::{
     LlmClient, LlmConfig, LlmProvider, create_llm_client, detect_template_leak, extract_json_content,
+    repair_query_plan_json,
 };
 
 const DEFAULT_MAX_RETRIES: usize = 2;
@@ -907,7 +908,8 @@ fn process_assembled_text(
         ));
     }
     let cleaned = extract_json_content(&buffer);
-    let plan: QueryPlan = match serde_json::from_str(cleaned) {
+    let repaired = vlorql_llm::repair_query_plan_json(cleaned);
+    let plan: QueryPlan = match serde_json::from_str(&repaired) {
         Ok(plan) => plan,
         Err(error) => {
             return StreamEvent::Error(VlorQLError::llm(
@@ -918,6 +920,7 @@ fn process_assembled_text(
                     "source": "stream_assistant_content",
                     "buffer_length": buffer.len(),
                     "cleaned": cleaned != buffer,
+                    "repaired": &*repaired != cleaned,
                 }),
             ));
         }

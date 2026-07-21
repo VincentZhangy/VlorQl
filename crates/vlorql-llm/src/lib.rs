@@ -1280,6 +1280,190 @@ fn find_outermost_json_obj(text: &str) -> Option<&str> {
     None
 }
 
+/// Attempts to repair structural issues in a QueryPlan JSON produced
+/// by small LLMs.
+///
+/// Common issues repaired:
+///
+/// - **Misplaced fields**: `order_by`, `limit`, `offset`, `group_by`,
+///   `having` inside the `where` object are moved to the top level.
+/// - **Array predicates**: `left` / `right` inside `and` / `or` that
+///   are arrays are unwrapped to a single object (first element wins).
+/// - **Null / empty entries**: removed from predicates.
+///
+/// Returns the input unchanged when no repair is needed.
+#[must_use]
+pub fn repair_query_plan_json(content: &str) -> std::borrow::Cow<'_, str> {
+    let mut value: serde_json::Value = match serde_json::from_str(content) {
+        Ok(v) => v,
+        Err(_) => return std::borrow::Cow::Borrowed(content),
+    };
+
+    let obj = match value.as_object_mut() {
+        Some(o) => o,
+        None => return std::borrow::Cow::Borrowed(content),
+    };
+
+    let changed = repair_query_plan_object(obj);
+
+    if changed {
+        std::borrow::Cow::Owned(
+            serde_json::to_string(&value).unwrap_or_else(|_| content.to_owned()),
+        )
+    } else {
+        std::borrow::Cow::Borrowed(content)
+    }
+}
+
+/// Recursively repairs a QueryPlan JSON object in-place.
+/// Returns `true` if any change was made.
+fn repair_query_plan_object(obj: &mut serde_json::Map<String, serde_json::Value>) -> bool {
+    let mut changed = false;
+
+    // --- 1. Move misplaced top-level fields from inside `where` ---
+    const TOP_LEVEL_FIELDS: &[&str] = &["order_by", "limit", "offset", "group_by", "having", "joins", "ctes"];
+
+    // Collect misplaced fields from `where` first (before any mutable borrow of `obj`).
+    let mut extracted: Vec<(String, serde_json::Value)> = Vec::new();
+
+    if let Some(where_val) = obj.get_mut("where")
+        && let Some(where_obj) = where_val.as_object_mut()
+    {
+        for &field in TOP_LEVEL_FIELDS {
+            if let Some(val) = where_obj.remove(field) {
+                if !val.is_null() && !is_empty_array(&val) {
+                    extracted.push((field.to_owned(), val));
+                }
+                changed = true;
+            }
+        }
+
+        // --- 2. Recursively fix array predicates inside `where` ---
+        changed |= repair_predicate_object(where_val);
+    }
+
+    // Now insert the extracted fields at the top level (separate borrow).
+    for (field, val) in &extracted {
+        if !obj.contains_key(field) {
+            obj.insert(field.clone(), val.clone());
+        }
+    }
+
+    // --- 3. Recursively repair predicates inside `having` ---
+    if let Some(having) = obj.get_mut("having") {
+        changed |= repair_predicate_object(having);
+    }
+
+    // --- 4. Recursively repair predicates inside joins ---
+    if let Some(joins) = obj.get_mut("joins")
+        && let Some(joins_arr) = joins.as_array_mut()
+    {
+        for join in joins_arr.iter_mut() {
+            if let Some(join_obj) = join.as_object_mut()
+                && let Some(on) = join_obj.get_mut("on")
+            {
+                changed |= repair_predicate_object(on);
+            }
+        }
+    }
+
+    // --- 5. Remove null / invalid elements from array fields ---
+    for array_field in &["group_by", "order_by"] {
+        if let Some(arr) = obj.get_mut(*array_field).and_then(|v| v.as_array_mut()) {
+            let len_before = arr.len();
+            arr.retain(|v| !v.is_null());
+            if arr.len() != len_before {
+                changed = true;
+            }
+            if arr.is_empty() {
+                obj.remove(*array_field);
+                changed = true;
+            }
+        }
+    }
+
+    changed
+}
+
+/// Repairs a single `Predicate` value (may be `and`/`or` with array sides).
+/// Recurses into nested predicates.
+fn repair_predicate_object(pred: &mut serde_json::Value) -> bool {
+    let obj = match pred.as_object_mut() {
+        Some(o) => o,
+        None => return false,
+    };
+
+    let mut changed = false;
+    let pred_type = obj
+        .get("type")
+        .and_then(|t| t.as_str())
+        .unwrap_or("")
+        .to_owned();
+
+    // Fix array-valued sides in and/or
+    if pred_type == "and" || pred_type == "or" {
+        for side in &["left", "right"] {
+            if let Some(arr) = obj.get(*side).and_then(|v| v.as_array()) {
+                if arr.is_empty() {
+                    obj.remove(*side);
+                    changed = true;
+                } else {
+                    let mut first = arr[0].clone();
+                    repair_predicate_object(&mut first);
+                    obj.insert((*side).to_string(), first);
+                    changed = true;
+                }
+            } else if let Some(side_val) = obj.get_mut(*side) {
+                changed |= repair_predicate_object(side_val);
+            }
+        }
+    }
+
+    // Fix array-valued `child` in `not`
+    if pred_type == "not" {
+        if let Some(arr) = obj.get("child").and_then(|v| v.as_array()) {
+            if !arr.is_empty() {
+                let mut first = arr[0].clone();
+                repair_predicate_object(&mut first);
+                obj.insert("child".to_owned(), first);
+                changed = true;
+            }
+        } else if let Some(child) = obj.get_mut("child") {
+            changed |= repair_predicate_object(child);
+        }
+    }
+
+    // Fix array-valued expression fields
+    if pred_type == "comparison" || pred_type == "between" || pred_type == "in" || pred_type == "like" || pred_type == "is_null" {
+        for field in &["left", "right", "expr", "low", "high"] {
+            if let Some(arr) = obj.get(*field).and_then(|v| v.as_array())
+                && !arr.is_empty()
+            {
+                obj.insert((*field).to_string(), arr[0].clone());
+                changed = true;
+            }
+        }
+    }
+
+    // Simplify single-child `and`/`or`: if only `left` exists and no `right`,
+    // replace the entire predicate with `left`.
+    if (pred_type == "and" || pred_type == "or")
+        && obj.contains_key("left")
+        && !obj.contains_key("right")
+        && let Some(left_val) = obj.remove("left")
+    {
+        *pred = left_val;
+        changed = true;
+    }
+
+    changed
+}
+
+/// Returns `true` when `v` is an empty JSON array `[]`.
+fn is_empty_array(v: &serde_json::Value) -> bool {
+    v.as_array().is_some_and(|a| a.is_empty())
+}
+
 /// Returns a descriptive error message when `content` contains raw
 /// chat-template tokens (`<|im_start|>`, `<|im_end|>`), which indicate
 /// the model did not understand the output format constraint.
@@ -1943,5 +2127,81 @@ mod tests {
     fn extract_json_content_strips_fence_then_finds_object() {
         let messy = "```markdown\nSome text {\"key\": \"value\"}\n```";
         assert_eq!(extract_json_content(messy), "{\"key\": \"value\"}");
+    }
+
+    // --- repair_query_plan_json tests ---
+
+    #[test]
+    fn repair_moves_misplaced_fields_from_where_to_top_level() {
+        // llama3.2 often puts order_by, limit, offset inside `where`
+        let input = r#"{"select":[{"type":"star"}],"from":{"table":"orders"},"where":{"type":"and","left":{"type":"comparison","left":{"type":"column_ref","column":"total"},"op":"gt","right":{"type":"literal","value":150,"data_type":"float"}},"order_by":[{"expr":{"type":"column_ref","column":"total"},"descending":true}],"limit":10}}"#;
+        let repaired = repair_query_plan_json(input);
+        let parsed: serde_json::Value = serde_json::from_str(&repaired).unwrap();
+        // order_by and limit should be at top level now
+        assert!(
+            parsed.get("order_by").is_some(),
+            "order_by should be at top level, got: {parsed}"
+        );
+        assert!(
+            parsed.get("limit").is_some(),
+            "limit should be at top level, got: {parsed}"
+        );
+        // where should NOT have order_by or limit
+        let wh = parsed.get("where").and_then(|w| w.as_object()).unwrap();
+        assert!(wh.get("order_by").is_none(), "where should not have order_by");
+        assert!(wh.get("limit").is_none(), "where should not have limit");
+    }
+
+    #[test]
+    fn repair_unwraps_array_left_in_and_predicate() {
+        // llama3.2 puts left/right as arrays instead of single objects
+        let input = r#"{"select":[{"type":"star"}],"from":{"table":"orders"},"where":{"type":"and","left":[{"type":"comparison","left":{"type":"column_ref","column":"total"},"op":"gt","right":{"type":"literal","value":150,"data_type":"float"}}],"right":{"type":"comparison","left":{"type":"column_ref","column":"status"},"op":"eq","right":{"type":"literal","value":"completed","data_type":"string"}}}}"#;
+        let repaired = repair_query_plan_json(input);
+        let parsed: serde_json::Value = serde_json::from_str(&repaired).unwrap();
+        let wh = parsed.get("where").and_then(|w| w.as_object()).unwrap();
+        let left = wh.get("left").unwrap();
+        assert!(left.is_object(), "left should be an object, not array: {left:?}");
+        assert_eq!(
+            left.get("type").and_then(|t| t.as_str()),
+            Some("comparison")
+        );
+    }
+
+    #[test]
+    fn repair_does_not_modify_valid_query_plan() {
+        let valid = r#"{"select":[{"type":"column_ref","table":"orders","column":"id"}],"from":{"table":"orders"},"where":{"type":"comparison","left":{"type":"column_ref","column":"total"},"op":"gt","right":{"type":"literal","value":150,"data_type":"float"}},"order_by":[{"expr":{"type":"column_ref","column":"total"},"descending":true}],"limit":10}"#;
+        let repaired = repair_query_plan_json(valid);
+        // Should be borrowed (not owned) — unchanged
+        assert!(
+            matches!(repaired, std::borrow::Cow::Borrowed(_)),
+            "valid JSON should not be modified"
+        );
+    }
+
+    #[test]
+    fn repair_handles_llama3_2_output_with_multiple_issues() {
+        // This is the actual llama3.2 output from the user's bug report
+        let input = r#"{"select":[{"type":"column_ref","table":"orders","column":"id","alias":null},{"type":"column_ref","table":"users","column":"name","alias":null},{"type":"column_ref","table":"orders","column":"total","alias":null}], "from":{"table":"orders","alias":null}, "where":{"type":"and", "left":[{"type":"comparison","left":{"type":"column_ref","column":"total","table":"orders"},"op":"gt","right":{"type":"literal","value":150,"data_type":"float"}}],"group_by":[null], "having":{"type":"comparison","left":{"type":"column_ref","column":"total","table":"orders"},"op":"gt","right":{"type":"literal","value":150,"data_type":"float"}},"order_by":[{"expr":{"type":"column_ref","column":"total","table":"orders"},"descending":false},{"expr":{"type":"column_ref","column":"id","table":"orders"},"descending":true}], "limit":10} }"#;
+        let repaired = repair_query_plan_json(input);
+        let parsed: serde_json::Value = serde_json::from_str(&repaired).unwrap();
+
+        // order_by should be at top level
+        assert!(parsed.get("order_by").is_some(), "order_by should be at top level");
+        assert!(parsed.get("limit").is_some(), "limit should be at top level");
+
+        // where should NOT have group_by, having, order_by, limit
+        let wh = parsed.get("where").and_then(|w| w.as_object()).unwrap();
+        assert!(wh.get("group_by").is_none(), "where should not have group_by");
+        assert!(wh.get("having").is_none(), "where should not have having");
+        assert!(wh.get("order_by").is_none(), "where should not have order_by");
+        assert!(wh.get("limit").is_none(), "where should not have limit");
+
+        // left should be an object, not array
+        let left = wh.get("left").unwrap();
+        assert!(left.is_object(), "left should be object, got: {left:?}");
+
+        // Verify the whole thing can parse as a QueryPlan
+        let plan: Result<QueryPlan, _> = serde_json::from_str(&repaired);
+        assert!(plan.is_ok(), "repaired should be a valid QueryPlan: {:?}", plan.err());
     }
 }
