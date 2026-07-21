@@ -1260,21 +1260,36 @@ fn strip_markdown_fence(text: &str) -> Option<&str> {
 }
 
 /// Finds the outermost JSON object (`{…}`) in a string by tracking
-/// brace depth.  Returns `None` when no balanced object is found.
+/// brace depth, respecting string boundaries so that braces inside
+/// strings are not counted.  Returns `None` when no balanced object
+/// is found.
 fn find_outermost_json_obj(text: &str) -> Option<&str> {
     let start = text.find('{')?;
-    let slice = &text[start..];
     let mut depth: u32 = 0;
-    for (i, ch) in slice.char_indices() {
-        match ch {
-            '{' => depth = depth.checked_add(1)?,
-            '}' => {
-                depth = depth.checked_sub(1)?;
-                if depth == 0 {
-                    return Some(&text[start..=start + i]);
-                }
+    let mut in_string = false;
+    let mut escaped = false;
+
+    for (i, ch) in text[start..].char_indices() {
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                in_string = false;
             }
-            _ => {}
+        } else {
+            match ch {
+                '{' => depth = depth.checked_add(1)?,
+                '}' => {
+                    depth = depth.checked_sub(1)?;
+                    if depth == 0 {
+                        return Some(&text[start..=start + i]);
+                    }
+                }
+                '"' => in_string = true,
+                _ => {}
+            }
         }
     }
     None
@@ -1379,6 +1394,43 @@ fn repair_query_plan_object(obj: &mut serde_json::Map<String, serde_json::Value>
                 obj.remove(*array_field);
                 changed = true;
             }
+        }
+    }
+
+    // --- 6. Collapse `where` from array to single predicate ---
+    //     llama3.2 sometimes emits `"where": [{...}, "garbage string"]`
+    let where_array_pred: Option<serde_json::Value> =
+        obj.get("where").and_then(|v| v.as_array()).map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_object())
+                .find(|o| o.contains_key("type"))
+                .cloned()
+                .map(serde_json::Value::Object)
+                .unwrap_or(serde_json::Value::Null)
+        });
+
+    if let Some(pred) = where_array_pred {
+        if pred.is_null() {
+            obj.remove("where");
+        } else {
+            obj.insert("where".to_owned(), pred);
+        }
+        changed = true;
+    }
+
+    // --- 7. Remove invalid elements from `select` ---
+    //     Only `column_ref`, `expr`, `star` are valid Projection types.
+    const VALID_PROJECTION_TYPES: &[&str] = &["column_ref", "expr", "star"];
+    if let Some(arr) = obj.get_mut("select").and_then(|v| v.as_array_mut()) {
+        let len_before = arr.len();
+        arr.retain(|v| {
+            v.as_object()
+                .and_then(|o| o.get("type"))
+                .and_then(|t| t.as_str())
+                .is_some_and(|t| VALID_PROJECTION_TYPES.contains(&t))
+        });
+        if arr.len() != len_before {
+            changed = true;
         }
     }
 
@@ -2203,5 +2255,47 @@ mod tests {
         // Verify the whole thing can parse as a QueryPlan
         let plan: Result<QueryPlan, _> = serde_json::from_str(&repaired);
         assert!(plan.is_ok(), "repaired should be a valid QueryPlan: {:?}", plan.err());
+    }
+
+    #[test]
+    fn repair_collapses_where_array_and_removes_invalid_select_items() {
+        // Simulated output where `where` is an array and select has an invalid
+        // `literal` item (mimicking llama3.2 structural errors).
+        let input = r#"{"select":[{"type":"column_ref","column":"id","table":"orders"},{"type":"literal","value":150},{"type":"column_ref","column":"name","table":"users"},{"type":"column_ref","column":"total","table":"orders"}],"from":{"table":"orders"},"where":[{"type":"and","left":[{"type":"comparison","left":{"type":"column_ref","column":"total"},"op":"gt","right":{"type":"literal","value":150}}],"right":{"type":"literal","value":"active"}}],"order_by":[{"expr":{"type":"column_ref","column":"total"},"descending":true}]}"#;
+        let repaired = repair_query_plan_json(input);
+        let parsed: serde_json::Value = serde_json::from_str(&repaired).unwrap();
+
+        // where should now be an object, not an array
+        let wh = parsed.get("where").unwrap();
+        assert!(wh.is_object(), "where should be an object after repair, got: {wh:?}");
+
+        // select should only contain valid Projection types
+        let select = parsed.get("select").and_then(|s| s.as_array()).unwrap();
+        for item in select {
+            let t = item.get("type").and_then(|t| t.as_str()).unwrap();
+            assert!(
+                ["column_ref", "expr", "star"].contains(&t),
+                "select item has invalid type: {t}"
+            );
+        }
+        // Should have 3 valid items (the literal was removed)
+        assert_eq!(select.len(), 3, "select should have 3 items after removing invalid one");
+    }
+
+    #[test]
+    fn find_outermost_json_obj_is_string_aware() {
+        // Braces inside a JSON string should not affect depth tracking.
+        let input = r#"{"outer":{"inner":"some {text with} braces"}}"#;
+        let found = super::find_outermost_json_obj(input);
+        assert!(found.is_some(), "should find balanced outer object");
+        assert_eq!(found.unwrap(), input);
+
+        // When a string contains braces, the scanner should not count them
+        // for depth tracking.
+        let with_braces_in_string = r#"{"where":[{"type":"and"},"string with {braces}"],"extra":"value"}"#;
+        let found2 = super::find_outermost_json_obj(with_braces_in_string);
+        assert!(found2.is_some(), "should handle braces inside strings");
+        let parsed: serde_json::Value = serde_json::from_str(found2.unwrap()).unwrap();
+        assert_eq!(parsed.get("extra").and_then(|v| v.as_str()), Some("value"));
     }
 }
