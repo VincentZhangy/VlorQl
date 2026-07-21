@@ -1493,6 +1493,16 @@ fn repair_query_plan_object(obj: &mut serde_json::Map<String, serde_json::Value>
         changed |= repair_predicate_object(where_val);
     }
 
+    // --- 7c. Inject default `select` when missing ---
+    //     qwen2.5 等小模型有时会省略子查询的 select 字段。
+    if !obj.contains_key("select") && obj.contains_key("from") {
+        obj.insert(
+            "select".to_owned(),
+            serde_json::json!([{"type": "star"}]),
+        );
+        changed = true;
+    }
+
     // --- 8. Repair and remove invalid elements from `select` ---
     //     First inject missing `type` tags for items that look like
     //     ColumnRef, then remove any remaining invalid items.
@@ -1603,6 +1613,24 @@ fn repair_predicate_object(pred: &mut serde_json::Value) -> bool {
         .unwrap_or("")
         .to_owned();
 
+    // If the object has no `type` tag but has `left` and `op` fields,
+    // it is a comparison predicate missing the type discriminator.
+    // Also immediately fix expression type tags inside it so the
+    // rest of the repair (see blocks below) doesn't need to re-check
+    // based on pred_type (which was captured before this injection).
+    if pred_type.is_empty() && obj.contains_key("left") && obj.contains_key("op") {
+        obj.insert(
+            "type".to_owned(),
+            serde_json::Value::String("comparison".to_owned()),
+        );
+        changed = true;
+        for field in ["left", "right"] {
+            if let Some(val) = obj.get_mut(field) {
+                changed |= repair_expression_value(val);
+            }
+        }
+    }
+
     // If the object has no `type` tag but looks like a bare Expression
     // (has `column` field), wrap it as a comparison `expr = NULL` so it
     // can deserialize as a `Predicate`. NULL is used because it is type-
@@ -1650,6 +1678,30 @@ fn repair_predicate_object(pred: &mut serde_json::Value) -> bool {
             }
         } else if let Some(child) = obj.get_mut("child") {
             changed |= repair_predicate_object(child);
+        }
+    }
+
+    // Recursively repair subquery plans inside `exists` / `in` predicates.
+    // Small models (qwen2.5-coder, llama3.2) often emit subqueries without
+    // a `select` field or with missing expression type tags.
+    if pred_type == "exists" {
+        if let Some(query) = obj.get_mut("query")
+            && let Some(query_obj) = query.as_object_mut()
+        {
+            changed |= repair_query_plan_object(query_obj);
+        }
+    }
+    if pred_type == "in" {
+        if let Some(target) = obj.get_mut("target") {
+            if let Some(target_obj) = target.as_object_mut() {
+                // InTarget::SubQuery — repair the inner plan
+                changed |= repair_query_plan_object(target_obj);
+            } else if let Some(arr) = target.as_array_mut() {
+                // InTarget::Values — fix expression type tags in each value
+                for val in arr.iter_mut() {
+                    changed |= repair_expression_value(val);
+                }
+            }
         }
     }
 
