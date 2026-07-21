@@ -1574,9 +1574,10 @@ fn repair_predicate_object(pred: &mut serde_json::Value) -> bool {
         .to_owned();
 
     // If the object has no `type` tag but looks like a bare Expression
-    // (has `column` field), wrap it as a comparison `expr = TRUE` so it
-    // can deserialize as a `Predicate`. The LLM sometimes emits raw
-    // ColumnRef objects in predicate positions (e.g. join `on`).
+    // (has `column` field), wrap it as a comparison `expr = NULL` so it
+    // can deserialize as a `Predicate`. NULL is used because it is type-
+    // compatible with all DataTypes (numeric, string, boolean, etc.)
+    // in the validator's `types_compatible` check.
     if pred_type.is_empty() && obj.contains_key("column") {
         let mut expr = pred.clone();
         repair_expression_value(&mut expr);
@@ -1584,7 +1585,7 @@ fn repair_predicate_object(pred: &mut serde_json::Value) -> bool {
             "type": "comparison",
             "left": expr,
             "op": "eq",
-            "right": {"type": "literal", "value": true, "data_type": "boolean"}
+            "right": {"type": "literal", "value": null, "data_type": "null"}
         });
         return true;
     }
