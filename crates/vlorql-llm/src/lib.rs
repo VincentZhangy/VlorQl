@@ -1365,19 +1365,41 @@ fn repair_query_plan_object(obj: &mut serde_json::Map<String, serde_json::Value>
     }
 
     // --- 3. Recursively repair predicates inside `having` ---
+    //     Also handles `"having": [null]` or `"having": [Predicate]` emitted by
+    //     the LLM when it mistakenly wraps the predicate in an array.
     if let Some(having) = obj.get_mut("having") {
-        changed |= repair_predicate_object(having);
+        if having.is_array() {
+            let arr = having.as_array().unwrap();
+            let pred = arr.iter()
+                .filter_map(|v| v.as_object())
+                .find(|o| o.contains_key("type"))
+                .cloned()
+                .map(serde_json::Value::Object)
+                .unwrap_or(serde_json::Value::Null);
+            if pred.is_null() {
+                obj.remove("having");
+            } else {
+                obj.insert("having".to_owned(), pred);
+            }
+            changed = true;
+        } else {
+            changed |= repair_predicate_object(having);
+        }
     }
 
     // --- 4. Recursively repair predicates inside joins ---
+    //     Also strips `left_table` (not a field on JoinClause) and any other
+    //     unknown join-level fields the LLM may hallucinate.
+    const VALID_JOIN_FIELDS: &[&str] = &["join_type", "right_table", "on"];
     if let Some(joins) = obj.get_mut("joins")
         && let Some(joins_arr) = joins.as_array_mut()
     {
         for join in joins_arr.iter_mut() {
-            if let Some(join_obj) = join.as_object_mut()
-                && let Some(on) = join_obj.get_mut("on")
-            {
-                changed |= repair_predicate_object(on);
+            if let Some(join_obj) = join.as_object_mut() {
+                join_obj.retain(|key, _| VALID_JOIN_FIELDS.contains(&key.as_str()));
+                if let Some(on) = join_obj.get_mut("on") {
+                    changed |= repair_predicate_object(on);
+                }
             }
         }
     }
@@ -1474,6 +1496,21 @@ fn repair_predicate_object(pred: &mut serde_json::Value) -> bool {
         .and_then(|t| t.as_str())
         .unwrap_or("")
         .to_owned();
+
+    // If the object has no `type` tag but looks like a bare Expression
+    // (has `column` field), wrap it as a comparison `expr = TRUE` so it
+    // can deserialize as a `Predicate`. The LLM sometimes emits raw
+    // ColumnRef objects in predicate positions (e.g. join `on`).
+    if pred_type.is_empty() && obj.contains_key("column") {
+        let expr = pred.clone();
+        *pred = serde_json::json!({
+            "type": "comparison",
+            "left": expr,
+            "op": "eq",
+            "right": {"type": "literal", "value": true, "data_type": "boolean"}
+        });
+        return true;
+    }
 
     // Fix array-valued sides in and/or
     if pred_type == "and" || pred_type == "or" {
