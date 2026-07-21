@@ -336,8 +336,26 @@ impl VlorQLError {
                 LlmErrorKind::Timeout => {
                     Some("Retry the LLM request or increase the request timeout.".to_owned())
                 }
-                LlmErrorKind::ParseError { .. } => {
-                    Some("Return only a JSON query plan matching the requested schema.".to_owned())
+                LlmErrorKind::ParseError { details } => {
+                    let details_lower = details.to_lowercase();
+                    let tip = if details_lower.contains("where") && (details_lower.contains("array") || details_lower.contains("sequence") || details_lower.contains("list") || details_lower.contains("expected")) {
+                        "The 'where' field must be a single Predicate object (NOT an array). In 'and'/'or', each of 'left' and 'right' is a single Predicate {...} — never wrap them in [...]."
+                    } else if details_lower.contains("unknown field") {
+                        "Remove any unrecognized fields from the JSON. Only fields defined in the schema are allowed."
+                    } else if details_lower.contains("invalid type") && details_lower.contains("expected") {
+                        "A field has the wrong JSON type — e.g., an array where an object was expected, or a string where a number was expected. Check the field types in the schema."
+                    } else if details_lower.contains("expected struct") {
+                        "A field contains a string instead of a JSON object, or a JSON array has an element of the wrong type. Ensure all nested objects use {...} not \"...\"."
+                    } else if details_lower.contains("expected variant") || details_lower.contains("unknown variant") {
+                        "The 'type' field has an unrecognized value. Use only valid type tags: 'column_ref', 'literal', 'comparison', 'and', 'or', etc."
+                    } else if details_lower.contains("missing field") {
+                        "A required field is missing. Add the required field to the JSON object."
+                    } else if details_lower.contains("trailing characters") || details_lower.contains("control character") || details_lower.contains("escape") || details_lower.contains("expected") {
+                        "The response contains invalid JSON syntax. Return ONLY a raw JSON object — no markdown fences (```json), no extra text before or after."
+                    } else {
+                        "Return only a JSON object matching the QueryPlan schema. No markdown fences, no extra text, no comments."
+                    };
+                    Some(tip.to_owned())
                 }
             },
             Self::Config { .. } => None,
@@ -897,7 +915,7 @@ mod tests {
         assert_code_and_suggestion(
             &parse,
             "L003",
-            Some("Return only a JSON query plan matching the requested schema."),
+            Some("Return only a JSON object matching the QueryPlan schema. No markdown fences, no extra text, no comments."),
         );
     }
 

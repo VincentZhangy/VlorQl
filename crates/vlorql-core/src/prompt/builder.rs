@@ -3,10 +3,9 @@
 use crate::cache::{PromptCache, PromptCacheKey, hash_policy};
 use crate::policy::{PolicyConfig, TablePolicy};
 use crate::schema::{
-    ColumnSchema, DataType, DialectProfile, JoinType, QueryPlan, SchemaSnapshot, SqlDialect,
+    ColumnSchema, DataType, DialectProfile, JoinType, SchemaSnapshot, SqlDialect,
     TableSchema,
 };
-use schemars::schema_for;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
 use std::hash::{Hash, Hasher};
@@ -331,37 +330,26 @@ impl PromptBuilder {
     }
 
     fn push_output_schema(&self, prompt: &mut String) {
-        let root_schema = schema_for!(QueryPlan);
-        let json_schema = serde_json::to_value(root_schema)
-            .map(|mut schema| {
-                remove_schema_descriptions(&mut schema);
-                schema
-            })
-            .and_then(|schema| serde_json::to_string(&schema))
-            .unwrap_or_else(|error| {
-                format!(
-                    "{{\"schema_generation_error\":\"{}\"}}",
-                    json_string_fragment(&error.to_string())
-                )
-            });
         prompt.push_str(
             "## Required JSON Output\n\
              Structure:\n\
              - select: [Projection] (type: column_ref → {table?, column, alias?} | expr → {expression, alias?} | star → {table?})\n\
              - from: {table, alias?}\n\
-             - where: optional Predicate — type and|or: {left: Predicate, right: Predicate}; comparison: {left: Expression, op, right: Expression}; not: {operand: Predicate}; between: {left, low, high: Expression}; is_null: {expr: Expression}; exists: {query: QueryPlan}\n\
+             - where: optional Predicate — type and|or: {left: Predicate, right: Predicate}; comparison: {left: Expression, op, right: Expression}; not: {child: Predicate}; between: {expr, low, high: Expression}; is_null: {expr: Expression}; exists: {query: QueryPlan}\n\
              - joins: optional [{join_type, right_table: FromClause, on: Predicate}]\n\
              - group_by: optional [Expression] | having: optional Predicate\n\
              - order_by: optional [{expr: Expression, descending: bool}]\n\
              - limit, offset: optional integer | ctes: optional [{name, query: QueryPlan}]\n\
              \n\
-             CRITICAL: `where` must contain ONLY a Predicate object (no joins, order_by, limit, group_by, having, offset, ctes — those go at the top level).\n\
+             CRITICAL: `where`, `left`, `right`, `child` must each be a SINGLE Predicate object (NOT an array). `left` and `right` inside `and`/`or` are single {{...}} objects, never arrays.\n\
+             CRITICAL: `order_by`, `limit`, `offset` go at the top level of the response, never inside `where`.\n\
              Use the tagged type variants. Return a data instance — not a schema definition.\n\
              Output JSON only: no fences, comments, or raw SQL.\n\
              \n\
+             Compact JSON Schema (every field is inlined, no $ref):\n\
              ```json\n",
         );
-        prompt.push_str(&json_schema);
+        prompt.push_str(compact_output_schema());
         prompt.push_str("\n```\n\n");
     }
 
@@ -650,29 +638,74 @@ fn join_type_name(join_type: &JoinType) -> &'static str {
     }
 }
 
-fn remove_schema_descriptions(value: &mut serde_json::Value) {
-    match value {
-        serde_json::Value::Object(object) => {
-            object.remove("description");
-            for value in object.values_mut() {
-                remove_schema_descriptions(value);
-            }
-        }
-        serde_json::Value::Array(values) => {
-            for value in values {
-                remove_schema_descriptions(value);
-            }
-        }
-        _ => {}
-    }
-}
-
-fn json_string_fragment(value: &str) -> String {
-    value
-        .replace('\\', "\\\\")
-        .replace('"', "\\\"")
-        .replace('\n', "\\n")
-        .replace('\r', "\\r")
+fn compact_output_schema() -> &'static str {
+    use std::sync::OnceLock;
+    static SCHEMA: OnceLock<String> = OnceLock::new();
+    SCHEMA.get_or_init(|| {
+        serde_json::to_string(&serde_json::json!({
+            "type": "object",
+            "properties": {
+                "select": {
+                    "type": "array",
+                    "items": {
+                        "oneOf": [
+                            {"type": "object", "properties": {"type": {"enum": ["column_ref"]}, "table": {"type": "string"}, "column": {"type": "string"}, "alias": {"type": "string"}}, "required": ["type", "column"]},
+                            {"type": "object", "properties": {"type": {"enum": ["expr"]}, "expression": {"type": "object"}, "alias": {"type": "string"}}, "required": ["type", "expression"]},
+                            {"type": "object", "properties": {"type": {"enum": ["star"]}, "table": {"type": "string"}}, "required": ["type"]}
+                        ]
+                    }
+                },
+                "from": {"type": "object", "properties": {"table": {"type": "string"}, "alias": {"type": "string"}}, "required": ["table"]},
+                "where": {
+                    "oneOf": [
+                        {"type": "object", "properties": {"type": {"enum": ["comparison"]}, "left": {"type": "object"}, "op": {"enum": ["eq","neq","gt","gte","lt","lte","like","ilike","in","between"]}, "right": {"type": "object"}}, "required": ["type","left","op","right"]},
+                        {"type": "object", "properties": {"type": {"enum": ["and"]}, "left": {"type": "object"}, "right": {"type": "object"}}, "required": ["type","left","right"]},
+                        {"type": "object", "properties": {"type": {"enum": ["or"]}, "left": {"type": "object"}, "right": {"type": "object"}}, "required": ["type","left","right"]},
+                        {"type": "object", "properties": {"type": {"enum": ["not"]}, "child": {"type": "object"}}, "required": ["type","child"]},
+                        {"type": "object", "properties": {"type": {"enum": ["between"]}, "expr": {"type": "object"}, "low": {"type": "object"}, "high": {"type": "object"}}, "required": ["type","expr","low","high"]},
+                        {"type": "object", "properties": {"type": {"enum": ["in"]}, "expr": {"type": "object"}, "target": {"type": "array","items": {"type": "object"}}}, "required": ["type","expr","target"]},
+                        {"type": "object", "properties": {"type": {"enum": ["like"]}, "expr": {"type": "object"}, "pattern": {"type": "string"}}, "required": ["type","expr","pattern"]},
+                        {"type": "object", "properties": {"type": {"enum": ["is_null"]}, "expr": {"type": "object"}}, "required": ["type","expr"]},
+                        {"type": "object", "properties": {"type": {"enum": ["exists"]}, "query": {"type": "object"}}, "required": ["type","query"]}
+                    ]
+                },
+                "joins": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "join_type": {"enum": ["inner","left","right","full","cross"]},
+                            "right_table": {"type": "object", "properties": {"table": {"type": "string"}, "alias": {"type": "string"}}, "required": ["table"]},
+                            "on": {"type": "object"}
+                        },
+                        "required": ["join_type","right_table","on"]
+                    }
+                },
+                "group_by": {"type": "array", "items": {"type": "object"}},
+                "having": {"type": "object"},
+                "order_by": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {"expr": {"type": "object"}, "descending": {"type": "boolean"}},
+                        "required": ["expr","descending"]
+                    }
+                },
+                "limit": {"type": "integer"},
+                "offset": {"type": "integer"},
+                "ctes": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {"name": {"type": "string"}, "query": {"type": "object"}},
+                        "required": ["name","query"]
+                    }
+                }
+            },
+            "required": ["select", "from"]
+        }))
+        .expect("compact output schema must serialize to JSON")
+    })
 }
 
 /// Builds a reverse foreign-key index: maps each `foreign_table` → list of
