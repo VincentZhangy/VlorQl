@@ -1463,11 +1463,24 @@ fn repair_query_plan_object(obj: &mut serde_json::Map<String, serde_json::Value>
         changed |= repair_predicate_object(where_val);
     }
 
-    // --- 8. Remove invalid elements from `select` ---
-    //     Only `column_ref`, `expr`, `star` are valid Projection types.
+    // --- 8. Repair and remove invalid elements from `select` ---
+    //     First inject missing `type` tags for items that look like
+    //     ColumnRef, then remove any remaining invalid items.
     const VALID_PROJECTION_TYPES: &[&str] = &["column_ref", "expr", "star"];
     if let Some(arr) = obj.get_mut("select").and_then(|v| v.as_array_mut()) {
         let len_before = arr.len();
+        // Inject missing `type` for items that look like ColumnRef
+        for item in arr.iter_mut() {
+            if let Some(item_obj) = item.as_object_mut() {
+                if !item_obj.contains_key("type") && item_obj.contains_key("column") {
+                    item_obj.insert(
+                        "type".to_owned(),
+                        serde_json::Value::String("column_ref".to_owned()),
+                    );
+                }
+            }
+        }
+        // Remove items that still have invalid or missing type
         arr.retain(|v| {
             v.as_object()
                 .and_then(|o| o.get("type"))
@@ -1479,7 +1492,70 @@ fn repair_query_plan_object(obj: &mut serde_json::Map<String, serde_json::Value>
         }
     }
 
+    // --- 9. Fix missing `type` tags on expression fields in group_by / order_by ---
+    //     The LLM often omits `type` from Expression objects in these positions.
+    for array_field in &["group_by", "order_by"] {
+        if let Some(arr) = obj.get_mut(*array_field).and_then(|v| v.as_array_mut()) {
+            for item in arr.iter_mut() {
+                if let Some(term) = item.as_object_mut()
+                    && term.contains_key("expr")
+                {
+                    // order_by items are OrderByTerm with an `expr` Expression
+                    if let Some(expr) = term.get_mut("expr") {
+                        changed |= repair_expression_value(expr);
+                    }
+                } else {
+                    // group_by items are bare Expression objects
+                    changed |= repair_expression_value(item);
+                }
+            }
+        }
+    }
+
     changed
+}
+
+/// Adds missing `"type"` tags to Expression-like JSON objects.
+///
+/// The LLM frequently omits the `type` discriminator from `ColumnRef`,
+/// `Literal`, and `FunctionCall` objects. This function infers the
+/// correct tag from the present fields so that serde can deserialize
+/// the value as an [`Expression`](vlorql_core::schema::Expression).
+fn repair_expression_value(val: &mut serde_json::Value) -> bool {
+    let obj = match val.as_object_mut() {
+        Some(o) => o,
+        None => return false,
+    };
+
+    if obj.contains_key("type") {
+        return false;
+    }
+
+    if obj.contains_key("column") {
+        obj.insert(
+            "type".to_owned(),
+            serde_json::Value::String("column_ref".to_owned()),
+        );
+        return true;
+    }
+
+    if obj.contains_key("value") {
+        obj.insert(
+            "type".to_owned(),
+            serde_json::Value::String("literal".to_owned()),
+        );
+        return true;
+    }
+
+    if obj.contains_key("name") && obj.contains_key("args") {
+        obj.insert(
+            "type".to_owned(),
+            serde_json::Value::String("function_call".to_owned()),
+        );
+        return true;
+    }
+
+    false
 }
 
 /// Repairs a single `Predicate` value (may be `and`/`or` with array sides).
@@ -1502,7 +1578,8 @@ fn repair_predicate_object(pred: &mut serde_json::Value) -> bool {
     // can deserialize as a `Predicate`. The LLM sometimes emits raw
     // ColumnRef objects in predicate positions (e.g. join `on`).
     if pred_type.is_empty() && obj.contains_key("column") {
-        let expr = pred.clone();
+        let mut expr = pred.clone();
+        repair_expression_value(&mut expr);
         *pred = serde_json::json!({
             "type": "comparison",
             "left": expr,
@@ -1553,6 +1630,17 @@ fn repair_predicate_object(pred: &mut serde_json::Value) -> bool {
             {
                 obj.insert((*field).to_string(), arr[0].clone());
                 changed = true;
+            }
+        }
+    }
+
+    // Fix missing `type` tags on expression fields nested within predicates.
+    // The LLM often emits bare `{"column":"x","table":"t"}` objects without
+    // the `"type":"column_ref"` discriminator that serde needs.
+    if pred_type == "comparison" || pred_type == "between" || pred_type == "in" || pred_type == "like" || pred_type == "is_null" {
+        for field in &["left", "right", "expr", "low", "high"] {
+            if let Some(val) = obj.get_mut(*field) {
+                changed |= repair_expression_value(val);
             }
         }
     }
@@ -2357,5 +2445,127 @@ mod tests {
         assert!(found2.is_some(), "should handle braces inside strings");
         let parsed: serde_json::Value = serde_json::from_str(found2.unwrap()).unwrap();
         assert_eq!(parsed.get("extra").and_then(|v| v.as_str()), Some("value"));
+    }
+
+    #[test]
+    fn repair_injects_missing_type_on_join_on_and_select() {
+        // The LLM emits flat objects without `type` discriminator in
+        // expression and projection positions, e.g.:
+        //   - join `on` is a bare `{"table":"users","column":"id"}`
+        //     instead of a comparison predicate.
+        //   - select items lack `"type":"column_ref"`.
+        // The fix injects the missing tags so serde can deserialize
+        // the result as a QueryPlan.
+        let input = r#"{
+  "from": {"alias": null, "table": "orders"},
+  "select": [
+    {"alias": null, "table": "orders", "column": "id"},
+    {"alias": null, "table": "users", "column": "name"},
+    {"alias": null, "table": "orders", "column": "total"}
+  ],
+  "where": {
+    "left": {"column": "total", "table": "orders", "type": "column_ref"},
+    "op": "gt",
+    "right": {"data_type": "float", "type": "literal", "value": 150},
+    "type": "comparison"
+  },
+  "joins": [{
+    "join_type": "inner",
+    "on": {"table": "users", "column": "id", "table": "orders", "column": "user_id"},
+    "right_table": {"alias": "u", "table": "users"},
+    "left_table": {"alias": "o", "table": "orders"}
+  }],
+  "group_by": [null],
+  "having": [null],
+  "order_by": [{"descending": false, "expr": {"column": "total", "table": "orders", "type": "column_ref"}}],
+  "limit": 10,
+  "offset": 0
+}"#;
+        let repaired = repair_query_plan_json(input);
+        let plan: Result<QueryPlan, _> = serde_json::from_str(&repaired);
+        assert!(
+            plan.is_ok(),
+            "repaired should deserialize as QueryPlan: {:?}",
+            plan.err()
+        );
+
+        let parsed: serde_json::Value = serde_json::from_str(&repaired).unwrap();
+
+        // select items should have type injected
+        let select = parsed.get("select").and_then(|s| s.as_array()).unwrap();
+        assert_eq!(select.len(), 3);
+        for item in select {
+            assert_eq!(
+                item.get("type").and_then(|t| t.as_str()),
+                Some("column_ref"),
+                "select item should have type column_ref: {item:?}"
+            );
+        }
+
+        // join should have its `on` repaired into a comparison predicate
+        let joins = parsed.get("joins").and_then(|j| j.as_array()).unwrap();
+        assert_eq!(joins.len(), 1);
+        let join = &joins[0];
+        // left_table should be stripped (not a valid JoinClause field)
+        assert!(
+            join.get("left_table").is_none(),
+            "left_table should be stripped"
+        );
+        let on = join.get("on").and_then(|o| o.as_object()).unwrap();
+        assert_eq!(
+            on.get("type").and_then(|t| t.as_str()),
+            Some("comparison"),
+            "on should be wrapped as comparison predicate"
+        );
+        // The left expression should have type column_ref injected
+        let left = on.get("left").and_then(|l| l.as_object()).unwrap();
+        assert_eq!(
+            left.get("type").and_then(|t| t.as_str()),
+            Some("column_ref"),
+            "on.left should have type column_ref: {left:?}"
+        );
+
+        // group_by null should be removed
+        assert!(parsed.get("group_by").is_none(), "null group_by should be removed");
+    }
+
+    #[test]
+    fn repair_injects_missing_type_on_bare_expression_in_group_by() {
+        // The LLM sometimes omits `type` from Expression objects in
+        // group_by positions.
+        let input = r#"{
+  "select": [{"type": "column_ref", "table": "orders", "column": "total"}],
+  "from": {"table": "orders"},
+  "group_by": [{"column": "status", "table": "orders"}],
+  "order_by": [{"descending": false, "expr": {"column": "total", "table": "orders"}}]
+}"#;
+        let repaired = repair_query_plan_json(input);
+        let plan: Result<QueryPlan, _> = serde_json::from_str(&repaired);
+        assert!(
+            plan.is_ok(),
+            "repaired should deserialize as QueryPlan: {:?}",
+            plan.err()
+        );
+
+        let parsed: serde_json::Value = serde_json::from_str(&repaired).unwrap();
+
+        // group_by expression should have type injected
+        let group_by = parsed.get("group_by").and_then(|g| g.as_array()).unwrap();
+        assert_eq!(group_by.len(), 1);
+        assert_eq!(
+            group_by[0].get("type").and_then(|t| t.as_str()),
+            Some("column_ref")
+        );
+
+        // order_by expr should have type injected
+        let order_by = parsed.get("order_by").and_then(|o| o.as_array()).unwrap();
+        assert_eq!(order_by.len(), 1);
+        assert_eq!(
+            order_by[0]
+                .get("expr")
+                .and_then(|e| e.get("type"))
+                .and_then(|t| t.as_str()),
+            Some("column_ref")
+        );
     }
 }
