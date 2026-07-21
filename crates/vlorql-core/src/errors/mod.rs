@@ -236,6 +236,10 @@ impl VlorQLError {
                     | ValidationErrorKind::InvalidFunction { .. }
                     | ValidationErrorKind::TypeMismatch { .. }
             ),
+            Self::Schema { kind, .. } => matches!(
+                kind,
+                SchemaErrorKind::TableNotFound { .. } | SchemaErrorKind::ColumnNotFound { .. }
+            ),
             Self::Llm { .. } => true,
             _ => false,
         }
@@ -322,9 +326,20 @@ impl VlorQLError {
             Self::Compilation { .. } => {
                 Some("Use only features supported by the selected SQL dialect compiler.".to_owned())
             }
-            Self::Schema { .. } => Some(
-                "Refresh the schema snapshot and reference an existing table or column.".to_owned(),
-            ),
+            Self::Schema { kind, .. } => match kind {
+                SchemaErrorKind::TableNotFound { table } => {
+                    let tip = if table == "where" || table == "from" {
+                        // These are internal field names, not actual table names
+                        "The 'table' field contains a reserved word or structural field name, not an actual table. Use a valid table name from the schema."
+                    } else {
+                        "Add the table as a JOIN (with an ON clause) or as the FROM source. If you reference columns with 'table: \"<name>\"', that table must be in FROM or JOINs."
+                    };
+                    Some(tip.to_owned())
+                }
+                SchemaErrorKind::ColumnNotFound { .. } => {
+                    Some("Use only column names listed in the schema for the referenced table.".to_owned())
+                }
+            },
             Self::Llm { kind, .. } => match kind {
                 LlmErrorKind::ApiError { status, .. } if *status == 401 || *status == 403 => {
                     Some("Check the LLM provider credentials and permissions.".to_owned())
@@ -864,15 +879,17 @@ mod tests {
 
     #[test]
     fn every_schema_error_kind_has_a_distinct_code() {
-        let shared_suggestion =
-            "Refresh the schema snapshot and reference an existing table or column.";
         let missing_table = VlorQLError::schema(
             SchemaErrorKind::TableNotFound {
                 table: "ghost".to_owned(),
             },
             json!({}),
         );
-        assert_code_and_suggestion(&missing_table, "S001", Some(shared_suggestion));
+        assert_code_and_suggestion(
+            &missing_table,
+            "S001",
+            Some("Add the table as a JOIN (with an ON clause) or as the FROM source. If you reference columns with 'table: \"<name>\"', that table must be in FROM or JOINs."),
+        );
 
         let missing_column = VlorQLError::schema(
             SchemaErrorKind::ColumnNotFound {
@@ -881,7 +898,11 @@ mod tests {
             },
             json!({}),
         );
-        assert_code_and_suggestion(&missing_column, "S002", Some(shared_suggestion));
+        assert_code_and_suggestion(
+            &missing_column,
+            "S002",
+            Some("Use only column names listed in the schema for the referenced table."),
+        );
     }
 
     #[test]
@@ -1022,7 +1043,7 @@ mod tests {
                     },
                     json!({}),
                 ),
-                false,
+                true,
             ),
             (
                 VlorQLError::config(ConfigErrorKind::MissingSchema, json!({})),
