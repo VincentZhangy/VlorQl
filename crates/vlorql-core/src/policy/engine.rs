@@ -195,7 +195,7 @@ impl PolicyEngine {
                 Some(source) => vec![source],
                 None => {
                     if reported_tables.insert(("schema", qualifier.to_owned())) {
-                        errors.push(table_not_found_error(qualifier, schema));
+                        errors.push(table_not_in_scope_or_not_found(qualifier, schema));
                     }
                     return;
                 }
@@ -228,7 +228,7 @@ impl PolicyEngine {
         if let Some(qualifier) = &reference.table {
             let Some(source) = scope.resolve_source(qualifier) else {
                 if reported_tables.insert(("schema", qualifier.clone())) {
-                    errors.push(table_not_found_error(qualifier, schema));
+                    errors.push(table_not_in_scope_or_not_found(qualifier, schema));
                 }
                 return;
             };
@@ -399,6 +399,22 @@ fn table_not_found_error(table: &str, schema: &SchemaSnapshot) -> VlorQLError {
                 .collect::<Vec<_>>(),
         }),
     )
+}
+
+fn table_not_in_scope_or_not_found(table: &str, schema: &SchemaSnapshot) -> VlorQLError {
+    let context = json!({
+        "table": table,
+        "available_tables": schema
+            .tables
+            .iter()
+            .map(|candidate| candidate.name.as_str())
+            .collect::<Vec<_>>(),
+    });
+    if schema.get_table(table).is_some() {
+        VlorQLError::schema(SchemaErrorKind::TableNotInScope { table: table.to_owned() }, context)
+    } else {
+        VlorQLError::schema(SchemaErrorKind::TableNotFound { table: table.to_owned() }, context)
+    }
 }
 
 trait AvailableColumns {

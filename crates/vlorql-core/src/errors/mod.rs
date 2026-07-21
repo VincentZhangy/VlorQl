@@ -189,6 +189,7 @@ impl VlorQLError {
             Self::Schema { kind, .. } => match kind {
                 SchemaErrorKind::TableNotFound { .. } => "S001",
                 SchemaErrorKind::ColumnNotFound { .. } => "S002",
+                SchemaErrorKind::TableNotInScope { .. } => "S003",
             },
             Self::Llm { kind, .. } => match kind {
                 LlmErrorKind::ApiError { .. } => "L001",
@@ -238,7 +239,7 @@ impl VlorQLError {
             ),
             Self::Schema { kind, .. } => matches!(
                 kind,
-                SchemaErrorKind::TableNotFound { .. } | SchemaErrorKind::ColumnNotFound { .. }
+                SchemaErrorKind::TableNotFound { .. } | SchemaErrorKind::TableNotInScope { .. } | SchemaErrorKind::ColumnNotFound { .. }
             ),
             Self::Llm { .. } => true,
             _ => false,
@@ -329,10 +330,17 @@ impl VlorQLError {
             Self::Schema { kind, .. } => match kind {
                 SchemaErrorKind::TableNotFound { table } => {
                     let tip = if table == "where" || table == "from" {
-                        // These are internal field names, not actual table names
                         "The 'table' field contains a reserved word or structural field name, not an actual table. Use a valid table name from the schema."
                     } else {
                         "Add the table as a JOIN (with an ON clause) or as the FROM source. If you reference columns with 'table: \"<name>\"', that table must be in FROM or JOINs."
+                    };
+                    Some(tip.to_owned())
+                }
+                SchemaErrorKind::TableNotInScope { table } => {
+                    let tip = if table == "where" || table == "from" {
+                        "The 'table' field contains a reserved word or structural field name, not an actual table. Use a valid table name from the schema."
+                    } else {
+                        "The table exists in the schema but is not part of the query's FROM or JOIN clauses. Add a JOIN (with an ON clause) for this table."
                     };
                     Some(tip.to_owned())
                 }
@@ -903,6 +911,18 @@ mod tests {
             "S002",
             Some("Use only column names listed in the schema for the referenced table."),
         );
+
+        let not_in_scope = VlorQLError::schema(
+            SchemaErrorKind::TableNotInScope {
+                table: "users".to_owned(),
+            },
+            json!({}),
+        );
+        assert_code_and_suggestion(
+            &not_in_scope,
+            "S003",
+            Some("The table exists in the schema but is not part of the query's FROM or JOIN clauses. Add a JOIN (with an ON clause) for this table."),
+        );
     }
 
     #[test]
@@ -1040,6 +1060,15 @@ mod tests {
                 VlorQLError::schema(
                     SchemaErrorKind::TableNotFound {
                         table: "missing".to_owned(),
+                    },
+                    json!({}),
+                ),
+                true,
+            ),
+            (
+                VlorQLError::schema(
+                    SchemaErrorKind::TableNotInScope {
+                        table: "users".to_owned(),
                     },
                     json!({}),
                 ),

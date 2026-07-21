@@ -40,7 +40,7 @@ fn validate_plan(plan: &QueryPlan, schema: &SchemaSnapshot, errors: &mut Vec<Vlo
     let references = collect_plan_references(plan);
     for qualifier in references.stars.into_iter().flatten() {
         if scope.resolve_source(&qualifier).is_none() && reported_tables.insert(qualifier.clone()) {
-            errors.push(table_not_found_error(&qualifier, schema));
+            errors.push(table_not_in_scope_or_not_found(&qualifier, schema));
         }
     }
 
@@ -67,7 +67,7 @@ fn validate_column_reference(
     if let Some(qualifier) = &reference.table {
         let Some(source) = scope.resolve_source(qualifier) else {
             if reported_tables.insert(qualifier.clone()) {
-                errors.push(table_not_found_error(qualifier, schema));
+                errors.push(table_not_in_scope_or_not_found(qualifier, schema));
             }
             return;
         };
@@ -151,6 +151,24 @@ fn push_column_not_found(
             "available_columns": available_columns,
         }),
     ));
+}
+
+/// Returns a `TableNotInScope` error when `table` exists in the schema,
+/// or a `TableNotFound` error when `table` is genuinely missing.
+fn table_not_in_scope_or_not_found(table: &str, schema: &SchemaSnapshot) -> VlorQLError {
+    let context = json!({
+        "table": table,
+        "available_tables": schema
+            .tables
+            .iter()
+            .map(|candidate| candidate.name.as_str())
+            .collect::<Vec<_>>(),
+    });
+    if schema.get_table(table).is_some() {
+        VlorQLError::schema(SchemaErrorKind::TableNotInScope { table: table.to_owned() }, context)
+    } else {
+        VlorQLError::schema(SchemaErrorKind::TableNotFound { table: table.to_owned() }, context)
+    }
 }
 
 fn table_not_found_error(table: &str, schema: &SchemaSnapshot) -> VlorQLError {
