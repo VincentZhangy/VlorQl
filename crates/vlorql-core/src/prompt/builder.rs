@@ -346,7 +346,9 @@ impl PromptBuilder {
             });
         prompt.push_str(
             "## Required JSON Output\n\
-             Return a JSON object matching the schema below (not a schema definition). Output JSON only: no fences, comments, or raw SQL. Use the tagged `type` variants exactly as defined.\n\
+             Top-level fields: select (required), from (required), where?, joins?, group_by?, having?, order_by?, limit?, offset?, ctes?.\n\
+             Each object must have a `\"type\"` field. Return a data instance matching the JSON Schema below — do not output schema metadata.\n\
+             Output JSON only: no fences, comments, or raw SQL.\n\
              \n\
              ```json\n",
         );
