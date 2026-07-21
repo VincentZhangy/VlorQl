@@ -1630,7 +1630,124 @@ fn repair_query_plan_object(obj: &mut serde_json::Map<String, serde_json::Value>
         }
     }
 
-    // --- 10. Normalize data_type strings (e.g. "integer" → "int") ---
+    // --- 10. Auto-inject missing LEFT JOINs when column refs reference
+    //     tables not in FROM or existing JOINs.  The ON clause is inferred
+    //     from the column names already present in the plan:
+    //
+    //     • If `order_items.product_id` references `products` (from),
+    //       `product_id` → singularize `products` = `product` → match →
+    //       `products.id = order_items.product_id`
+    //
+    //     • If `orders.user_id` references `users` (from_table's own col),
+    //       `user_id` → singularize `users` = `user` → match →
+    //       `orders.user_id = users.id`
+    let from_table: Option<String> = obj
+        .get("from")
+        .and_then(|v| {
+            v.as_str().map(|s| s.to_owned())
+                .or_else(|| v.as_object().and_then(|o| o.get("table").and_then(|t| t.as_str()).map(|s| s.to_owned())))
+        });
+    if let Some(ref from_tbl) = from_table {
+        // Collect tables already in scope.
+        let mut in_scope = vec![from_tbl.clone()];
+        if let Some(joins) = obj.get("joins").and_then(|v| v.as_array()) {
+            for join in joins {
+                if let Some(join_obj) = join.as_object() {
+                    if let Some(rt) = join_obj.get("right_table") {
+                        let tbl = rt.as_str()
+                            .or_else(|| rt.as_object().and_then(|o| o.get("table").and_then(|t| t.as_str())));
+                        if let Some(t) = tbl {
+                            in_scope.push(t.to_owned());
+                        }
+                    }
+                }
+            }
+        }
+
+        // Walk the plan to collect all column refs grouped by table.
+        let plan_value = serde_json::Value::Object(obj.clone());
+        let mut table_columns: std::collections::BTreeMap<String, Vec<String>> = std::collections::BTreeMap::new();
+        collect_column_refs(&plan_value, &mut table_columns);
+
+        // Find tables referenced but not in scope.
+        let mut missing: Vec<String> = table_columns.keys()
+            .filter(|t| !in_scope.contains(t))
+            .cloned()
+            .collect();
+        missing.sort();
+
+        if !missing.is_empty() {
+            let from_singular = singularize(from_tbl);
+            let joins = obj.entry("joins").or_insert_with(|| serde_json::Value::Array(vec![]));
+            let joins_arr = joins.as_array_mut().unwrap();
+
+            'next_missing: for table in &missing {
+                let table_singular = singularize(table);
+
+                // Strategy A: the missing table has a FK back to the FROM table.
+                // e.g. order_items.product_id → products.id
+                if let Some(cols) = table_columns.get(table) {
+                    for col in cols {
+                        if let Some(fk_target) = col.strip_suffix("_id") {
+                            if fk_target == from_singular || fk_target == *from_tbl {
+                                joins_arr.push(serde_json::json!({
+                                    "join_type": "left",
+                                    "right_table": {"table": table},
+                                    "on": {
+                                        "type": "comparison",
+                                        "left": {"type": "column_ref", "table": from_tbl, "column": "id"},
+                                        "op": "eq",
+                                        "right": {"type": "column_ref", "table": table, "column": col},
+                                    },
+                                }));
+                                changed = true;
+                                continue 'next_missing;
+                            }
+                        }
+                    }
+                }
+
+                // Strategy B: the FROM table has a FK to the missing table.
+                // e.g. orders.user_id → users.id
+                if let Some(cols) = table_columns.get(from_tbl) {
+                    for col in cols {
+                        if let Some(fk_target) = col.strip_suffix("_id") {
+                            if fk_target == table_singular || fk_target == *table {
+                                joins_arr.push(serde_json::json!({
+                                    "join_type": "left",
+                                    "right_table": {"table": table},
+                                    "on": {
+                                        "type": "comparison",
+                                        "left": {"type": "column_ref", "table": from_tbl, "column": col},
+                                        "op": "eq",
+                                        "right": {"type": "column_ref", "table": table, "column": "id"},
+                                    },
+                                }));
+                                changed = true;
+                                continue 'next_missing;
+                            }
+                        }
+                    }
+                }
+
+                // Strategy C: fallback — join on id = id (likely wrong, but
+                // pushes the error into validation where retries can help).
+                joins_arr.push(serde_json::json!({
+                    "join_type": "left",
+                    "right_table": {"table": table},
+                    "on": {
+                        "type": "comparison",
+                        "left": {"type": "column_ref", "table": from_tbl, "column": "id"},
+                        "op": "eq",
+                        "right": {"type": "column_ref", "table": table, "column": "id"},
+                    },
+                }));
+                changed = true;
+            }
+        }
+    }
+
+    // --- 11. Normalize data_type strings (e.g. "integer" → "int") ---
     let mut plan_value = serde_json::Value::Object(std::mem::take(obj));
     changed |= normalize_data_types(&mut plan_value);
     if let serde_json::Value::Object(map) = plan_value {
@@ -1676,6 +1793,40 @@ fn normalize_data_types_inner(val: &mut serde_json::Value, changed: &mut bool) {
         serde_json::Value::Array(arr) => {
             for v in arr.iter_mut() {
                 normalize_data_types_inner(v, changed);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Strips a trailing 's' from table names to guess the singular form
+/// (e.g. "users" → "user", "orders" → "order", "order_items" → "order_item").
+fn singularize(s: &str) -> String {
+    if s.ends_with('s') {
+        s[..s.len() - 1].to_owned()
+    } else {
+        s.to_owned()
+    }
+}
+
+/// Collects all column refs from a JSON value, grouped by table name.
+fn collect_column_refs(val: &serde_json::Value, acc: &mut std::collections::BTreeMap<String, Vec<String>>) {
+    match val {
+        serde_json::Value::Object(map) => {
+            if map.get("type").and_then(|t| t.as_str()) == Some("column_ref") {
+                if let Some(table) = map.get("table").and_then(|t| t.as_str()) {
+                    if let Some(column) = map.get("column").and_then(|c| c.as_str()) {
+                        acc.entry(table.to_owned()).or_default().push(column.to_owned());
+                    }
+                }
+            }
+            for v in map.values() {
+                collect_column_refs(v, acc);
+            }
+        }
+        serde_json::Value::Array(arr) => {
+            for v in arr {
+                collect_column_refs(v, acc);
             }
         }
         _ => {}
@@ -2838,6 +2989,43 @@ mod tests {
 
         let dt = parsed["where"]["child"]["right"]["data_type"].as_str().unwrap();
         assert_eq!(dt, "int", "data_type should be normalized from 'integer' to 'int', got: {dt}");
+
+        let plan: Result<QueryPlan, _> = serde_json::from_str(&repaired);
+        assert!(plan.is_ok(), "repaired should be a valid QueryPlan: {:?}", plan.err());
+    }
+
+    #[test]
+    fn repair_auto_joins_missing_table_via_column_ref() {
+        let input = r#"{"from":{"table":"orders","alias":null},"select":[{"type":"column_ref","table":"orders","column":"id"},{"type":"column_ref","table":"users","column":"name"},{"type":"column_ref","table":"orders","column":"total"}]}"#;
+        let repaired = repair_query_plan_json(input);
+        let parsed: serde_json::Value = serde_json::from_str(&repaired).unwrap();
+
+        let joins = parsed.get("joins").and_then(|j| j.as_array()).unwrap();
+        assert_eq!(joins.len(), 1, "should have 1 auto-injected join");
+
+        let rt = joins[0].get("right_table").and_then(|r| r.get("table")).and_then(|t| t.as_str()).unwrap();
+        assert_eq!(rt, "users", "right_table should be 'users'");
+
+        let plan: Result<QueryPlan, _> = serde_json::from_str(&repaired);
+        assert!(plan.is_ok(), "repaired should be a valid QueryPlan: {:?}", plan.err());
+    }
+
+    #[test]
+    fn repair_auto_join_uses_fk_column_name() {
+        let input = r#"{"from":{"table":"products","alias":null},"select":[{"type":"star"}],"where":{"type":"not","child":{"type":"exists","query":{"from":{"table":"order_items","alias":null},"select":[{"type":"star"}],"where":{"type":"comparison","left":{"type":"column_ref","table":"order_items","column":"product_id"},"op":"eq","right":{"type":"column_ref","table":"products","column":"id"}}}}}}"#;
+        let repaired = repair_query_plan_json(input);
+        let parsed: serde_json::Value = serde_json::from_str(&repaired).unwrap();
+
+        let joins = parsed["where"]["child"]["query"]["joins"]
+            .as_array().expect("subquery should have auto-join for products");
+        assert_eq!(joins.len(), 1);
+        let on_left = joins[0]["on"]["left"]["column"].as_str().unwrap();
+        let on_right = joins[0]["on"]["right"]["column"].as_str().unwrap();
+        // FK column in 'from_tbl' (order_items.product_id) matches singular of
+        // missing table (product → products), so strategy B infers:
+        //   order_items.product_id = products.id
+        assert_eq!(on_left, "product_id", "left should be order_items.product_id");
+        assert_eq!(on_right, "id", "right should be products.id");
 
         let plan: Result<QueryPlan, _> = serde_json::from_str(&repaired);
         assert!(plan.is_ok(), "repaired should be a valid QueryPlan: {:?}", plan.err());
