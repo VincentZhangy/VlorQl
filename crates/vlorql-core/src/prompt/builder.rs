@@ -270,7 +270,6 @@ impl PromptBuilder {
         prompt.push('\n');
     }
 
-
     fn push_dialect_constraints(&self, prompt: &mut String) {
         let dialect_name = sql_dialect_name(self.dialect.dialect);
 
@@ -301,7 +300,11 @@ impl PromptBuilder {
         let joins = if join_types.is_empty() {
             "none".to_owned()
         } else {
-            format!("{} (max {})", join_types.join(", "), optional_limit(self.dialect.max_joins))
+            format!(
+                "{} (max {})",
+                join_types.join(", "),
+                optional_limit(self.dialect.max_joins)
+            )
         };
 
         let func_allow = if self.dialect.allowed_functions.is_empty() {
@@ -320,7 +323,11 @@ impl PromptBuilder {
         let _ = writeln!(prompt, "Features: {}", feature_flags.join(", "));
         let _ = writeln!(prompt, "Joins: {joins}");
         let _ = writeln!(prompt, "Functions: {func_allow} | {func_deny}");
-        let _ = writeln!(prompt, "GroupBy: {}\n", optional_limit(self.dialect.max_group_by_columns));
+        let _ = writeln!(
+            prompt,
+            "GroupBy: {}\n",
+            optional_limit(self.dialect.max_group_by_columns)
+        );
     }
 
     fn push_output_schema(&self, prompt: &mut String) {
@@ -454,7 +461,6 @@ impl PromptBuilder {
             .map(|table| table.name.clone())
             .collect()
     }
-
 }
 
 fn table_document_tokens(table: &TableSchema) -> HashMap<String, usize> {

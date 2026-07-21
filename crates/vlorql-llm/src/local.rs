@@ -1074,8 +1074,14 @@ mod tests {
             .create_async()
             .await;
 
+        let mut extra = std::collections::HashMap::new();
+        extra.insert(
+            "strict_json_schema".to_owned(),
+            serde_json::Value::Bool(true),
+        );
         let config = LlmConfig {
             api_base: Some(server.url()),
+            extra,
             ..local_config(LlmProvider::Ollama, "llama3.2")
         };
         let client = LocalClient::new(config).expect("client should build");

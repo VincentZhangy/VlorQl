@@ -775,7 +775,7 @@ impl LlmClient for MockLlmClient {
 
 pub(crate) fn compact_query_plan_schema() -> Value {
     static SCHEMA: std::sync::OnceLock<Value> = std::sync::OnceLock::new();
-    SCHEMA.get_or_init(|| simplified_query_plan_schema()).clone()
+    SCHEMA.get_or_init(simplified_query_plan_schema).clone()
 }
 
 /// Returns a flattened JSON Schema for `QueryPlan` without `$ref` or `$defs`.
