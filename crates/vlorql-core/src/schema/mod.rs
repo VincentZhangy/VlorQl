@@ -166,7 +166,7 @@ mod tests {
         // to the same plan.
         let body = json!({
             "select": [{
-                "type": "column",
+                "type": "column_ref",
                 "table": "users",
                 "column": "id",
                 "alias": null

@@ -347,7 +347,7 @@ impl PromptBuilder {
         prompt.push_str(
             "## Required JSON Output\n\
              Structure:\n\
-             - select: [Projection] (type: column → {table?, column, alias?} | expr → {expression, alias?} | star → {table?})\n\
+             - select: [Projection] (type: column_ref → {table?, column, alias?} | expr → {expression, alias?} | star → {table?})\n\
              - from: {table, alias?}\n\
              - where: optional Predicate — type and|or: {left: Predicate, right: Predicate}; comparison: {left: Expression, op, right: Expression}; not: {operand: Predicate}; between: {left, low, high: Expression}; is_null: {expr: Expression}; exists: {query: QueryPlan}\n\
              - joins: optional [{join_type, right_table: FromClause, on: Predicate}]\n\
@@ -384,7 +384,7 @@ impl PromptBuilder {
 
         let example_json = serde_json::json!({
             "select": [{
-                "type": "column",
+                "type": "column_ref",
                 "table": table.name,
                 "column": column.name,
                 "alias": null
@@ -403,8 +403,8 @@ impl PromptBuilder {
         );
         let _ = writeln!(
             prompt,
-            "Q: Orders with total > 150, sorted by total desc\n\
-             A: {{\"select\":[{{\"type\":\"column\",\"table\":\"orders\",\"column\":\"id\",\"alias\":null}},{{\"type\":\"column\",\"table\":\"orders\",\"column\":\"total\",\"alias\":null}}],\"from\":{{\"table\":\"orders\",\"alias\":null}},\"where\":{{\"type\":\"comparison\",\"left\":{{\"type\":\"column_ref\",\"column\":\"total\",\"table\":\"orders\"}},\"op\":\"gt\",\"right\":{{\"type\":\"literal\",\"value\":150,\"data_type\":\"float\"}}}},\"order_by\":[{{\"expr\":{{\"type\":\"column_ref\",\"column\":\"total\",\"table\":\"orders\"}},\"descending\":true}}],\"limit\":10}}\n\
+             "Q: Orders with total > 150, sorted by total desc\n\
+              A: {{\"select\":[{{\"type\":\"column_ref\",\"table\":\"orders\",\"column\":\"id\",\"alias\":null}},{{\"type\":\"column_ref\",\"table\":\"orders\",\"column\":\"total\",\"alias\":null}}],\"from\":{{\"table\":\"orders\",\"alias\":null}},\"where\":{{\"type\":\"comparison\",\"left\":{{\"type\":\"column_ref\",\"column\":\"total\",\"table\":\"orders\"}},\"op\":\"gt\",\"right\":{{\"type\":\"literal\",\"value\":150,\"data_type\":\"float\"}}}},\"order_by\":[{{\"expr\":{{\"type\":\"column_ref\",\"column\":\"total\",\"table\":\"orders\"}},\"descending\":true}}],\"limit\":10}}\n\
              \n\
              The real response must obey the current schema and dialect.\n",
         );
@@ -419,6 +419,10 @@ impl PromptBuilder {
         prompt.push_str(
             "## JSON Type Reminder\n\
              Every tagged object must include a `\"type\"` field matching the JSON Schema above.\n\
+             \n\
+             Notes:\n\
+             - `data_type` only belongs inside `literal` objects.\n\
+             - `order_by`, `limit`, `offset` go at the top level, never inside `where`.\n\
              \n\
              Example of a nested `WHERE`:\n\
              ```json\n\

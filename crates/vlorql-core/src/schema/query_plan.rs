@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Projection {
     /// Select one named column.
+    #[serde(rename = "column_ref")]
     Column {
         /// Source-table qualifier, if the column reference should be
         /// qualified in the rendered SQL.

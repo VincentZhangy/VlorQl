@@ -794,7 +794,7 @@ fn simplified_query_plan_schema() -> Value {
                 "items": {
                     "type": "object",
                     "properties": {
-                        "type": { "type": "string", "enum": ["column", "expr", "star"] },
+                        "type": { "type": "string", "enum": ["column_ref", "expr", "star"] },
                         "table": { "type": "string" },
                         "column": { "type": "string" },
                         "expression": { "$ref": "#/definitions/Expression" },
