@@ -346,7 +346,7 @@ impl PromptBuilder {
             });
         prompt.push_str(
             "## Required JSON Output\n\
-             Return a JSON object matching the schema below. Output JSON only: no fences, comments, or raw SQL.\n\
+             Return a JSON object matching the schema below (not a schema definition). Output JSON only: no fences, comments, or raw SQL. Use the tagged `type` variants exactly as defined.\n\
              \n\
              ```json\n",
         );
@@ -402,6 +402,13 @@ impl PromptBuilder {
         prompt.push_str(
             "## JSON Type Reminder\n\
              Every tagged object must include a `\"type\"` field matching the JSON Schema above.\n\
+             \n\
+             Example of a nested `WHERE`:\n\
+             ```json\n\
+             {\"where\": {\"type\": \"and\",\n\
+               \"left\": {\"type\": \"comparison\", \"left\": {\"type\": \"column_ref\", \"column\": \"total\", \"table\": \"orders\"}, \"op\": \"gt\", \"right\": {\"type\": \"literal\", \"value\": 150, \"data_type\": \"float\"}},\n\
+               \"right\": {\"type\": \"comparison\", \"left\": {\"type\": \"column_ref\", \"column\": \"status\", \"table\": \"orders\"}, \"op\": \"eq\", \"right\": {\"type\": \"literal\", \"value\": \"completed\", \"data_type\": \"string\"}}}}\n\
+             ```\n\
              \n",
         );
     }
