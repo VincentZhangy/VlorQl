@@ -1397,7 +1397,37 @@ fn repair_query_plan_object(obj: &mut serde_json::Map<String, serde_json::Value>
         for join in joins_arr.iter_mut() {
             if let Some(join_obj) = join.as_object_mut() {
                 join_obj.retain(|key, _| VALID_JOIN_FIELDS.contains(&key.as_str()));
+                let right_table_name = join_obj
+                    .get("right_table")
+                    .and_then(|rt| rt.as_object())
+                    .and_then(|rt| rt.get("table"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_owned();
                 if let Some(on) = join_obj.get_mut("on") {
+                    // Handle bare ColumnRef in join ON clause.
+                    // The LLM sometimes emits duplicate-keyed objects like
+                    // {"table":"users","column":"id","table":"orders","column":"user_id"}
+                    // which JSON parsing resolves to just {"table":"orders","column":"user_id"}.
+                    // Reconstruct a proper comparison using right_table info.
+                    if let Some(on_obj) = on.as_object() {
+                        if !on_obj.contains_key("type") && on_obj.contains_key("column") {
+                            let mut left_expr = on.clone();
+                            repair_expression_value(&mut left_expr);
+                            *on = serde_json::json!({
+                                "type": "comparison",
+                                "left": left_expr,
+                                "op": "eq",
+                                "right": {
+                                    "type": "column_ref",
+                                    "table": right_table_name,
+                                    "column": "id"
+                                }
+                            });
+                            changed = true;
+                            continue;
+                        }
+                    }
                     changed |= repair_predicate_object(on);
                 }
             }
@@ -2524,6 +2554,18 @@ mod tests {
             left.get("type").and_then(|t| t.as_str()),
             Some("column_ref"),
             "on.left should have type column_ref: {left:?}"
+        );
+        // The right expression should also be reconstructed as column_ref to right_table.id
+        let right = on.get("right").and_then(|r| r.as_object()).unwrap();
+        assert_eq!(
+            right.get("type").and_then(|t| t.as_str()),
+            Some("column_ref"),
+            "on.right should have type column_ref: {right:?}"
+        );
+        assert_eq!(
+            right.get("table").and_then(|t| t.as_str()),
+            Some("users"),
+            "on.right.table should be the right_table name"
         );
 
         // group_by null should be removed
