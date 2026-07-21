@@ -57,7 +57,7 @@ use vlorql_core::schema::{
     Predicate, Projection, QueryPlan,
 };
 use vlorql_core::validate::ValidatedPlan;
-use vlorql_llm::{LlmClient, LlmConfig, LlmProvider, MockLlmClient, create_llm_client};
+use vlorql_llm::{LlmClient, LlmConfig, LlmProvider, create_llm_client};
 
 use rustls::SignatureScheme;
 use rustls::client::danger::{ServerCertVerified, ServerCertVerifier};
@@ -309,12 +309,12 @@ fn build_schema() -> Arc<SchemaSnapshot> {
 // ============================================================================
 //
 // 「真实 LLM 模式」：设置 OPENAI_API_KEY（或 LLM_PROVIDER），
-// 框架自动调用 LLM 生成 QueryPlan，您无需手动构建。
+// 框架自动调用 LLM 为每个问题生成 QueryPlan。
 //
-// 「离线演示模式」：未设置 API Key 时使用 MockLlmClient，
-// 它会返回一个预设的 QueryPlan 来模拟 LLM 输出。
+// 「离线演示模式」：不设置 API Key，使用预设的 QueryPlan 通过
+// compile_only() 直接编译，无需 LLM。
 
-fn select_llm_client() -> Box<dyn LlmClient> {
+fn select_llm_client() -> Option<Box<dyn LlmClient>> {
     // 优先使用真实的 OpenAI 兼容 API
     if let Ok(api_key) = std::env::var("OPENAI_API_KEY")
         && !api_key.trim().is_empty()
@@ -332,8 +332,8 @@ fn select_llm_client() -> Box<dyn LlmClient> {
             "[INFO] 真实 LLM 模式：使用 OpenAI 兼容客户端 (model={})",
             config.model
         );
-        eprintln!("       您只需要输入自然语言，QueryPlan 由 LLM 自动生成\n");
-        return create_llm_client(config).expect("创建 OpenAI 客户端失败");
+        eprintln!("       所有查询都将通过 LLM 自动生成 QueryPlan\n");
+        return Some(create_llm_client(config).expect("创建 OpenAI 客户端失败"));
     }
 
     // 也支持其他 Provider
@@ -371,26 +371,46 @@ fn select_llm_client() -> Box<dyn LlmClient> {
             ..LlmConfig::default()
         };
         eprintln!("[INFO] 真实 LLM 模式：使用 {provider} 客户端\n");
-        return create_llm_client(config).expect("创建 LLM 客户端失败");
+        return Some(create_llm_client(config).expect("创建 LLM 客户端失败"));
     }
 
     // 未设置 API Key → 离线演示模式
-    eprintln!("[INFO] 离线演示模式：未检测到 API Key，使用 MockLlmClient");
-    eprintln!("       Mock 模式需要预设一个 QueryPlan 来模拟 LLM 输出。");
+    eprintln!("[INFO] 离线演示模式：未检测到 API Key");
+    eprintln!("       使用预设的 QueryPlan 通过 compile_only() 直接编译。");
     eprintln!("       设置 OPENAI_API_KEY 即可切换到真实 LLM 模式，无需手动构建 QueryPlan。\n");
-    Box::new(MockLlmClient::success(build_demo_plan()))
+    None
 }
 
 // ============================================================================
-// 3. 离线演示模式：预设 QueryPlan（仅 Mock 模式需要）
+// 3. 预设 QueryPlan（仅离线模式需要）
 // ============================================================================
 //
-// 注意：这段代码仅用于「离线演示模式」。
 // 在真实 LLM 模式下，QueryPlan 由 LLM 自动生成，完全不需要这段代码。
-//
-// 预设 QueryPlan 对应自然语言问题：
-//   "列出总金额超过150的已完成订单，显示订单号、客户名和总金额"
+// 离线演示模式使用 compile_only() 直接编译这些预设的 Plan。
 
+/// 返回所有自然语言问题及其对应的预设 QueryPlan。
+fn build_all_plans() -> Vec<(&'static str, QueryPlan)> {
+    vec![
+        (
+            "列出总金额超过150的已完成订单，显示订单号、客户名和总金额，按金额从高到低排序，最多10条",
+            build_demo_plan(),
+        ),
+        (
+            "查询状态为已完成或已发货的订单，显示订单号、金额、状态和客户名",
+            build_in_predicate_plan(),
+        ),
+        (
+            "哪些商品从未被购买过？",
+            build_is_null_plan(),
+        ),
+        (
+            "每种产品卖了多少件？",
+            build_aggregate_plan(),
+        ),
+    ]
+}
+
+/// Plan 1: 基础查询 —— 已完成的订单（总金额 > 150）
 fn build_demo_plan() -> QueryPlan {
     QueryPlan {
         select: vec![
@@ -469,29 +489,6 @@ fn build_demo_plan() -> QueryPlan {
         }]),
         ctes: None,
     }
-}
-
-// ============================================================================
-// 4. 更多自然语言查询（手动构建的 QueryPlan 示例）
-// ============================================================================
-
-/// 返回更多的自然语言查询及其对应的 QueryPlan，
-/// 覆盖更多 SQL 特性（IN、IS NULL、LEFT JOIN、GROUP BY + 聚合）。
-fn build_additional_plans() -> Vec<(&'static str, QueryPlan)> {
-    vec![
-        (
-            "查询状态为已完成或已发货的订单，显示订单号、金额、状态和客户名",
-            build_in_predicate_plan(),
-        ),
-        (
-            "哪些商品从未被购买过？",
-            build_is_null_plan(),
-        ),
-        (
-            "每种产品卖了多少件？",
-            build_aggregate_plan(),
-        ),
-    ]
 }
 
 /// Plan 2: IN 谓词 —— 查询状态为 completed 或 shipped 的订单
@@ -975,35 +972,53 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // B. 构建 VlorQl Facade
     // ──────────────────────────────────────────────────────────────
     println!("─── 步骤 B: 构建 VlorQl Facade ───\n");
-    let vlorql = VlorQl::builder()
+    let llm_client = select_llm_client();
+    let is_llm_mode = llm_client.is_some();
+    let mut builder = VlorQl::builder()
         .with_schema(Arc::clone(&schema))
         .with_dialect_name("postgres")
         .with_policy(PolicyConfig::default())
-        .with_llm_client(select_llm_client())
-        .with_max_retries(2)
-        .build()?;
+        .with_max_retries(2);
+    if let Some(client) = llm_client {
+        builder = builder.with_llm_client(client);
+    }
+    let vlorql = builder.build()?;
     println!("[OK] VlorQl Facade 已构建\n");
 
     // ──────────────────────────────────────────────────────────────
-    // C. 发送自然语言查询 —— 这就是您唯一需要做的事情
+    // C. 编译全部自然语言查询
     // ──────────────────────────────────────────────────────────────
-    println!("─── 步骤 C: 发送自然语言查询 ───\n");
-    let user_question =
-        "列出总金额超过150的已完成订单，显示订单号、客户名和总金额，按金额从高到低排序，最多10条";
-    println!("用户问题: \"{user_question}\"");
-    println!();
-    println!("[INFO] VlorQl 内部自动完成以下步骤：");
-    println!("       1. 构建系统提示词（Schema + 方言 + 策略）");
-    println!("       2. 调用 LLM 生成结构化 QueryPlan");
-    println!("       3. 验证 QueryPlan（Schema → 策略 → 类型 → 方言）");
-    println!("       4. 编译为参数化 SQL");
-    if std::env::var("OPENAI_API_KEY").is_ok() || std::env::var("LLM_PROVIDER").is_ok() {
-        println!("       5. 如果验证失败，自动带错误信息重试 LLM");
-    }
-    println!();
+    let questions_and_plans = build_all_plans();
+    let count = questions_and_plans.len();
 
-    let compiled = vlorql.query(user_question).await?;
-    println!("[OK] 查询完成\n");
+    if is_llm_mode {
+        println!("─── 步骤 C: 使用 LLM 生成全部 {count} 条查询 ───\n");
+        println!("[INFO] 每条查询都通过 VlorQl 完整流程：");
+        println!("       1. 构建系统提示词（Schema + 方言 + 策略）");
+        println!("       2. 调用 LLM 生成结构化 QueryPlan");
+        println!("       3. 验证 QueryPlan（Schema → 策略 → 类型 → 方言）");
+        println!("       4. 编译为参数化 SQL");
+        println!("       5. 如果验证失败，自动带错误信息重试 LLM");
+        println!();
+    } else {
+        println!("─── 步骤 C: 使用预设 QueryPlan 编译全部 {count} 条查询 ───\n");
+        println!("[INFO] 离线模式：使用 compile_only() 直接编译预设 Plan。");
+        println!("       设置 OPENAI_API_KEY 即可让 LLM 动态生成每个查询。\n");
+    }
+
+    let mut all_compiled = Vec::with_capacity(count);
+    for (i, (question, plan)) in questions_and_plans.iter().enumerate() {
+        let compiled = if is_llm_mode {
+            println!("[{}/{}] 查询: \"{}\"", i + 1, count, question);
+            let c = vlorql.query(question).await?;
+            println!("[OK]\n");
+            c
+        } else {
+            let validated = ValidatedPlan(Arc::new(plan.clone()));
+            vlorql.compile_only(&validated)?
+        };
+        all_compiled.push(compiled);
+    }
 
     // ──────────────────────────────────────────────────────────────
     // D. 查看编译结果
@@ -1011,50 +1026,20 @@ async fn main() -> Result<(), Box<dyn Error>> {
     println!("─── 步骤 D: 编译后的参数化 SQL ───\n");
     println!("方言: {:?}", SqlDialect::Postgres);
     println!();
-    println!("SQL:");
-    println!("─────────────────────────────────────────────");
-    println!("{}", compiled.sql);
-    println!("─────────────────────────────────────────────");
-    println!();
-    if compiled.parameters.is_empty() {
-        println!("参数: (无)");
-    } else {
-        println!("参数:");
-        for (i, param) in compiled.parameters.iter().enumerate() {
-            println!(
-                "  ${}: value={}, type={:?}",
-                i + 1,
-                param.value,
-                param.data_type
-            );
-        }
-    }
-    println!();
 
-    // ──────────────────────────────────────────────────────────────
-    // E. 编译更多自然语言查询
-    // ──────────────────────────────────────────────────────────────
-    println!("─── 步骤 E: 编译更多自然语言查询 ───\n");
-    println!("以下查询使用 compile_only() 直接编译手动构建的 QueryPlan，");
-    println!("演示更多 SQL 特性的编译输出。\n");
-
-    let mut all_compiled = vec![compiled];
-    let additional = build_additional_plans();
-    for (i, (question, plan)) in additional.iter().enumerate() {
-        let validated = ValidatedPlan(Arc::new(plan.clone()));
-        let c = vlorql.compile_only(&validated)?;
-        all_compiled.push(c);
-        println!("查询 {}: \"{}\"", i + 2, question);
+    for (i, compiled) in all_compiled.iter().enumerate() {
+        let (question, _) = &questions_and_plans[i];
+        println!("查询 {}: \"{}\"", i + 1, question);
         println!();
         println!("  SQL:");
         println!("  ─────────────────────────────────────────────");
-        println!("  {}", all_compiled.last().unwrap().sql);
+        println!("  {}", compiled.sql);
         println!("  ─────────────────────────────────────────────");
-        if all_compiled.last().unwrap().parameters.is_empty() {
+        if compiled.parameters.is_empty() {
             println!("  参数: (无)");
         } else {
             println!("  参数:");
-            for (j, param) in all_compiled.last().unwrap().parameters.iter().enumerate() {
+            for (j, param) in compiled.parameters.iter().enumerate() {
                 println!(
                     "    ${}: value={}, type={:?}",
                     j + 1,
@@ -1067,9 +1052,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
 
     // ──────────────────────────────────────────────────────────────
-    // F. 在 PostgreSQL 上执行（可选）
+    // E. 在 PostgreSQL 上执行（可选）
     // ──────────────────────────────────────────────────────────────
-    println!("─── 步骤 F: 在 PostgreSQL 上执行全部查询 ───\n");
+    println!("─── 步骤 E: 在 PostgreSQL 上执行全部查询 ───\n");
     execute_on_postgres(&all_compiled).await?;
 
     println!("\n═══════════════════════════════════════════════════════");
