@@ -12,7 +12,7 @@ fn run_pipeline(raw: &str) -> Result<vlorql_core::schema::QueryPlan, Box<dyn std
     let json_str = extract_json_content(raw);
     // Stage 2: Normalize
     let mut value: serde_json::Value = serde_json::from_str(json_str)?;
-    pipeline::normalize(&mut value);
+    let _ = pipeline::normalize(&mut value);
     // Stage 3: Build
     let plan = query_builder::build_plan(&value)?;
     Ok(plan)
@@ -166,7 +166,7 @@ fn double_normalize_roundtrip() {
     let json_str = extract_json_content(raw);
     let mut value: serde_json::Value = serde_json::from_str(json_str).unwrap();
     // First normalize
-    pipeline::normalize(&mut value);
+    let _ = pipeline::normalize(&mut value);
     // Second normalize — should be no-op
     assert!(
         !pipeline::normalize(&mut value),

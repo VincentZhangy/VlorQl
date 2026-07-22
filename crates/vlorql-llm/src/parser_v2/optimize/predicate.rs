@@ -570,7 +570,6 @@ fn expressions_equal(a: &Expression, b: &Expression) -> bool {
 mod tests {
     use super::*;
     use serde_json::json;
-    use vlorql_core::schema::*;
 
     fn lit_bool(v: bool) -> Expression {
         Expression::Literal {
