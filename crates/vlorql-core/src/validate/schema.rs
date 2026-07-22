@@ -2,7 +2,7 @@
 
 use crate::errors::{SchemaErrorKind, VlorQLError};
 use crate::query::{ColumnReference, QueryScope, collect_plan_references};
-use crate::schema::{QueryPlan, SchemaSnapshot};
+use crate::schema::{Expression, InTarget, Predicate, Projection, QueryPlan, SchemaSnapshot};
 use serde_json::json;
 use std::collections::HashSet;
 
@@ -54,6 +54,8 @@ fn validate_plan(plan: &QueryPlan, schema: &SchemaSnapshot, errors: &mut Vec<Vlo
             &mut reported_columns,
         );
     }
+
+    validate_subqueries_in_plan(plan, schema, errors);
 }
 
 fn validate_column_reference(
@@ -168,6 +170,97 @@ fn table_not_in_scope_or_not_found(table: &str, schema: &SchemaSnapshot) -> Vlor
         VlorQLError::schema(SchemaErrorKind::TableNotInScope { table: table.to_owned() }, context)
     } else {
         VlorQLError::schema(SchemaErrorKind::TableNotFound { table: table.to_owned() }, context)
+    }
+}
+
+/// Recursively validate subqueries found in predicates and expressions.
+fn validate_subqueries_in_plan(
+    plan: &QueryPlan,
+    schema: &SchemaSnapshot,
+    errors: &mut Vec<VlorQLError>,
+) {
+    for projection in &plan.select {
+        if let Projection::Expr { expression, .. } = projection {
+            validate_subqueries_in_expression(expression, schema, errors);
+        }
+    }
+    if let Some(predicate) = &plan.r#where {
+        validate_subqueries_in_predicate(predicate, schema, errors);
+    }
+    if let Some(expressions) = &plan.group_by {
+        for expression in expressions {
+            validate_subqueries_in_expression(expression, schema, errors);
+        }
+    }
+    if let Some(predicate) = &plan.having {
+        validate_subqueries_in_predicate(predicate, schema, errors);
+    }
+    if let Some(terms) = &plan.order_by {
+        for term in terms {
+            validate_subqueries_in_expression(&term.expr, schema, errors);
+        }
+    }
+    if let Some(joins) = &plan.joins {
+        for join in joins {
+            validate_subqueries_in_predicate(&join.on, schema, errors);
+        }
+    }
+}
+
+fn validate_subqueries_in_expression(
+    expression: &Expression,
+    schema: &SchemaSnapshot,
+    errors: &mut Vec<VlorQLError>,
+) {
+    match expression {
+        Expression::SubQuery { query } => {
+            validate_plan(query, schema, errors);
+        }
+        Expression::FunctionCall { args, .. } => {
+            for argument in args {
+                validate_subqueries_in_expression(argument, schema, errors);
+            }
+        }
+        Expression::BinaryOp { left, right, .. } => {
+            validate_subqueries_in_expression(left, schema, errors);
+            validate_subqueries_in_expression(right, schema, errors);
+        }
+        _ => {}
+    }
+}
+
+fn validate_subqueries_in_predicate(
+    predicate: &Predicate,
+    schema: &SchemaSnapshot,
+    errors: &mut Vec<VlorQLError>,
+) {
+    match predicate {
+        Predicate::Comparison { left, right, .. } => {
+            validate_subqueries_in_expression(left, schema, errors);
+            validate_subqueries_in_expression(right, schema, errors);
+        }
+        Predicate::And { left, right } | Predicate::Or { left, right } => {
+            validate_subqueries_in_predicate(left, schema, errors);
+            validate_subqueries_in_predicate(right, schema, errors);
+        }
+        Predicate::Not { child } => validate_subqueries_in_predicate(child, schema, errors),
+        Predicate::Between { expr, low, high } => {
+            validate_subqueries_in_expression(expr, schema, errors);
+            validate_subqueries_in_expression(low, schema, errors);
+            validate_subqueries_in_expression(high, schema, errors);
+        }
+        Predicate::In { expr, target } => {
+            validate_subqueries_in_expression(expr, schema, errors);
+            if let InTarget::SubQuery(query) = target {
+                validate_plan(query, schema, errors);
+            }
+        }
+        Predicate::Exists { query } => {
+            validate_plan(query, schema, errors);
+        }
+        Predicate::Like { expr, .. } | Predicate::IsNull { expr } => {
+            validate_subqueries_in_expression(expr, schema, errors);
+        }
     }
 }
 

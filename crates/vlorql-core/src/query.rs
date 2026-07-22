@@ -127,10 +127,7 @@ pub(crate) fn collect_expression_references(
             collect_expression_references(right, references);
         }
         Expression::Star => {}
-        Expression::SubQuery { query } => {
-            let sub_refs = collect_plan_references(query);
-            references.extend(sub_refs.columns);
-        }
+        Expression::SubQuery { .. } => {}
     }
 }
 
@@ -155,22 +152,13 @@ pub(crate) fn collect_predicate_references(
         }
         Predicate::In { expr, target } => {
             collect_expression_references(expr, references);
-            match target {
-                InTarget::Values(values) => {
-                    for value in values {
-                        collect_expression_references(value, references);
-                    }
-                }
-                InTarget::SubQuery(query) => {
-                    let sub_refs = collect_plan_references(query);
-                    references.extend(sub_refs.columns);
+            if let InTarget::Values(values) = target {
+                for value in values {
+                    collect_expression_references(value, references);
                 }
             }
         }
-        Predicate::Exists { query } => {
-            let sub_refs = collect_plan_references(query);
-            references.extend(sub_refs.columns);
-        }
+        Predicate::Exists { .. } => {}
         Predicate::Like { expr, .. } | Predicate::IsNull { expr } => {
             collect_expression_references(expr, references);
         }
