@@ -906,8 +906,10 @@ async fn execute_on_postgres(queries: &[vlorql::CompiledQuery]) -> Result<(), Bo
                 for row in &rows {
                     let values: Vec<String> = (0..row.len())
                         .map(|i| {
-                            // 按顺序尝试：i64 -> f64 -> String -> 最后回退到 "NULL"
-                            if let Ok(v) = row.try_get::<_, i64>(i) {
+                            // 按顺序尝试：i32 -> i64 -> f64 -> String -> 最后回退到 "NULL"
+                            if let Ok(v) = row.try_get::<_, i32>(i) {
+                                v.to_string()
+                            } else if let Ok(v) = row.try_get::<_, i64>(i) {
                                 v.to_string()
                             } else if let Ok(v) = row.try_get::<_, f64>(i) {
                                 v.to_string()
