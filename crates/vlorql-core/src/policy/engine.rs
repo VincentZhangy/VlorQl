@@ -114,14 +114,27 @@ impl PolicyEngine {
         schema: &SchemaSnapshot,
         errors: &mut Vec<VlorQLError>,
     ) {
+        self.validate_plan_inner(plan, schema, errors, None);
+    }
+
+    fn validate_plan_inner(
+        &self,
+        plan: &QueryPlan,
+        schema: &SchemaSnapshot,
+        errors: &mut Vec<VlorQLError>,
+        outer_scope: Option<&QueryScope>,
+    ) {
         // A CTE's body is an independent query scope and must be checked recursively.
         if let Some(ctes) = &plan.ctes {
             for cte in ctes {
-                self.validate_plan(&cte.query, schema, errors);
+                self.validate_plan_inner(&cte.query, schema, errors, None);
             }
         }
 
-        let scope = QueryScope::from_plan(plan);
+        let mut scope = QueryScope::from_plan(plan);
+        if let Some(outer) = outer_scope {
+            scope.extend_with_outer(outer);
+        }
         let mut reported_tables = HashSet::new();
         let mut reported_columns = HashSet::new();
 
@@ -160,7 +173,7 @@ impl PolicyEngine {
             );
         }
 
-        self.validate_subqueries_in_plan(plan, schema, errors);
+        self.validate_subqueries_in_plan(plan, schema, errors, &scope);
     }
 
     fn validate_subqueries_in_plan(
@@ -168,31 +181,32 @@ impl PolicyEngine {
         plan: &QueryPlan,
         schema: &SchemaSnapshot,
         errors: &mut Vec<VlorQLError>,
+        outer_scope: &QueryScope,
     ) {
         for projection in &plan.select {
             if let Projection::Expr { expression, .. } = projection {
-                self.validate_subqueries_in_expression(expression, schema, errors);
+                self.validate_subqueries_in_expression(expression, schema, errors, outer_scope);
             }
         }
         if let Some(predicate) = &plan.r#where {
-            self.validate_subqueries_in_predicate(predicate, schema, errors);
+            self.validate_subqueries_in_predicate(predicate, schema, errors, outer_scope);
         }
         if let Some(expressions) = &plan.group_by {
             for expression in expressions {
-                self.validate_subqueries_in_expression(expression, schema, errors);
+                self.validate_subqueries_in_expression(expression, schema, errors, outer_scope);
             }
         }
         if let Some(predicate) = &plan.having {
-            self.validate_subqueries_in_predicate(predicate, schema, errors);
+            self.validate_subqueries_in_predicate(predicate, schema, errors, outer_scope);
         }
         if let Some(terms) = &plan.order_by {
             for term in terms {
-                self.validate_subqueries_in_expression(&term.expr, schema, errors);
+                self.validate_subqueries_in_expression(&term.expr, schema, errors, outer_scope);
             }
         }
         if let Some(joins) = &plan.joins {
             for join in joins {
-                self.validate_subqueries_in_predicate(&join.on, schema, errors);
+                self.validate_subqueries_in_predicate(&join.on, schema, errors, outer_scope);
             }
         }
     }
@@ -202,19 +216,20 @@ impl PolicyEngine {
         expression: &Expression,
         schema: &SchemaSnapshot,
         errors: &mut Vec<VlorQLError>,
+        outer_scope: &QueryScope,
     ) {
         match expression {
             Expression::SubQuery { query } => {
-                self.validate_plan(query, schema, errors);
+                self.validate_plan_inner(query, schema, errors, Some(outer_scope));
             }
             Expression::FunctionCall { args, .. } => {
                 for argument in args {
-                    self.validate_subqueries_in_expression(argument, schema, errors);
+                    self.validate_subqueries_in_expression(argument, schema, errors, outer_scope);
                 }
             }
             Expression::BinaryOp { left, right, .. } => {
-                self.validate_subqueries_in_expression(left, schema, errors);
-                self.validate_subqueries_in_expression(right, schema, errors);
+                self.validate_subqueries_in_expression(left, schema, errors, outer_scope);
+                self.validate_subqueries_in_expression(right, schema, errors, outer_scope);
             }
             _ => {}
         }
@@ -225,33 +240,36 @@ impl PolicyEngine {
         predicate: &Predicate,
         schema: &SchemaSnapshot,
         errors: &mut Vec<VlorQLError>,
+        outer_scope: &QueryScope,
     ) {
         match predicate {
             Predicate::Comparison { left, right, .. } => {
-                self.validate_subqueries_in_expression(left, schema, errors);
-                self.validate_subqueries_in_expression(right, schema, errors);
+                self.validate_subqueries_in_expression(left, schema, errors, outer_scope);
+                self.validate_subqueries_in_expression(right, schema, errors, outer_scope);
             }
             Predicate::And { left, right } | Predicate::Or { left, right } => {
-                self.validate_subqueries_in_predicate(left, schema, errors);
-                self.validate_subqueries_in_predicate(right, schema, errors);
+                self.validate_subqueries_in_predicate(left, schema, errors, outer_scope);
+                self.validate_subqueries_in_predicate(right, schema, errors, outer_scope);
             }
-            Predicate::Not { child } => self.validate_subqueries_in_predicate(child, schema, errors),
+            Predicate::Not { child } => {
+                self.validate_subqueries_in_predicate(child, schema, errors, outer_scope);
+            }
             Predicate::Between { expr, low, high } => {
-                self.validate_subqueries_in_expression(expr, schema, errors);
-                self.validate_subqueries_in_expression(low, schema, errors);
-                self.validate_subqueries_in_expression(high, schema, errors);
+                self.validate_subqueries_in_expression(expr, schema, errors, outer_scope);
+                self.validate_subqueries_in_expression(low, schema, errors, outer_scope);
+                self.validate_subqueries_in_expression(high, schema, errors, outer_scope);
             }
             Predicate::In { expr, target } => {
-                self.validate_subqueries_in_expression(expr, schema, errors);
+                self.validate_subqueries_in_expression(expr, schema, errors, outer_scope);
                 if let InTarget::SubQuery(query) = target {
-                    self.validate_plan(query, schema, errors);
+                    self.validate_plan_inner(query, schema, errors, Some(outer_scope));
                 }
             }
             Predicate::Exists { query } => {
-                self.validate_plan(query, schema, errors);
+                self.validate_plan_inner(query, schema, errors, Some(outer_scope));
             }
             Predicate::Like { expr, .. } | Predicate::IsNull { expr } => {
-                self.validate_subqueries_in_expression(expr, schema, errors);
+                self.validate_subqueries_in_expression(expr, schema, errors, outer_scope);
             }
         }
     }
