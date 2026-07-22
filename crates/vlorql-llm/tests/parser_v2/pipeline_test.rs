@@ -18,7 +18,9 @@ fn run_pipeline(raw: &str) -> Result<vlorql_core::schema::QueryPlan, Box<dyn std
     Ok(plan)
 }
 
-fn run_pipeline_str(raw: &str) -> Result<vlorql_core::schema::QueryPlan, Box<dyn std::error::Error>> {
+fn run_pipeline_str(
+    raw: &str,
+) -> Result<vlorql_core::schema::QueryPlan, Box<dyn std::error::Error>> {
     run_pipeline(raw)
 }
 
@@ -166,7 +168,10 @@ fn double_normalize_roundtrip() {
     // First normalize
     pipeline::normalize(&mut value);
     // Second normalize — should be no-op
-    assert!(!pipeline::normalize(&mut value), "normalize should be idempotent");
+    assert!(
+        !pipeline::normalize(&mut value),
+        "normalize should be idempotent"
+    );
     // Build
     let plan = query_builder::build_plan(&value).unwrap();
     assert_eq!(plan.select.len(), 1);

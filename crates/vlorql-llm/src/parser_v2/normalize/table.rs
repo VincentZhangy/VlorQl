@@ -16,10 +16,7 @@ pub fn string_to_object(val: &mut serde_json::Value) -> bool {
     };
 
     if let Some(table_name) = from_val.as_str() {
-        obj.insert(
-            "from".to_owned(),
-            serde_json::json!({"table": table_name}),
-        );
+        obj.insert("from".to_owned(), serde_json::json!({"table": table_name}));
         return true;
     }
 

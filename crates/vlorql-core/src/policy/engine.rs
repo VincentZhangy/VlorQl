@@ -526,9 +526,19 @@ fn table_not_in_scope_or_not_found(table: &str, schema: &SchemaSnapshot) -> Vlor
             .collect::<Vec<_>>(),
     });
     if schema.get_table(table).is_some() {
-        VlorQLError::schema(SchemaErrorKind::TableNotInScope { table: table.to_owned() }, context)
+        VlorQLError::schema(
+            SchemaErrorKind::TableNotInScope {
+                table: table.to_owned(),
+            },
+            context,
+        )
     } else {
-        VlorQLError::schema(SchemaErrorKind::TableNotFound { table: table.to_owned() }, context)
+        VlorQLError::schema(
+            SchemaErrorKind::TableNotFound {
+                table: table.to_owned(),
+            },
+            context,
+        )
     }
 }
 

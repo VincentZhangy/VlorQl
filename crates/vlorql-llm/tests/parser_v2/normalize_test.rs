@@ -202,7 +202,8 @@ fn normalize_max_rows_to_limit() {
 
 #[test]
 fn normalize_skip_to_offset() {
-    let mut val = serde_json::json!({"select": [{"type": "star"}], "from": {"table": "users"}, "skip": 20});
+    let mut val =
+        serde_json::json!({"select": [{"type": "star"}], "from": {"table": "users"}, "skip": 20});
     assert!(aliases::normalize_field_names(&mut val));
     assert_eq!(val.get("offset").and_then(|v| v.as_u64()), Some(20));
     assert!(val.get("skip").is_none());
@@ -250,8 +251,14 @@ fn normalize_nested_multi_alias() {
     assert!(val.get("filter").is_none());
     // Inside where: "kind" → "type", "field" → "column", "operator" → "op"
     let where_obj = val.get("where").unwrap();
-    assert_eq!(where_obj.get("type").and_then(|v| v.as_str()), Some("comparison"));
-    assert_eq!(where_obj.get("column").and_then(|v| v.as_str()), Some("age"));
+    assert_eq!(
+        where_obj.get("type").and_then(|v| v.as_str()),
+        Some("comparison")
+    );
+    assert_eq!(
+        where_obj.get("column").and_then(|v| v.as_str()),
+        Some("age")
+    );
     assert_eq!(where_obj.get("op").and_then(|v| v.as_str()), Some("gt"));
     assert!(where_obj.get("kind").is_none());
     assert!(where_obj.get("field").is_none());
@@ -273,9 +280,14 @@ fn normalize_does_not_overwrite_existing() {
     let mut val = serde_json::json!({"where": {"type": "comparison"}, "filter": {"type": "and"}});
     // "filter" → "where" skipped because "where" already exists
     assert!(!aliases::normalize_field_names(&mut val));
-    assert!(val.get("filter").is_some(), "filter stays when where already exists");
+    assert!(
+        val.get("filter").is_some(),
+        "filter stays when where already exists"
+    );
     assert_eq!(
-        val.get("where").and_then(|v| v.get("type")).and_then(|v| v.as_str()),
+        val.get("where")
+            .and_then(|v| v.get("type"))
+            .and_then(|v| v.as_str()),
         Some("comparison")
     );
 }

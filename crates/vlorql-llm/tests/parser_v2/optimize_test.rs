@@ -3,9 +3,9 @@
 //! Tests the optimizer in the context of the full V2 pipeline
 //! (recover → normalize → build → fix → validate → optimize).
 
-use vlorql_llm::parser_v2::optimize::optimize;
 use vlorql_llm::parser_v2::builder::query_builder;
 use vlorql_llm::parser_v2::normalize::pipeline;
+use vlorql_llm::parser_v2::optimize::optimize;
 use vlorql_llm::parser_v2::recover::extract_json_content;
 
 fn build_plan(raw: &str) -> Result<vlorql_core::schema::QueryPlan, Box<dyn std::error::Error>> {
@@ -24,7 +24,10 @@ fn simplify_and_true_in_where() {
     let mut plan = build_plan(raw).unwrap();
     assert!(optimize(&mut plan));
     // AND TRUE should be removed
-    assert!(matches!(plan.r#where.unwrap(), vlorql_core::schema::Predicate::Comparison { .. }));
+    assert!(matches!(
+        plan.r#where.unwrap(),
+        vlorql_core::schema::Predicate::Comparison { .. }
+    ));
 }
 
 #[test]
@@ -33,7 +36,10 @@ fn simplify_not_not() {
     let mut plan = build_plan(raw).unwrap();
     assert!(optimize(&mut plan));
     // NOT NOT should be eliminated
-    assert!(matches!(plan.r#where.unwrap(), vlorql_core::schema::Predicate::Comparison { .. }));
+    assert!(matches!(
+        plan.r#where.unwrap(),
+        vlorql_core::schema::Predicate::Comparison { .. }
+    ));
 }
 
 // ── Projection pruning ────────────────────────────────────────────
@@ -55,14 +61,20 @@ fn full_pipeline_with_optimize() {
     let mut plan = build_plan(raw).unwrap();
     // After normalize: filter → where, AND TRUE should be simplified
     assert!(optimize(&mut plan));
-    assert!(matches!(plan.r#where.unwrap(), vlorql_core::schema::Predicate::Comparison { .. }));
+    assert!(matches!(
+        plan.r#where.unwrap(),
+        vlorql_core::schema::Predicate::Comparison { .. }
+    ));
 }
 
 #[test]
 fn canonical_plan_no_optimization() {
     let raw = r#"{"select": [{"type": "star"}], "from": {"table": "users"}, "where": {"type": "comparison", "left": {"type": "column_ref", "column": "age"}, "op": "gt", "right": {"type": "literal", "value": 18, "data_type": "int"}}}"#;
     let mut plan = build_plan(raw).unwrap();
-    assert!(!optimize(&mut plan), "canonical plan should not need optimization");
+    assert!(
+        !optimize(&mut plan),
+        "canonical plan should not need optimization"
+    );
 }
 
 // ── DeepSeek-style ────────────────────────────────────────────────

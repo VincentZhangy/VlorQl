@@ -15,15 +15,13 @@ pub fn is_valid_json(text: &str) -> bool {
 /// Returns `true` when `text` is a valid JSON **object** (`{...}`).
 #[must_use]
 pub fn is_valid_json_object(text: &str) -> bool {
-    serde_json::from_str::<serde_json::Value>(text)
-        .map_or(false, |v| v.is_object())
+    serde_json::from_str::<serde_json::Value>(text).map_or(false, |v| v.is_object())
 }
 
 /// Returns `true` when `text` is a valid JSON **array** (`[...]`).
 #[must_use]
 pub fn is_valid_json_array(text: &str) -> bool {
-    serde_json::from_str::<serde_json::Value>(text)
-        .map_or(false, |v| v.is_array())
+    serde_json::from_str::<serde_json::Value>(text).map_or(false, |v| v.is_array())
 }
 
 /// If `text` is a JSON array whose first element is a JSON object,

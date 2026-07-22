@@ -22,9 +22,7 @@ fn has_aggregate_in_select(select: &[Projection]) -> bool {
 /// Returns `true` when `expr` is (or contains) an aggregate function call.
 fn is_aggregate_expr(expr: &Expression) -> bool {
     match expr {
-        Expression::FunctionCall { name, .. } => {
-            vlorql_core::function::is_aggregate(name)
-        }
+        Expression::FunctionCall { name, .. } => vlorql_core::function::is_aggregate(name),
         Expression::BinaryOp { left, right, .. } => {
             is_aggregate_expr(left) || is_aggregate_expr(right)
         }
@@ -255,7 +253,10 @@ fn validate_predicate(predicate: &Predicate, errors: &mut Vec<ValidationError>) 
 /// Validate an expression.
 fn validate_expression(expression: &Expression, errors: &mut Vec<ValidationError>) {
     match expression {
-        Expression::Literal { value, data_type: _ } => {
+        Expression::Literal {
+            value,
+            data_type: _,
+        } => {
             if value.is_null() {
                 // NULL literal is always valid.
             }
@@ -268,7 +269,11 @@ fn validate_expression(expression: &Expression, errors: &mut Vec<ValidationError
                 ));
             }
         }
-        Expression::FunctionCall { name, args, distinct: _ } => {
+        Expression::FunctionCall {
+            name,
+            args,
+            distinct: _,
+        } => {
             if name.is_empty() {
                 errors.push(ValidationError::new(
                     ValidationErrorKind::InvalidExpression,
@@ -298,13 +303,16 @@ fn validate_expression(expression: &Expression, errors: &mut Vec<ValidationError
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vlorql_core::schema::*;
     use serde_json::json;
+    use vlorql_core::schema::*;
 
     fn valid_plan() -> QueryPlan {
         QueryPlan {
             select: vec![Projection::Star { table: None }],
-            from: FromClause { table: "users".to_owned(), alias: None },
+            from: FromClause {
+                table: "users".to_owned(),
+                alias: None,
+            },
             r#where: None,
             group_by: None,
             having: None,
@@ -320,7 +328,11 @@ mod tests {
     fn valid_plan_passes() {
         let plan = valid_plan();
         let errors = validate(&plan);
-        assert!(errors.is_empty(), "valid plan should have no errors: {:?}", errors);
+        assert!(
+            errors.is_empty(),
+            "valid plan should have no errors: {:?}",
+            errors
+        );
     }
 
     #[test]
@@ -328,7 +340,11 @@ mod tests {
         let mut plan = valid_plan();
         plan.select = vec![];
         let errors = validate(&plan);
-        assert!(errors.iter().any(|e| e.kind == ValidationErrorKind::EmptySelect));
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.kind == ValidationErrorKind::EmptySelect)
+        );
     }
 
     #[test]
@@ -340,7 +356,11 @@ mod tests {
             alias: None,
         }];
         let errors = validate(&plan);
-        assert!(errors.iter().any(|e| e.kind == ValidationErrorKind::InvalidProjection));
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.kind == ValidationErrorKind::InvalidProjection)
+        );
     }
 
     #[test]
@@ -348,7 +368,11 @@ mod tests {
         let mut plan = valid_plan();
         plan.from.table = "".to_owned();
         let errors = validate(&plan);
-        assert!(errors.iter().any(|e| e.kind == ValidationErrorKind::MissingFrom));
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.kind == ValidationErrorKind::MissingFrom)
+        );
     }
 
     #[test]
@@ -356,15 +380,28 @@ mod tests {
         let mut plan = valid_plan();
         plan.joins = Some(vec![JoinClause {
             join_type: JoinType::Inner,
-            right_table: FromClause { table: "orders".to_owned(), alias: None },
+            right_table: FromClause {
+                table: "orders".to_owned(),
+                alias: None,
+            },
             on: Predicate::Comparison {
-                left: Expression::Literal { value: json!(true), data_type: DataType::Boolean },
+                left: Expression::Literal {
+                    value: json!(true),
+                    data_type: DataType::Boolean,
+                },
                 op: ComparisonOperator::Eq,
-                right: Expression::Literal { value: json!(true), data_type: DataType::Boolean },
+                right: Expression::Literal {
+                    value: json!(true),
+                    data_type: DataType::Boolean,
+                },
             },
         }]);
         let errors = validate(&plan);
-        assert!(errors.iter().any(|e| e.kind == ValidationErrorKind::MissingJoinCondition));
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.kind == ValidationErrorKind::MissingJoinCondition)
+        );
     }
 
     #[test]
@@ -372,15 +409,28 @@ mod tests {
         let mut plan = valid_plan();
         plan.joins = Some(vec![JoinClause {
             join_type: JoinType::Cross,
-            right_table: FromClause { table: "orders".to_owned(), alias: None },
+            right_table: FromClause {
+                table: "orders".to_owned(),
+                alias: None,
+            },
             on: Predicate::Comparison {
-                left: Expression::Literal { value: json!(true), data_type: DataType::Boolean },
+                left: Expression::Literal {
+                    value: json!(true),
+                    data_type: DataType::Boolean,
+                },
                 op: ComparisonOperator::Eq,
-                right: Expression::Literal { value: json!(true), data_type: DataType::Boolean },
+                right: Expression::Literal {
+                    value: json!(true),
+                    data_type: DataType::Boolean,
+                },
             },
         }]);
         let errors = validate(&plan);
-        assert!(!errors.iter().any(|e| e.kind == ValidationErrorKind::MissingJoinCondition));
+        assert!(
+            !errors
+                .iter()
+                .any(|e| e.kind == ValidationErrorKind::MissingJoinCondition)
+        );
     }
 
     #[test]
@@ -392,10 +442,17 @@ mod tests {
                 column: "".to_owned(),
             },
             op: ComparisonOperator::Eq,
-            right: Expression::Literal { value: json!(1), data_type: DataType::Int },
+            right: Expression::Literal {
+                value: json!(1),
+                data_type: DataType::Int,
+            },
         });
         let errors = validate(&plan);
-        assert!(errors.iter().any(|e| e.kind == ValidationErrorKind::InvalidExpression));
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.kind == ValidationErrorKind::InvalidExpression)
+        );
     }
 
     #[test]
@@ -410,7 +467,11 @@ mod tests {
             alias: None,
         }];
         let errors = validate(&plan);
-        assert!(errors.iter().any(|e| e.kind == ValidationErrorKind::InvalidExpression));
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.kind == ValidationErrorKind::InvalidExpression)
+        );
     }
 
     #[test]
@@ -424,7 +485,11 @@ mod tests {
             pattern: "".to_owned(),
         });
         let errors = validate(&plan);
-        assert!(errors.iter().any(|e| e.kind == ValidationErrorKind::InvalidPredicate));
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.kind == ValidationErrorKind::InvalidPredicate)
+        );
     }
 
     #[test]
@@ -432,43 +497,54 @@ mod tests {
         let mut plan = valid_plan();
         plan.limit = Some(0);
         let errors = validate(&plan);
-        assert!(errors.iter().any(|e| e.kind == ValidationErrorKind::InvalidLimit));
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.kind == ValidationErrorKind::InvalidLimit)
+        );
     }
 
     #[test]
     fn validates_nested_cte() {
         let mut plan = valid_plan();
-        plan.ctes = Some(vec![
-            CommonTableExpression {
-                name: "active".to_owned(),
-                query: Box::new(QueryPlan {
-                    select: vec![Projection::Star { table: None }],
-                    from: FromClause { table: "users".to_owned(), alias: None },
-                    r#where: None,
-                    group_by: None,
-                    having: None,
-                    order_by: None,
-                    limit: None,
-                    offset: None,
-                    joins: None,
-                    ctes: None,
-                }),
-            },
-        ]);
+        plan.ctes = Some(vec![CommonTableExpression {
+            name: "active".to_owned(),
+            query: Box::new(QueryPlan {
+                select: vec![Projection::Star { table: None }],
+                from: FromClause {
+                    table: "users".to_owned(),
+                    alias: None,
+                },
+                r#where: None,
+                group_by: None,
+                having: None,
+                order_by: None,
+                limit: None,
+                offset: None,
+                joins: None,
+                ctes: None,
+            }),
+        }]);
         let errors = validate(&plan);
-        assert!(errors.is_empty(), "valid CTE should have no errors: {:?}", errors);
+        assert!(
+            errors.is_empty(),
+            "valid CTE should have no errors: {:?}",
+            errors
+        );
     }
 
     #[test]
     fn detects_cte_with_empty_name() {
         let mut plan = valid_plan();
-        plan.ctes = Some(vec![
-            CommonTableExpression {
-                name: "".to_owned(),
-                query: Box::new(valid_plan()),
-            },
-        ]);
+        plan.ctes = Some(vec![CommonTableExpression {
+            name: "".to_owned(),
+            query: Box::new(valid_plan()),
+        }]);
         let errors = validate(&plan);
-        assert!(errors.iter().any(|e| e.kind == ValidationErrorKind::CteError));
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.kind == ValidationErrorKind::CteError)
+        );
     }
 }

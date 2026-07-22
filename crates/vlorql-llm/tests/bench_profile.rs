@@ -55,7 +55,13 @@ struct StageTiming {
 
 impl StageTiming {
     fn new(name: &'static str) -> Self {
-        Self { name, total_ns: 0, min_ns: u128::MAX, max_ns: 0, count: 0 }
+        Self {
+            name,
+            total_ns: 0,
+            min_ns: u128::MAX,
+            max_ns: 0,
+            count: 0,
+        }
     }
 
     fn record(&mut self, ns: u128) {
@@ -66,7 +72,11 @@ impl StageTiming {
     }
 
     fn avg_ns(&self) -> u128 {
-        if self.count == 0 { 0 } else { self.total_ns / self.count as u128 }
+        if self.count == 0 {
+            0
+        } else {
+            self.total_ns / self.count as u128
+        }
     }
 
     fn report(&self) {
@@ -155,7 +165,10 @@ fn profile_pipeline(label: &str, input: &str, iterations: usize) {
         stage.report();
     }
     println!("  {}", "-".repeat(75));
-    println!("  {:12}   avg {:>8} ns (total pipeline)", "TOTAL", total_avg);
+    println!(
+        "  {:12}   avg {:>8} ns (total pipeline)",
+        "TOTAL", total_avg
+    );
     println!();
 }
 

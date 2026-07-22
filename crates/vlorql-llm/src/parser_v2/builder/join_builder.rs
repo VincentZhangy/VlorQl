@@ -1,7 +1,7 @@
 //! Join clause builder: canonical JSON → [`JoinClause`].
 
-use vlorql_core::schema::{JoinClause, Predicate};
 use serde_json::Value;
+use vlorql_core::schema::{JoinClause, Predicate};
 
 use super::expr_builder::{BuildError, build_predicate, parse_join_type, req_obj, req_str};
 use super::table_builder::build_from_clause;
@@ -21,9 +21,8 @@ pub fn build_join_clause(val: &Value) -> Result<JoinClause, BuildError> {
     let join_type = parse_join_type(type_str)?;
 
     let right_table = build_from_clause(
-        obj.get("right_table").ok_or_else(|| {
-            BuildError::new("right_table", "missing `right_table` field on join")
-        })?,
+        obj.get("right_table")
+            .ok_or_else(|| BuildError::new("right_table", "missing `right_table` field on join"))?,
         "right_table",
     )?;
 
@@ -46,7 +45,11 @@ pub fn build_join_clause(val: &Value) -> Result<JoinClause, BuildError> {
         return Err(BuildError::new("on", "missing `on` field on join"));
     };
 
-    Ok(JoinClause { join_type, right_table, on })
+    Ok(JoinClause {
+        join_type,
+        right_table,
+        on,
+    })
 }
 
 #[cfg(test)]

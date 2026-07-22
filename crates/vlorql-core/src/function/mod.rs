@@ -23,6 +23,6 @@ pub mod registry;
 
 pub use def::{Dialect, FunctionDef, FunctionKind};
 pub use registry::{
-    init_registry, is_aggregate, is_known_function, lookup_function,
-    lookup_function_for_dialect, register_function,
+    init_registry, is_aggregate, is_known_function, lookup_function, lookup_function_for_dialect,
+    register_function,
 };

@@ -25,7 +25,9 @@ pub use recover::{detect_template_leak, extract_json_content};
 ///
 /// Returns a `serde_json::Error` when canonicalize cannot produce a value that
 /// deserializes as [`vlorql_core::schema::QueryPlan`].
-pub fn parse_query_plan(json_text: &str) -> Result<vlorql_core::schema::QueryPlan, serde_json::Error> {
+pub fn parse_query_plan(
+    json_text: &str,
+) -> Result<vlorql_core::schema::QueryPlan, serde_json::Error> {
     let repaired = repair_query_plan_json(json_text);
     from_canonical_str(&repaired)
 }

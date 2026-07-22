@@ -38,8 +38,8 @@ pub use vlorql_core::optimizer::QueryOptimizer as QueryOptimizerCore;
 pub use vlorql_core::schema::{DialectProfile, SchemaSnapshot, SqlDialect};
 pub use vlorql_core::validate::{OptimizedPlan, ValidatedPlan};
 pub use vlorql_llm::{
-    LlmClient, LlmConfig, LlmProvider, create_llm_client, detect_template_leak,
-    parse_query_plan, parse_query_plan_lenient,
+    LlmClient, LlmConfig, LlmProvider, create_llm_client, detect_template_leak, parse_query_plan,
+    parse_query_plan_lenient,
 };
 
 const DEFAULT_MAX_RETRIES: usize = 2;
@@ -787,7 +787,10 @@ fn format_retry_question_str(question: &str, error: &VlorQLError) -> String {
     let response = error.to_error_response();
     let feedback = serde_json::to_string(&response).unwrap_or_else(|_| error.to_string());
     let hint = match error {
-        VlorQLError::Llm { kind: vlorql_core::errors::LlmErrorKind::ParseError { .. }, .. } => {
+        VlorQLError::Llm {
+            kind: vlorql_core::errors::LlmErrorKind::ParseError { .. },
+            ..
+        } => {
             " TIP: If the previous query used NOT EXISTS with a subquery, replace it with LEFT JOIN + IS NULL — it is simpler and avoids JSON nesting issues."
         }
         _ => "",
@@ -1026,7 +1029,10 @@ mod tests {
             .await
             .expect("valid mock plan should compile");
         assert_eq!(compiled.dialect, SqlDialect::Sqlite);
-        assert_eq!(compiled.sql, "SELECT \"t1\".\"id\" FROM \"users\" AS \"t1\"");
+        assert_eq!(
+            compiled.sql,
+            "SELECT \"t1\".\"id\" FROM \"users\" AS \"t1\""
+        );
     }
 
     #[tokio::test]
@@ -1234,7 +1240,10 @@ mod tests {
             .expect("valid mock plan should compile");
 
         assert_eq!(compiled.dialect, SqlDialect::Sqlite);
-        assert_eq!(compiled.sql, "SELECT \"t1\".\"id\" FROM \"users\" AS \"t1\"");
+        assert_eq!(
+            compiled.sql,
+            "SELECT \"t1\".\"id\" FROM \"users\" AS \"t1\""
+        );
         // The test verifies that the query completes without error under
         // a tracing subscriber; span hierarchy is validated by inspecting
         // the subscriber output (stderr) when `RUST_LOG` is set.

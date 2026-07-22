@@ -6,8 +6,8 @@
 //! - (Future) Removing unused columns (requires schema analysis)
 //! - (Future) Pushing down predicates to reduce rows earlier
 
-use vlorql_core::schema::{Projection, QueryPlan};
 use std::collections::HashSet;
+use vlorql_core::schema::{Projection, QueryPlan};
 
 /// Run all projection optimization rules on a [`QueryPlan`].
 ///
@@ -32,7 +32,11 @@ fn remove_duplicate_columns(plan: &mut QueryPlan) -> bool {
 
     for proj in plan.select.drain(..) {
         match &proj {
-            Projection::Column { table, column, alias: _ } => {
+            Projection::Column {
+                table,
+                column,
+                alias: _,
+            } => {
                 let key = (table.clone(), column.clone());
                 if !seen.insert(key) {
                     changed = true;
@@ -59,7 +63,10 @@ mod tests {
     fn base_plan() -> QueryPlan {
         QueryPlan {
             select: vec![],
-            from: FromClause { table: "users".to_owned(), alias: None },
+            from: FromClause {
+                table: "users".to_owned(),
+                alias: None,
+            },
             r#where: None,
             group_by: None,
             having: None,
@@ -75,9 +82,21 @@ mod tests {
     fn removes_duplicate_columns() {
         let mut plan = base_plan();
         plan.select = vec![
-            Projection::Column { table: None, column: "id".to_owned(), alias: None },
-            Projection::Column { table: None, column: "name".to_owned(), alias: None },
-            Projection::Column { table: None, column: "id".to_owned(), alias: None },
+            Projection::Column {
+                table: None,
+                column: "id".to_owned(),
+                alias: None,
+            },
+            Projection::Column {
+                table: None,
+                column: "name".to_owned(),
+                alias: None,
+            },
+            Projection::Column {
+                table: None,
+                column: "id".to_owned(),
+                alias: None,
+            },
         ];
         assert!(optimize(&mut plan));
         assert_eq!(plan.select.len(), 2);
@@ -87,8 +106,16 @@ mod tests {
     fn keeps_unique_columns() {
         let mut plan = base_plan();
         plan.select = vec![
-            Projection::Column { table: None, column: "id".to_owned(), alias: None },
-            Projection::Column { table: None, column: "name".to_owned(), alias: None },
+            Projection::Column {
+                table: None,
+                column: "id".to_owned(),
+                alias: None,
+            },
+            Projection::Column {
+                table: None,
+                column: "name".to_owned(),
+                alias: None,
+            },
         ];
         assert!(!optimize(&mut plan));
         assert_eq!(plan.select.len(), 2);
@@ -134,9 +161,21 @@ mod tests {
     fn deduplicates_with_qualified_columns() {
         let mut plan = base_plan();
         plan.select = vec![
-            Projection::Column { table: Some("u".to_owned()), column: "id".to_owned(), alias: None },
-            Projection::Column { table: Some("u".to_owned()), column: "id".to_owned(), alias: None },
-            Projection::Column { table: Some("o".to_owned()), column: "id".to_owned(), alias: None },
+            Projection::Column {
+                table: Some("u".to_owned()),
+                column: "id".to_owned(),
+                alias: None,
+            },
+            Projection::Column {
+                table: Some("u".to_owned()),
+                column: "id".to_owned(),
+                alias: None,
+            },
+            Projection::Column {
+                table: Some("o".to_owned()),
+                column: "id".to_owned(),
+                alias: None,
+            },
         ];
         assert!(optimize(&mut plan));
         assert_eq!(plan.select.len(), 2); // u.id appears once, o.id appears once

@@ -1,7 +1,7 @@
 //! Projection / SELECT builder: canonical JSON → [`Projection`].
 
-use vlorql_core::schema::Projection;
 use serde_json::Value;
+use vlorql_core::schema::Projection;
 
 use super::expr_builder::{BuildError, build_expression, opt_str, req_obj, req_str, type_name};
 
@@ -13,7 +13,10 @@ use super::expr_builder::{BuildError, build_expression, opt_str, req_obj, req_st
 /// - `{"type": "star", "table": "users"}`
 pub fn build_projection(val: &Value) -> Result<Projection, BuildError> {
     let obj = val.as_object().ok_or_else(|| {
-        BuildError::new("", format!("expected object for Projection, got {}", type_name(val)))
+        BuildError::new(
+            "",
+            format!("expected object for Projection, got {}", type_name(val)),
+        )
     })?;
     let type_str = req_str(obj, "type", "")?;
     match type_str {
@@ -21,12 +24,19 @@ pub fn build_projection(val: &Value) -> Result<Projection, BuildError> {
             let column = req_str(obj, "column", "")?.to_owned();
             let table = opt_str(obj, "table").map(|s| s.to_owned());
             let alias = opt_str(obj, "alias").map(|s| s.to_owned());
-            Ok(Projection::Column { table, column, alias })
+            Ok(Projection::Column {
+                table,
+                column,
+                alias,
+            })
         }
         "expr" => {
-            let e = req_obj(obj.get("expression").ok_or_else(|| {
-                BuildError::new("", "missing `expression` field on expr projection")
-            })?, "expression")?;
+            let e = req_obj(
+                obj.get("expression").ok_or_else(|| {
+                    BuildError::new("", "missing `expression` field on expr projection")
+                })?,
+                "expression",
+            )?;
             let expression = build_expression(&Value::Object(e.clone()))?;
             let alias = opt_str(obj, "alias").map(|s| s.to_owned());
             Ok(Projection::Expr { expression, alias })
@@ -35,7 +45,10 @@ pub fn build_projection(val: &Value) -> Result<Projection, BuildError> {
             let table = opt_str(obj, "table").map(|s| s.to_owned());
             Ok(Projection::Star { table })
         }
-        other => Err(BuildError::new("type", format!("unknown Projection variant `{other}`"))),
+        other => Err(BuildError::new(
+            "type",
+            format!("unknown Projection variant `{other}`"),
+        )),
     }
 }
 
@@ -56,7 +69,9 @@ mod tests {
     fn build_column_ref_projection() {
         let val = json!({"type": "column_ref", "table": "users", "column": "id"});
         let proj = build_projection(&val).unwrap();
-        assert!(matches!(proj, Projection::Column { table: Some(t), column: c, .. } if t == "users" && c == "id"));
+        assert!(
+            matches!(proj, Projection::Column { table: Some(t), column: c, .. } if t == "users" && c == "id")
+        );
     }
 
     #[test]

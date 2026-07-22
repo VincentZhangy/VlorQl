@@ -36,7 +36,10 @@ fn validate_plan_with_outer(
 
     let mut scope = QueryScope::from_plan(plan);
     if let Some(outer) = outer_scope {
-        debug!("extending scope with outer: {:?}", outer.sources.iter().map(|s| &s.table).collect::<Vec<_>>());
+        debug!(
+            "extending scope with outer: {:?}",
+            outer.sources.iter().map(|s| &s.table).collect::<Vec<_>>()
+        );
         scope.extend_with_outer(outer);
     }
     let mut reported_tables = HashSet::new();
@@ -182,9 +185,19 @@ fn table_not_in_scope_or_not_found(table: &str, schema: &SchemaSnapshot) -> Vlor
             .collect::<Vec<_>>(),
     });
     if schema.get_table(table).is_some() {
-        VlorQLError::schema(SchemaErrorKind::TableNotInScope { table: table.to_owned() }, context)
+        VlorQLError::schema(
+            SchemaErrorKind::TableNotInScope {
+                table: table.to_owned(),
+            },
+            context,
+        )
     } else {
-        VlorQLError::schema(SchemaErrorKind::TableNotFound { table: table.to_owned() }, context)
+        VlorQLError::schema(
+            SchemaErrorKind::TableNotFound {
+                table: table.to_owned(),
+            },
+            context,
+        )
     }
 }
 

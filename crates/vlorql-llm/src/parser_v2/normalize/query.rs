@@ -6,8 +6,7 @@
 
 /// Fields that are valid on a QueryPlan.
 const PLAN_FIELDS: &[&str] = &[
-    "select", "from", "where", "group_by", "having",
-    "order_by", "limit", "offset", "joins", "ctes",
+    "select", "from", "where", "group_by", "having", "order_by", "limit", "offset", "joins", "ctes",
 ];
 
 /// Strip unknown top-level fields that `QueryPlan` rejects.
@@ -106,8 +105,12 @@ pub fn normalize(val: &mut serde_json::Value) -> bool {
 
 /// Collect table names referenced in `select` items.
 fn select_tables(val: &serde_json::Value) -> Vec<String> {
-    let Some(obj) = val.as_object() else { return vec![] };
-    let Some(select) = obj.get("select").and_then(|v| v.as_array()) else { return vec![] };
+    let Some(obj) = val.as_object() else {
+        return vec![];
+    };
+    let Some(select) = obj.get("select").and_then(|v| v.as_array()) else {
+        return vec![];
+    };
     let mut tables: Vec<String> = Vec::new();
     for item in select {
         if let Some(item_obj) = item.as_object() {
@@ -123,7 +126,9 @@ fn select_tables(val: &serde_json::Value) -> Vec<String> {
 
 /// Collect table names already referenced in `from` and `joins`.
 fn existing_tables(val: &serde_json::Value) -> Vec<String> {
-    let Some(obj) = val.as_object() else { return vec![] };
+    let Some(obj) = val.as_object() else {
+        return vec![];
+    };
     let mut tables: Vec<String> = Vec::new();
     // FROM table
     if let Some(from) = obj.get("from").and_then(|v| v.as_object()) {
@@ -168,15 +173,19 @@ fn singularize(s: &str) -> &str {
 fn auto_join_missing_tables(val: &mut serde_json::Value) -> bool {
     // Collect all info upfront while we have an immutable borrow.
     let (from_table, missing): (Option<String>, Vec<String>) = {
-        let Some(obj) = val.as_object() else { return false };
+        let Some(obj) = val.as_object() else {
+            return false;
+        };
         let select_tables = select_tables(val);
         let existing = existing_tables(val);
-        let from_table = obj.get("from")
+        let from_table = obj
+            .get("from")
             .and_then(|f| f.as_object())
             .and_then(|f| f.get("table"))
             .and_then(|t| t.as_str())
             .map(|s| s.to_owned());
-        let missing: Vec<String> = select_tables.into_iter()
+        let missing: Vec<String> = select_tables
+            .into_iter()
             .filter(|t| !existing.iter().any(|e| e == t))
             .collect();
         (from_table, missing)
@@ -186,7 +195,9 @@ fn auto_join_missing_tables(val: &mut serde_json::Value) -> bool {
         return false;
     }
 
-    let Some(obj) = val.as_object_mut() else { return false };
+    let Some(obj) = val.as_object_mut() else {
+        return false;
+    };
     let mut changed = false;
 
     for table in &missing {
@@ -261,7 +272,10 @@ mod tests {
         let order_by = val.get("order_by").unwrap().as_array().unwrap();
         assert_eq!(order_by.len(), 1);
         assert_eq!(
-            order_by[0].get("expr").and_then(|v| v.get("column")).and_then(|v| v.as_str()),
+            order_by[0]
+                .get("expr")
+                .and_then(|v| v.get("column"))
+                .and_then(|v| v.as_str()),
             Some("name")
         );
         assert_eq!(

@@ -6,9 +6,9 @@
 
 use crate::schema::DataType;
 
-use super::def::{Dialect, FunctionKind};
 use super::builder::FunctionDefBuilder;
 use super::def::FunctionDef;
+use super::def::{Dialect, FunctionKind};
 
 /// All built-in functions.
 pub fn builtin_functions() -> Vec<FunctionDef> {
@@ -145,15 +145,37 @@ mod tests {
     fn builtin_contains_all_expected() {
         let funcs = builtin_functions();
         let names: Vec<&str> = funcs.iter().map(|f| f.canonical_name()).collect();
-        for expected in &["sum", "count", "avg", "min", "max", "upper", "lower", "length", "substr", "coalesce", "abs", "round", "row_number", "rank", "dense_rank"] {
-            assert!(names.contains(expected), "{expected} should be in builtin functions");
+        for expected in &[
+            "sum",
+            "count",
+            "avg",
+            "min",
+            "max",
+            "upper",
+            "lower",
+            "length",
+            "substr",
+            "coalesce",
+            "abs",
+            "round",
+            "row_number",
+            "rank",
+            "dense_rank",
+        ] {
+            assert!(
+                names.contains(expected),
+                "{expected} should be in builtin functions"
+            );
         }
     }
 
     #[test]
     fn string_agg_is_postgres_only() {
         let funcs = builtin_functions();
-        let sa = funcs.iter().find(|f| f.canonical_name() == "string_agg").unwrap();
+        let sa = funcs
+            .iter()
+            .find(|f| f.canonical_name() == "string_agg")
+            .unwrap();
         assert!(sa.supports_dialect(Dialect::Postgres));
         assert!(!sa.supports_dialect(Dialect::Sqlite));
     }

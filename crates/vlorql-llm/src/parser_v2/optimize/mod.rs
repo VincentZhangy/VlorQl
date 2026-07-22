@@ -54,31 +54,45 @@ pub fn optimize(plan: &mut QueryPlan) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vlorql_core::schema::*;
     use serde_json::json;
+    use vlorql_core::schema::*;
 
     fn col(name: &str) -> Expression {
-        Expression::ColumnRef { table: None, column: name.to_owned() }
+        Expression::ColumnRef {
+            table: None,
+            column: name.to_owned(),
+        }
     }
 
     fn lit_int(v: i64) -> Expression {
-        Expression::Literal { value: json!(v), data_type: DataType::Int }
+        Expression::Literal {
+            value: json!(v),
+            data_type: DataType::Int,
+        }
     }
 
     fn lit_bool(v: bool) -> Expression {
-        Expression::Literal { value: json!(v), data_type: DataType::Boolean }
+        Expression::Literal {
+            value: json!(v),
+            data_type: DataType::Boolean,
+        }
     }
 
     fn true_pred() -> Predicate {
         Predicate::Comparison {
-            left: lit_bool(true), op: ComparisonOperator::Eq, right: lit_bool(true),
+            left: lit_bool(true),
+            op: ComparisonOperator::Eq,
+            right: lit_bool(true),
         }
     }
 
     fn base_plan() -> QueryPlan {
         QueryPlan {
             select: vec![Projection::Star { table: None }],
-            from: FromClause { table: "users".to_owned(), alias: None },
+            from: FromClause {
+                table: "users".to_owned(),
+                alias: None,
+            },
             r#where: None,
             group_by: None,
             having: None,
@@ -95,30 +109,38 @@ mod tests {
         let mut plan = base_plan();
         plan.r#where = Some(Predicate::And {
             left: Box::new(Predicate::Comparison {
-                left: col("age"), op: ComparisonOperator::Gt, right: lit_int(18),
+                left: col("age"),
+                op: ComparisonOperator::Gt,
+                right: lit_int(18),
             }),
             right: Box::new(true_pred()),
         });
         assert!(optimize(&mut plan));
         // AND TRUE removed
-        assert!(matches!(plan.r#where.unwrap(), Predicate::Comparison { .. }));
+        assert!(matches!(
+            plan.r#where.unwrap(),
+            Predicate::Comparison { .. }
+        ));
     }
 
     #[test]
     fn simplifies_join_predicate() {
         let mut plan = base_plan();
-        plan.joins = Some(vec![
-            JoinClause {
-                join_type: JoinType::Inner,
-                right_table: FromClause { table: "orders".to_owned(), alias: None },
-                on: Predicate::And {
-                    left: Box::new(Predicate::Comparison {
-                        left: col("user_id"), op: ComparisonOperator::Eq, right: col("id"),
-                    }),
-                    right: Box::new(true_pred()),
-                },
+        plan.joins = Some(vec![JoinClause {
+            join_type: JoinType::Inner,
+            right_table: FromClause {
+                table: "orders".to_owned(),
+                alias: None,
             },
-        ]);
+            on: Predicate::And {
+                left: Box::new(Predicate::Comparison {
+                    left: col("user_id"),
+                    op: ComparisonOperator::Eq,
+                    right: col("id"),
+                }),
+                right: Box::new(true_pred()),
+            },
+        }]);
         assert!(optimize(&mut plan));
         let join = &plan.joins.unwrap()[0];
         // AND TRUE removed from ON
@@ -129,8 +151,16 @@ mod tests {
     fn removes_duplicate_projections() {
         let mut plan = base_plan();
         plan.select = vec![
-            Projection::Column { table: None, column: "id".to_owned(), alias: None },
-            Projection::Column { table: None, column: "id".to_owned(), alias: None },
+            Projection::Column {
+                table: None,
+                column: "id".to_owned(),
+                alias: None,
+            },
+            Projection::Column {
+                table: None,
+                column: "id".to_owned(),
+                alias: None,
+            },
         ];
         assert!(optimize(&mut plan));
         assert_eq!(plan.select.len(), 1);
@@ -140,7 +170,9 @@ mod tests {
     fn no_change_for_canonical() {
         let mut plan = base_plan();
         plan.r#where = Some(Predicate::Comparison {
-            left: col("age"), op: ComparisonOperator::Gt, right: lit_int(18),
+            left: col("age"),
+            op: ComparisonOperator::Gt,
+            right: lit_int(18),
         });
         assert!(!optimize(&mut plan));
     }
@@ -148,32 +180,40 @@ mod tests {
     #[test]
     fn recursive_cte_optimization() {
         let mut plan = base_plan();
-        plan.ctes = Some(vec![
-            CommonTableExpression {
-                name: "active".to_owned(),
-                query: Box::new(QueryPlan {
-                    select: vec![Projection::Star { table: None }],
-                    from: FromClause { table: "users".to_owned(), alias: None },
-                    r#where: Some(Predicate::And {
-                        left: Box::new(Predicate::Comparison {
-                            left: col("status"), op: ComparisonOperator::Eq,
-                            right: Expression::Literal { value: json!("active"), data_type: DataType::String },
-                        }),
-                        right: Box::new(true_pred()),
+        plan.ctes = Some(vec![CommonTableExpression {
+            name: "active".to_owned(),
+            query: Box::new(QueryPlan {
+                select: vec![Projection::Star { table: None }],
+                from: FromClause {
+                    table: "users".to_owned(),
+                    alias: None,
+                },
+                r#where: Some(Predicate::And {
+                    left: Box::new(Predicate::Comparison {
+                        left: col("status"),
+                        op: ComparisonOperator::Eq,
+                        right: Expression::Literal {
+                            value: json!("active"),
+                            data_type: DataType::String,
+                        },
                     }),
-                    group_by: None,
-                    having: None,
-                    order_by: None,
-                    limit: None,
-                    offset: None,
-                    joins: None,
-                    ctes: None,
+                    right: Box::new(true_pred()),
                 }),
-            },
-        ]);
+                group_by: None,
+                having: None,
+                order_by: None,
+                limit: None,
+                offset: None,
+                joins: None,
+                ctes: None,
+            }),
+        }]);
         assert!(optimize(&mut plan));
         // CTE subquery should have its AND TRUE simplified.
         let cte = &plan.ctes.unwrap()[0];
-        assert!(matches!(cte.query.r#where.as_ref().unwrap(), Predicate::Comparison { .. }));
+        assert!(matches!(
+            cte.query.r#where.as_ref().unwrap(),
+            Predicate::Comparison { .. }
+        ));
     }
 }

@@ -1,7 +1,7 @@
 //! FromClause / table builder: canonical JSON → [`FromClause`].
 
-use vlorql_core::schema::FromClause;
 use serde_json::Value;
+use vlorql_core::schema::FromClause;
 
 use super::expr_builder::{BuildError, opt_str, req_obj, req_str};
 

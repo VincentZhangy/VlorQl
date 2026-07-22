@@ -11,7 +11,7 @@ use vlorql_llm::parser_v2::validate::validator;
 fn build_plan(raw: &str) -> Result<vlorql_core::schema::QueryPlan, Box<dyn std::error::Error>> {
     let json_str = extract_json_content(raw);
     let mut value: serde_json::Value = serde_json::from_str(json_str)?;
-    pipeline::normalize(&mut value);
+    let _ = pipeline::normalize(&mut value);
     let plan = query_builder::build_plan(&value)?;
     Ok(plan)
 }
@@ -23,7 +23,11 @@ fn valid_star_plan() {
     let raw = r#"{"select": [{"type": "star"}], "from": {"table": "users"}}"#;
     let plan = build_plan(raw).unwrap();
     let result = validator::validate_plan(&plan);
-    assert!(result.is_ok(), "valid star plan should pass: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "valid star plan should pass: {:?}",
+        result.err()
+    );
 }
 
 #[test]
@@ -37,7 +41,11 @@ fn valid_full_plan() {
     }"#;
     let plan = build_plan(raw).unwrap();
     let result = validator::validate_plan(&plan);
-    assert!(result.is_ok(), "valid full plan should pass: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "valid full plan should pass: {:?}",
+        result.err()
+    );
 }
 
 #[test]
@@ -49,7 +57,11 @@ fn valid_plan_with_joins() {
     }"#;
     let plan = build_plan(raw).unwrap();
     let result = validator::validate_plan(&plan);
-    assert!(result.is_ok(), "valid plan with joins should pass: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "valid plan with joins should pass: {:?}",
+        result.err()
+    );
 }
 
 #[test]
@@ -61,7 +73,11 @@ fn valid_plan_with_cross_join() {
     }"#;
     let plan = build_plan(raw).unwrap();
     let result = validator::validate_plan(&plan);
-    assert!(result.is_ok(), "cross join without on should pass: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "cross join without on should pass: {:?}",
+        result.err()
+    );
 }
 
 #[test]
@@ -73,7 +89,11 @@ fn valid_plan_with_cte() {
     }"#;
     let plan = build_plan(raw).unwrap();
     let result = validator::validate_plan(&plan);
-    assert!(result.is_ok(), "valid plan with CTE should pass: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "valid plan with CTE should pass: {:?}",
+        result.err()
+    );
 }
 
 // ── Invalid plans ─────────────────────────────────────────────────
@@ -105,7 +125,10 @@ fn missing_join_condition_fails_build() {
         "joins": [{"join_type": "inner", "right_table": {"table": "orders"}}]
     }"#;
     let result = build_plan(raw);
-    assert!(result.is_err(), "inner join without on should fail at build time");
+    assert!(
+        result.is_err(),
+        "inner join without on should fail at build time"
+    );
 }
 
 // ── Full pipeline validation test ─────────────────────────────────
@@ -116,7 +139,11 @@ fn messy_deepseek_plan_ends_up_valid() {
     let raw = r#"{"select": [{"type": "star"}], "from": {"table": "orders"}, "filter": {"type": "comparison", "left": {"column": "status"}, "op": "eq", "right": {"value": "active"}}}"#;
     let plan = build_plan(raw).unwrap();
     let result = validator::validate_plan(&plan);
-    assert!(result.is_ok(), "DeepSeek-style plan should be valid after normalize: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "DeepSeek-style plan should be valid after normalize: {:?}",
+        result.err()
+    );
 }
 
 #[test]
@@ -125,7 +152,11 @@ fn messy_qwen_plan_ends_up_valid() {
     let raw = r#"{"projection": ["id", "name"], "source": "users", "filter": {"type": "comparison", "left": {"column": "age"}, "op": "gt", "right": {"value": 18}}}"#;
     let plan = build_plan(raw).unwrap();
     let result = validator::validate_plan(&plan);
-    assert!(result.is_ok(), "Qwen-style plan should be valid after normalize: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Qwen-style plan should be valid after normalize: {:?}",
+        result.err()
+    );
 }
 
 // ── Error handling ────────────────────────────────────────────────

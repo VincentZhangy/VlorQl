@@ -3,8 +3,7 @@
 use crate::cache::{PromptCache, PromptCacheKey, hash_policy};
 use crate::policy::{PolicyConfig, TablePolicy};
 use crate::schema::{
-    ColumnSchema, DataType, DialectProfile, JoinType, SchemaSnapshot, SqlDialect,
-    TableSchema,
+    ColumnSchema, DataType, DialectProfile, JoinType, SchemaSnapshot, SqlDialect, TableSchema,
 };
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
@@ -444,7 +443,7 @@ impl PromptBuilder {
         );
         let _ = writeln!(
             prompt,
-             "Q: Orders with total > 150, sorted by total desc\n\
+            "Q: Orders with total > 150, sorted by total desc\n\
               A: {{\"select\":[{{\"type\":\"column_ref\",\"table\":\"orders\",\"column\":\"id\",\"alias\":null}},{{\"type\":\"column_ref\",\"table\":\"orders\",\"column\":\"total\",\"alias\":null}}],\"from\":{{\"table\":\"orders\",\"alias\":null}},\"where\":{{\"type\":\"comparison\",\"left\":{{\"type\":\"column_ref\",\"column\":\"total\",\"table\":\"orders\"}},\"op\":\"gt\",\"right\":{{\"type\":\"literal\",\"value\":150,\"data_type\":\"float\"}}}},\"order_by\":[{{\"expr\":{{\"type\":\"column_ref\",\"column\":\"total\",\"table\":\"orders\"}},\"descending\":true}}],\"limit\":10}}\n"
         );
         // Add a JOIN example if there are at least 2 relevant tables
@@ -462,31 +461,31 @@ impl PromptBuilder {
         if has_join_example {
             let _ = writeln!(
                 prompt,
-                 "Q: List users with their order totals\n\
+                "Q: List users with their order totals\n\
                   A: {{\"select\":[{{\"type\":\"column_ref\",\"table\":\"users\",\"column\":\"name\",\"alias\":null}},{{\"type\":\"column_ref\",\"table\":\"orders\",\"column\":\"total\",\"alias\":null}}],\"from\":{{\"table\":\"users\",\"alias\":null}},\"joins\":[{{\"join_type\":\"inner\",\"right_table\":{{\"table\":\"orders\",\"alias\":null}},\"on\":{{\"type\":\"comparison\",\"left\":{{\"type\":\"column_ref\",\"column\":\"id\",\"table\":\"users\"}},\"op\":\"eq\",\"right\":{{\"type\":\"column_ref\",\"column\":\"user_id\",\"table\":\"orders\"}}}}}}],\"limit\":10}}\n"
             );
             // Anti-join: preferred pattern for "never / without" questions.
             let _ = writeln!(
                 prompt,
-                 "Q: Users who never placed an order\n\
+                "Q: Users who never placed an order\n\
                   A: {{\"select\":[{{\"type\":\"column_ref\",\"table\":\"users\",\"column\":\"id\",\"alias\":null}},{{\"type\":\"column_ref\",\"table\":\"users\",\"column\":\"name\",\"alias\":null}}],\"from\":{{\"table\":\"users\",\"alias\":null}},\"joins\":[{{\"join_type\":\"left\",\"right_table\":{{\"table\":\"orders\",\"alias\":null}},\"on\":{{\"type\":\"comparison\",\"left\":{{\"type\":\"column_ref\",\"column\":\"id\",\"table\":\"users\"}},\"op\":\"eq\",\"right\":{{\"type\":\"column_ref\",\"column\":\"user_id\",\"table\":\"orders\"}}}}}}],\"where\":{{\"type\":\"is_null\",\"expr\":{{\"type\":\"column_ref\",\"column\":\"id\",\"table\":\"orders\"}}}},\"limit\":10}}\n"
             );
             // Minimal NOT EXISTS form (only if LEFT JOIN is unavailable).
             let _ = writeln!(
                 prompt,
-                 "Q: Users with no orders (NOT EXISTS form)\n\
+                "Q: Users with no orders (NOT EXISTS form)\n\
                   A: {{\"select\":[{{\"type\":\"column_ref\",\"table\":\"users\",\"column\":\"id\",\"alias\":null}}],\"from\":{{\"table\":\"users\",\"alias\":null}},\"where\":{{\"type\":\"not\",\"child\":{{\"type\":\"exists\",\"query\":{{\"select\":[{{\"type\":\"star\"}}],\"from\":{{\"table\":\"orders\",\"alias\":null}},\"where\":{{\"type\":\"comparison\",\"left\":{{\"type\":\"column_ref\",\"column\":\"user_id\",\"table\":\"orders\"}},\"op\":\"eq\",\"right\":{{\"type\":\"column_ref\",\"column\":\"id\",\"table\":\"users\"}}}}}}}}}},\"limit\":10}}\n"
             );
             // GROUP BY + aggregate: "each / every / per" questions.
             let _ = writeln!(
                 prompt,
-                 "Q: How many items were sold per product?\n\
+                "Q: How many items were sold per product?\n\
                   A: {{\"select\":[{{\"type\":\"column_ref\",\"table\":\"products\",\"column\":\"name\",\"alias\":\"product\"}},{{\"type\":\"expr\",\"expression\":{{\"type\":\"function_call\",\"name\":\"sum\",\"args\":[{{\"type\":\"column_ref\",\"column\":\"quantity\",\"table\":\"order_items\"}}],\"distinct\":false}},\"alias\":\"total_sold\"}}],\"from\":{{\"table\":\"products\",\"alias\":null}},\"joins\":[{{\"join_type\":\"inner\",\"right_table\":{{\"table\":\"order_items\",\"alias\":null}},\"on\":{{\"type\":\"comparison\",\"left\":{{\"type\":\"column_ref\",\"column\":\"id\",\"table\":\"products\"}},\"op\":\"eq\",\"right\":{{\"type\":\"column_ref\",\"column\":\"product_id\",\"table\":\"order_items\"}}}}}}],\"group_by\":[{{\"type\":\"column_ref\",\"table\":\"products\",\"column\":\"name\"}}]}}\n"
             );
         }
         let _ = writeln!(
             prompt,
-             "\n\
+            "\n\
               The real response must obey the current schema and dialect.\n",
         );
     }

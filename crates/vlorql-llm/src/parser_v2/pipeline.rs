@@ -69,13 +69,13 @@ pub fn parse_query_plan(raw: &str) -> Result<QueryPlan, ParseError> {
     let json_str = extract_json_content(raw);
 
     // Stage 2: Normalize — canonicalize the JSON.
-    let mut value: serde_json::Value = serde_json::from_str(json_str)
-        .map_err(|e| ParseError::InvalidJson(e.to_string()))?;
+    let mut value: serde_json::Value =
+        serde_json::from_str(json_str).map_err(|e| ParseError::InvalidJson(e.to_string()))?;
     let _ = normalize_pipeline::normalize(&mut value);
 
     // Stage 3: Build — canonical JSON → QueryPlan AST.
-    let mut plan = query_builder::build_plan(&value)
-        .map_err(|e| ParseError::BuildError(e.to_string()))?;
+    let mut plan =
+        query_builder::build_plan(&value).map_err(|e| ParseError::BuildError(e.to_string()))?;
 
     // Stage 4: Fix — auto-fix safe defaults.
     let _ = fixer::fix_plan(&mut plan);
@@ -97,11 +97,11 @@ pub fn parse_query_plan(raw: &str) -> Result<QueryPlan, ParseError> {
 /// Useful when you want to see the plan even if it has minor issues.
 pub fn parse_query_plan_lenient(raw: &str) -> Result<QueryPlan, ParseError> {
     let json_str = extract_json_content(raw);
-    let mut value: serde_json::Value = serde_json::from_str(json_str)
-        .map_err(|e| ParseError::InvalidJson(e.to_string()))?;
+    let mut value: serde_json::Value =
+        serde_json::from_str(json_str).map_err(|e| ParseError::InvalidJson(e.to_string()))?;
     let _ = normalize_pipeline::normalize(&mut value);
-    let mut plan = query_builder::build_plan(&value)
-        .map_err(|e| ParseError::BuildError(e.to_string()))?;
+    let mut plan =
+        query_builder::build_plan(&value).map_err(|e| ParseError::BuildError(e.to_string()))?;
     let _ = fixer::fix_plan(&mut plan);
     let _ = optimize_plan(&mut plan);
     Ok(plan)
@@ -120,19 +120,23 @@ pub struct ParseResult {
 /// Parse with full debug output.
 pub fn parse_query_plan_debug(raw: &str) -> Result<ParseResult, ParseError> {
     let json_str = extract_json_content(raw).to_owned();
-    let mut value: serde_json::Value = serde_json::from_str(&json_str)
-        .map_err(|e| ParseError::InvalidJson(e.to_string()))?;
+    let mut value: serde_json::Value =
+        serde_json::from_str(&json_str).map_err(|e| ParseError::InvalidJson(e.to_string()))?;
     let _ = normalize_pipeline::normalize(&mut value);
     let canonical = value.clone();
-    let mut plan = query_builder::build_plan(&value)
-        .map_err(|e| ParseError::BuildError(e.to_string()))?;
+    let mut plan =
+        query_builder::build_plan(&value).map_err(|e| ParseError::BuildError(e.to_string()))?;
     let _ = fixer::fix_plan(&mut plan);
     if let Err(errors) = validator::validate_plan(&plan) {
         let messages: Vec<String> = errors.iter().map(|e| e.to_string()).collect();
         return Err(ParseError::ValidationErrors(messages));
     }
     let _ = optimize_plan(&mut plan);
-    Ok(ParseResult { json_str, canonical, plan })
+    Ok(ParseResult {
+        json_str,
+        canonical,
+        plan,
+    })
 }
 
 #[cfg(test)]
@@ -149,7 +153,8 @@ mod tests {
 
     #[test]
     fn parse_with_markdown_fence() {
-        let raw = "```json\n{\"select\": [{\"type\": \"star\"}], \"from\": {\"table\": \"users\"}}\n```";
+        let raw =
+            "```json\n{\"select\": [{\"type\": \"star\"}], \"from\": {\"table\": \"users\"}}\n```";
         let plan = parse_query_plan(raw).unwrap();
         assert_eq!(plan.from.table, "users");
     }

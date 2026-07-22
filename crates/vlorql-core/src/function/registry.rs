@@ -90,8 +90,7 @@ pub fn lookup_function_for_dialect(name: &str, dialect: Dialect) -> Option<Funct
 
 /// Returns `true` when `name` is a known aggregate function.
 pub fn is_aggregate(name: &str) -> bool {
-    lookup_function(name)
-        .is_some_and(|def| def.kind == FunctionKind::Aggregate)
+    lookup_function(name).is_some_and(|def| def.kind == FunctionKind::Aggregate)
 }
 
 /// Returns `true` when `name` is a known function of any kind.

@@ -13,8 +13,7 @@ const VALID_JOIN_FIELDS: &[&str] = &["join_type", "right_table", "on"];
 
 /// Fields that belong at the plan level, not inside a join object.
 const PLAN_LEVEL_FIELDS: &[&str] = &[
-    "select", "from", "where", "group_by", "having",
-    "order_by", "limit", "offset", "ctes",
+    "select", "from", "where", "group_by", "having", "order_by", "limit", "offset", "ctes",
 ];
 
 /// Extract plan-level fields from inside join objects and return them
@@ -22,9 +21,7 @@ const PLAN_LEVEL_FIELDS: &[&str] = &[
 ///
 /// Returns `true` if any field was extracted.
 #[must_use]
-pub fn extract_plan_level_fields(
-    val: &mut serde_json::Value,
-) -> Vec<(String, serde_json::Value)> {
+pub fn extract_plan_level_fields(val: &mut serde_json::Value) -> Vec<(String, serde_json::Value)> {
     let Some(obj) = val.as_object_mut() else {
         return Vec::new();
     };
@@ -93,10 +90,7 @@ pub fn string_right_table_to_object(val: &mut serde_json::Value) -> bool {
     for join in joins.iter_mut() {
         if let Some(join_obj) = join.as_object_mut() {
             if let Some(rt) = join_obj.get("right_table").and_then(|v| v.as_str()) {
-                join_obj.insert(
-                    "right_table".to_owned(),
-                    serde_json::json!({"table": rt}),
-                );
+                join_obj.insert("right_table".to_owned(), serde_json::json!({"table": rt}));
                 changed = true;
             }
         }
@@ -357,11 +351,11 @@ pub fn infer_missing_on(val: &mut serde_json::Value) -> bool {
 /// Not linguistically perfect, but good enough for FK column naming.
 fn singularize(s: &str) -> &str {
     if s.ends_with("_items") {
-        &s[..s.len() - 1]  // order_items → order_item
+        &s[..s.len() - 1] // order_items → order_item
     } else if s.ends_with('s') && s.len() > 1 {
-        &s[..s.len() - 1]  // products → product, users → user
+        &s[..s.len() - 1] // products → product, users → user
     } else {
-        s                    // already singular or irregular
+        s // already singular or irregular
     }
 }
 
@@ -424,9 +418,7 @@ mod tests {
             "select": [{"type": "star"}],
             "from": {"table": "users"}
         });
-        let extracted = vec![
-            ("where".to_owned(), json!({"type": "comparison"})),
-        ];
+        let extracted = vec![("where".to_owned(), json!({"type": "comparison"}))];
         assert!(super::apply_extracted_fields(&mut val, extracted));
         assert!(val.get("where").is_some());
     }
@@ -521,7 +513,12 @@ mod tests {
         assert_eq!(joins.len(), 1);
         let join_obj = joins[0].as_object().unwrap();
         // right_table should be an object.
-        assert!(join_obj.get("right_table").and_then(|v| v.as_object()).is_some());
+        assert!(
+            join_obj
+                .get("right_table")
+                .and_then(|v| v.as_object())
+                .is_some()
+        );
         // extra_field should be stripped.
         assert!(join_obj.get("extra_field").is_none());
     }

@@ -50,7 +50,11 @@ pub fn fence_language(text: &str) -> Option<&str> {
     let text = text.trim();
     let after_fence = text.strip_prefix("```")?;
     let lang = after_fence.split('\n').next()?;
-    if lang.is_empty() { None } else { Some(lang.trim()) }
+    if lang.is_empty() {
+        None
+    } else {
+        Some(lang.trim())
+    }
 }
 
 #[cfg(test)]

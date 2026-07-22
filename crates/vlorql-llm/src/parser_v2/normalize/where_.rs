@@ -283,7 +283,10 @@ mod tests {
             }
         });
         assert!(extract_top_level_fields(&mut val));
-        assert!(val.get("order_by").is_some(), "order_by should be extracted");
+        assert!(
+            val.get("order_by").is_some(),
+            "order_by should be extracted"
+        );
         assert!(val.get("limit").is_some(), "limit should be extracted");
         // These fields should be removed from inside `where`.
         let where_obj = val.get("where").unwrap().as_object().unwrap();
