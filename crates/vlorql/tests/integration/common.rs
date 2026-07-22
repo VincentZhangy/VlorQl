@@ -86,7 +86,7 @@ pub fn base_plan() -> QueryPlan {
         }],
         from: FromClause {
             table: "users".to_owned(),
-            alias: None,
+            alias: Some("t1".to_owned()),
         },
         r#where: None,
         group_by: None,

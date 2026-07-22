@@ -43,6 +43,23 @@ impl QueryScope {
         Self { sources, cte_names }
     }
 
+    /// Merge outer scope sources into this scope.
+    ///
+    /// Correlated subqueries need access to the outer query's tables.
+    /// Inner sources (from the subquery's own FROM/JOIN) take precedence
+    /// over outer sources with the same table name.
+    pub(crate) fn extend_with_outer(&mut self, outer: &QueryScope) {
+        let inner_tables: HashSet<&str> = self.sources.iter().map(|s| s.table.as_str()).collect();
+        let to_add: Vec<&QuerySource> = outer
+            .sources
+            .iter()
+            .filter(|source| !inner_tables.contains(source.table.as_str()))
+            .collect();
+        for source in to_add {
+            self.sources.push(source.clone());
+        }
+    }
+
     pub(crate) fn resolve_source(&self, qualifier: &str) -> Option<&QuerySource> {
         self.sources
             .iter()
@@ -127,10 +144,7 @@ pub(crate) fn collect_expression_references(
             collect_expression_references(right, references);
         }
         Expression::Star => {}
-        Expression::SubQuery { query } => {
-            let sub_refs = collect_plan_references(query);
-            references.extend(sub_refs.columns);
-        }
+        Expression::SubQuery { .. } => {}
     }
 }
 
@@ -155,22 +169,13 @@ pub(crate) fn collect_predicate_references(
         }
         Predicate::In { expr, target } => {
             collect_expression_references(expr, references);
-            match target {
-                InTarget::Values(values) => {
-                    for value in values {
-                        collect_expression_references(value, references);
-                    }
-                }
-                InTarget::SubQuery(query) => {
-                    let sub_refs = collect_plan_references(query);
-                    references.extend(sub_refs.columns);
+            if let InTarget::Values(values) = target {
+                for value in values {
+                    collect_expression_references(value, references);
                 }
             }
         }
-        Predicate::Exists { query } => {
-            let sub_refs = collect_plan_references(query);
-            references.extend(sub_refs.columns);
-        }
+        Predicate::Exists { .. } => {}
         Predicate::Like { expr, .. } | Predicate::IsNull { expr } => {
             collect_expression_references(expr, references);
         }

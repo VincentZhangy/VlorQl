@@ -5,7 +5,9 @@ use crate::errors::{PolicyErrorKind, SchemaErrorKind, VlorQLError};
 use crate::query::{
     ColumnReference, QueryScope, QuerySource, collect_plan_references, collect_predicate_references,
 };
-use crate::schema::{Predicate, QueryPlan, SchemaSnapshot, TableSchema};
+use crate::schema::{
+    Expression, InTarget, Predicate, Projection, QueryPlan, SchemaSnapshot, TableSchema,
+};
 use serde_json::json;
 use std::collections::HashSet;
 
@@ -112,14 +114,27 @@ impl PolicyEngine {
         schema: &SchemaSnapshot,
         errors: &mut Vec<VlorQLError>,
     ) {
+        self.validate_plan_inner(plan, schema, errors, None);
+    }
+
+    fn validate_plan_inner(
+        &self,
+        plan: &QueryPlan,
+        schema: &SchemaSnapshot,
+        errors: &mut Vec<VlorQLError>,
+        outer_scope: Option<&QueryScope>,
+    ) {
         // A CTE's body is an independent query scope and must be checked recursively.
         if let Some(ctes) = &plan.ctes {
             for cte in ctes {
-                self.validate_plan(&cte.query, schema, errors);
+                self.validate_plan_inner(&cte.query, schema, errors, None);
             }
         }
 
-        let scope = QueryScope::from_plan(plan);
+        let mut scope = QueryScope::from_plan(plan);
+        if let Some(outer) = outer_scope {
+            scope.extend_with_outer(outer);
+        }
         let mut reported_tables = HashSet::new();
         let mut reported_columns = HashSet::new();
 
@@ -156,6 +171,106 @@ impl PolicyEngine {
                 &mut reported_tables,
                 &mut reported_columns,
             );
+        }
+
+        self.validate_subqueries_in_plan(plan, schema, errors, &scope);
+    }
+
+    fn validate_subqueries_in_plan(
+        &self,
+        plan: &QueryPlan,
+        schema: &SchemaSnapshot,
+        errors: &mut Vec<VlorQLError>,
+        outer_scope: &QueryScope,
+    ) {
+        for projection in &plan.select {
+            if let Projection::Expr { expression, .. } = projection {
+                self.validate_subqueries_in_expression(expression, schema, errors, outer_scope);
+            }
+        }
+        if let Some(predicate) = &plan.r#where {
+            self.validate_subqueries_in_predicate(predicate, schema, errors, outer_scope);
+        }
+        if let Some(expressions) = &plan.group_by {
+            for expression in expressions {
+                self.validate_subqueries_in_expression(expression, schema, errors, outer_scope);
+            }
+        }
+        if let Some(predicate) = &plan.having {
+            self.validate_subqueries_in_predicate(predicate, schema, errors, outer_scope);
+        }
+        if let Some(terms) = &plan.order_by {
+            for term in terms {
+                self.validate_subqueries_in_expression(&term.expr, schema, errors, outer_scope);
+            }
+        }
+        if let Some(joins) = &plan.joins {
+            for join in joins {
+                self.validate_subqueries_in_predicate(&join.on, schema, errors, outer_scope);
+            }
+        }
+    }
+
+    fn validate_subqueries_in_expression(
+        &self,
+        expression: &Expression,
+        schema: &SchemaSnapshot,
+        errors: &mut Vec<VlorQLError>,
+        outer_scope: &QueryScope,
+    ) {
+        match expression {
+            Expression::SubQuery { query } => {
+                self.validate_plan_inner(query, schema, errors, Some(outer_scope));
+            }
+            Expression::FunctionCall { args, .. } => {
+                for argument in args {
+                    self.validate_subqueries_in_expression(argument, schema, errors, outer_scope);
+                }
+            }
+            Expression::BinaryOp { left, right, .. } => {
+                self.validate_subqueries_in_expression(left, schema, errors, outer_scope);
+                self.validate_subqueries_in_expression(right, schema, errors, outer_scope);
+            }
+            _ => {}
+        }
+    }
+
+    fn validate_subqueries_in_predicate(
+        &self,
+        predicate: &Predicate,
+        schema: &SchemaSnapshot,
+        errors: &mut Vec<VlorQLError>,
+        outer_scope: &QueryScope,
+    ) {
+        match predicate {
+            Predicate::Comparison { left, right, .. } => {
+                self.validate_subqueries_in_expression(left, schema, errors, outer_scope);
+                self.validate_subqueries_in_expression(right, schema, errors, outer_scope);
+            }
+            Predicate::And { left, right } | Predicate::Or { left, right } => {
+                self.validate_subqueries_in_predicate(left, schema, errors, outer_scope);
+                self.validate_subqueries_in_predicate(right, schema, errors, outer_scope);
+            }
+            Predicate::Not { child } => {
+                self.validate_subqueries_in_predicate(child, schema, errors, outer_scope);
+            }
+            Predicate::Between { expr, low, high } => {
+                self.validate_subqueries_in_expression(expr, schema, errors, outer_scope);
+                self.validate_subqueries_in_expression(low, schema, errors, outer_scope);
+                self.validate_subqueries_in_expression(high, schema, errors, outer_scope);
+            }
+            Predicate::In { expr, target } => {
+                self.validate_subqueries_in_expression(expr, schema, errors, outer_scope);
+                if let InTarget::SubQuery(query) = target {
+                    self.validate_plan_inner(query, schema, errors, Some(outer_scope));
+                }
+            }
+            Predicate::Exists { query } => {
+                self.validate_plan_inner(query, schema, errors, Some(outer_scope));
+            }
+            Predicate::Like { expr, .. } | Predicate::IsNull { expr } => {
+                self.validate_subqueries_in_expression(expr, schema, errors, outer_scope);
+            }
         }
     }
 
@@ -195,7 +310,7 @@ impl PolicyEngine {
                 Some(source) => vec![source],
                 None => {
                     if reported_tables.insert(("schema", qualifier.to_owned())) {
-                        errors.push(table_not_found_error(qualifier, schema));
+                        errors.push(table_not_in_scope_or_not_found(qualifier, schema));
                     }
                     return;
                 }
@@ -228,7 +343,7 @@ impl PolicyEngine {
         if let Some(qualifier) = &reference.table {
             let Some(source) = scope.resolve_source(qualifier) else {
                 if reported_tables.insert(("schema", qualifier.clone())) {
-                    errors.push(table_not_found_error(qualifier, schema));
+                    errors.push(table_not_in_scope_or_not_found(qualifier, schema));
                 }
                 return;
             };
@@ -399,6 +514,22 @@ fn table_not_found_error(table: &str, schema: &SchemaSnapshot) -> VlorQLError {
                 .collect::<Vec<_>>(),
         }),
     )
+}
+
+fn table_not_in_scope_or_not_found(table: &str, schema: &SchemaSnapshot) -> VlorQLError {
+    let context = json!({
+        "table": table,
+        "available_tables": schema
+            .tables
+            .iter()
+            .map(|candidate| candidate.name.as_str())
+            .collect::<Vec<_>>(),
+    });
+    if schema.get_table(table).is_some() {
+        VlorQLError::schema(SchemaErrorKind::TableNotInScope { table: table.to_owned() }, context)
+    } else {
+        VlorQLError::schema(SchemaErrorKind::TableNotFound { table: table.to_owned() }, context)
+    }
 }
 
 trait AvailableColumns {

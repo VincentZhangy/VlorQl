@@ -21,6 +21,7 @@
 pub mod cache;
 pub mod compile;
 pub mod errors;
+pub mod function;
 pub mod observability;
 pub mod optimizer;
 pub mod policy;
@@ -29,3 +30,11 @@ pub(crate) mod query;
 pub mod schema;
 pub mod statistics;
 pub mod validate;
+
+/// Initialise the function registry with built-in functions.
+///
+/// Should be called once during program startup (e.g. from the
+/// application's `main` or the `vlorql` facade's `build` method).
+pub fn init_function_registry() {
+    function::init_registry(function::builtin::builtin_functions());
+}

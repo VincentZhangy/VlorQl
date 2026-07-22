@@ -189,6 +189,7 @@ impl VlorQLError {
             Self::Schema { kind, .. } => match kind {
                 SchemaErrorKind::TableNotFound { .. } => "S001",
                 SchemaErrorKind::ColumnNotFound { .. } => "S002",
+                SchemaErrorKind::TableNotInScope { .. } => "S003",
             },
             Self::Llm { kind, .. } => match kind {
                 LlmErrorKind::ApiError { .. } => "L001",
@@ -235,6 +236,11 @@ impl VlorQLError {
                     | ValidationErrorKind::InvalidColumn { .. }
                     | ValidationErrorKind::InvalidFunction { .. }
                     | ValidationErrorKind::TypeMismatch { .. }
+                    | ValidationErrorKind::AggregationMismatch { .. }
+            ),
+            Self::Schema { kind, .. } => matches!(
+                kind,
+                SchemaErrorKind::TableNotFound { .. } | SchemaErrorKind::TableNotInScope { .. } | SchemaErrorKind::ColumnNotFound { .. }
             ),
             Self::Llm { .. } => true,
             _ => false,
@@ -322,9 +328,27 @@ impl VlorQLError {
             Self::Compilation { .. } => {
                 Some("Use only features supported by the selected SQL dialect compiler.".to_owned())
             }
-            Self::Schema { .. } => Some(
-                "Refresh the schema snapshot and reference an existing table or column.".to_owned(),
-            ),
+            Self::Schema { kind, .. } => match kind {
+                SchemaErrorKind::TableNotFound { table } => {
+                    let tip = if table == "where" || table == "from" {
+                        "The 'table' field contains a reserved word or structural field name, not an actual table. Use a valid table name from the schema."
+                    } else {
+                        "Add the table as a JOIN (with an ON clause) or as the FROM source. If you reference columns with 'table: \"<name>\"', that table must be in FROM or JOINs."
+                    };
+                    Some(tip.to_owned())
+                }
+                SchemaErrorKind::TableNotInScope { table } => {
+                    let tip = if table == "where" || table == "from" {
+                        "The 'table' field contains a reserved word or structural field name, not an actual table. Use a valid table name from the schema."
+                    } else {
+                        "The table exists in the schema but is not part of the query's FROM or JOIN clauses. Add a JOIN (with an ON clause) for this table."
+                    };
+                    Some(tip.to_owned())
+                }
+                SchemaErrorKind::ColumnNotFound { .. } => {
+                    Some("Use only column names listed in the schema for the referenced table.".to_owned())
+                }
+            },
             Self::Llm { kind, .. } => match kind {
                 LlmErrorKind::ApiError { status, .. } if *status == 401 || *status == 403 => {
                     Some("Check the LLM provider credentials and permissions.".to_owned())
@@ -336,8 +360,26 @@ impl VlorQLError {
                 LlmErrorKind::Timeout => {
                     Some("Retry the LLM request or increase the request timeout.".to_owned())
                 }
-                LlmErrorKind::ParseError { .. } => {
-                    Some("Return only a JSON query plan matching the requested schema.".to_owned())
+                LlmErrorKind::ParseError { details } => {
+                    let details_lower = details.to_lowercase();
+                    let tip = if details_lower.contains("where") && (details_lower.contains("array") || details_lower.contains("sequence") || details_lower.contains("list") || details_lower.contains("expected")) {
+                        "The 'where' field must be a single Predicate object (NOT an array). In 'and'/'or', each of 'left' and 'right' is a single Predicate {...} — never wrap them in [...]."
+                    } else if details_lower.contains("unknown field") {
+                        "Remove any unrecognized fields from the JSON. Only fields defined in the schema are allowed."
+                    } else if details_lower.contains("invalid type") && details_lower.contains("expected") {
+                        "A field has the wrong JSON type — e.g., an array where an object was expected, or a string where a number was expected. Check the field types in the schema."
+                    } else if details_lower.contains("expected struct") {
+                        "A field contains a string instead of a JSON object, or a JSON array has an element of the wrong type. Ensure all nested objects use {...} not \"...\"."
+                    } else if details_lower.contains("expected variant") || details_lower.contains("unknown variant") {
+                        "The 'type' field has an unrecognized value. Use only valid type tags: 'column_ref', 'literal', 'comparison', 'and', 'or', etc."
+                    } else if details_lower.contains("missing field") {
+                        "A required field is missing. Add the required field to the JSON object."
+                    } else if details_lower.contains("trailing characters") || details_lower.contains("control character") || details_lower.contains("escape") || details_lower.contains("expected") {
+                        "The response contains invalid JSON syntax. Return ONLY a raw JSON object — no markdown fences (```json), no extra text before or after."
+                    } else {
+                        "Return only a JSON object matching the QueryPlan schema. No markdown fences, no extra text, no comments."
+                    };
+                    Some(tip.to_owned())
                 }
             },
             Self::Config { .. } => None,
@@ -846,15 +888,17 @@ mod tests {
 
     #[test]
     fn every_schema_error_kind_has_a_distinct_code() {
-        let shared_suggestion =
-            "Refresh the schema snapshot and reference an existing table or column.";
         let missing_table = VlorQLError::schema(
             SchemaErrorKind::TableNotFound {
                 table: "ghost".to_owned(),
             },
             json!({}),
         );
-        assert_code_and_suggestion(&missing_table, "S001", Some(shared_suggestion));
+        assert_code_and_suggestion(
+            &missing_table,
+            "S001",
+            Some("Add the table as a JOIN (with an ON clause) or as the FROM source. If you reference columns with 'table: \"<name>\"', that table must be in FROM or JOINs."),
+        );
 
         let missing_column = VlorQLError::schema(
             SchemaErrorKind::ColumnNotFound {
@@ -863,7 +907,23 @@ mod tests {
             },
             json!({}),
         );
-        assert_code_and_suggestion(&missing_column, "S002", Some(shared_suggestion));
+        assert_code_and_suggestion(
+            &missing_column,
+            "S002",
+            Some("Use only column names listed in the schema for the referenced table."),
+        );
+
+        let not_in_scope = VlorQLError::schema(
+            SchemaErrorKind::TableNotInScope {
+                table: "users".to_owned(),
+            },
+            json!({}),
+        );
+        assert_code_and_suggestion(
+            &not_in_scope,
+            "S003",
+            Some("The table exists in the schema but is not part of the query's FROM or JOIN clauses. Add a JOIN (with an ON clause) for this table."),
+        );
     }
 
     #[test]
@@ -897,7 +957,7 @@ mod tests {
         assert_code_and_suggestion(
             &parse,
             "L003",
-            Some("Return only a JSON query plan matching the requested schema."),
+            Some("Return only a JSON object matching the QueryPlan schema. No markdown fences, no extra text, no comments."),
         );
     }
 
@@ -1004,7 +1064,16 @@ mod tests {
                     },
                     json!({}),
                 ),
-                false,
+                true,
+            ),
+            (
+                VlorQLError::schema(
+                    SchemaErrorKind::TableNotInScope {
+                        table: "users".to_owned(),
+                    },
+                    json!({}),
+                ),
+                true,
             ),
             (
                 VlorQLError::config(ConfigErrorKind::MissingSchema, json!({})),

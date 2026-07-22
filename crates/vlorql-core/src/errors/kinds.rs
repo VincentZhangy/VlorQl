@@ -132,6 +132,13 @@ pub enum SchemaErrorKind {
         /// Name of the missing table.
         table: String,
     },
+    /// A referenced table exists in the schema but is not part of the
+    /// query's `FROM` or `JOIN` clauses.
+    #[error("table `{table}` exists in the schema but is not referenced in the FROM or JOIN clauses of the query")]
+    TableNotInScope {
+        /// Name of the table that is missing from the query scope.
+        table: String,
+    },
     /// A referenced column does not exist on a table in the schema snapshot.
     #[error("column `{table}.{column}` was not found in the schema")]
     ColumnNotFound {

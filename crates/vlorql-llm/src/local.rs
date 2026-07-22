@@ -596,7 +596,14 @@ fn parse_completion_payload(body: &str, backend: LocalBackend) -> Result<QueryPl
             }),
         ));
     }
-    serde_json::from_str::<QueryPlan>(content).map_err(|error| {
+    let cleaned = crate::extract_json_content(content);
+    crate::parse_llm_response(cleaned).map_err(|error| {
+        let raw_content = truncate(content, 4096);
+        let cleaned_for_debug = if cleaned != content {
+            Some(truncate(cleaned, 4096))
+        } else {
+            None
+        };
         VlorQLError::llm(
             LlmErrorKind::ParseError {
                 details: format!("assistant content is not a valid QueryPlan: {error}"),
@@ -604,7 +611,8 @@ fn parse_completion_payload(body: &str, backend: LocalBackend) -> Result<QueryPl
             json!({
                 "source": "local_content",
                 "backend": backend.label(),
-                "content": truncate(content, 4096),
+                "content": raw_content,
+                "cleaned": cleaned_for_debug,
             }),
         )
     })
@@ -695,7 +703,7 @@ mod tests {
             }],
             from: FromClause {
                 table: "users".to_owned(),
-                alias: None,
+                alias: Some("t1".to_owned()),
             },
             r#where: None,
             group_by: None,

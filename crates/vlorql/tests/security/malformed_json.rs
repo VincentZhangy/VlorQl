@@ -208,7 +208,7 @@ fn from_clause_missing_table_is_rejected() {
 #[test]
 fn extra_top_level_field_is_rejected() {
     let body = r#"{
-        "select": [{"type": "column", "table": "users", "column": "id", "alias": null}],
+        "select": [{"type": "column_ref", "table": "users", "column": "id", "alias": null}],
         "from": {"table": "users", "alias": null},
         "extra": true
     }"#;
@@ -225,7 +225,7 @@ fn extra_top_level_field_is_rejected() {
 fn extra_field_in_projection_is_rejected() {
     let body = r#"{
         "select": [{
-            "type": "column",
+            "type": "column_ref",
             "table": "users",
             "column": "id",
             "alias": null,
@@ -266,7 +266,7 @@ fn facade_rejects_malicious_json_body() {
     // compiled SQL.
     let body = r#"{
         "select": [{
-            "type": "column",
+            "type": "column_ref",
             "table": "users",
             "column": "name",
             "alias": null

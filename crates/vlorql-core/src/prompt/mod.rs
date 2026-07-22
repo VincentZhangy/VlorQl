@@ -182,15 +182,22 @@ mod tests {
         assert!(prompt.contains("# Role"));
         assert!(prompt.contains("## Schema"));
         assert!(prompt.contains("## Dialect"));
+        assert!(prompt.contains("## Planning Rules"));
         assert!(prompt.contains("## Required JSON Output"));
         assert!(prompt.contains("QueryPlan"));
-        assert!(prompt.contains("additionalProperties"));
+        assert!(prompt.contains("\"properties\""));
         assert!(prompt.contains("JSON only"));
         assert!(prompt.contains("## Example"));
+        assert!(prompt.contains("LEFT JOIN"));
+        assert!(prompt.contains("is_null"));
         assert!(prompt.contains("users("));
         assert!(prompt.contains("organizations("));
         assert!(!prompt.contains("audit_logs"));
-        assert!(prompt.chars().count() < 11_000);
+        assert!(
+            prompt.chars().count() < 12_000,
+            "prompt too long: {} chars",
+            prompt.chars().count()
+        );
     }
 
     #[test]
@@ -218,7 +225,7 @@ mod tests {
             .with_examples(false)
             .build_system_prompt("Show users");
         assert!(!prompt.contains("## Example"));
-        assert!(prompt.chars().count() < 11_000);
+        assert!(prompt.chars().count() < 12_000);
     }
 }
 
@@ -376,14 +383,13 @@ mod extra_tests {
     }
 
     #[test]
-    fn prompt_embeds_a_strict_json_schema_for_query_plan() {
+    fn prompt_embeds_a_compact_json_schema_for_query_plan() {
         let prompt = non_empty_builder().build_system_prompt("Show users");
-        // The required JSON output section must embed a real JSON
-        // Schema payload, not a placeholder string. The presence of
-        // both the `$schema` and `properties` keys is a strong
-        // indicator that the payload was produced by `schemars`.
-        assert!(prompt.contains("\"$schema\""));
+        // The required JSON output section must embed a compact
+        // JSON Schema payload. The compact schema uses `oneOf` and
+        // `properties` instead of `$ref`/`$defs`.
         assert!(prompt.contains("\"properties\""));
+        assert!(prompt.contains("\"oneOf\""));
         assert!(prompt.contains("QueryPlan"));
         // The schema section must wrap the JSON in a fenced code
         // block so the LLM treats it as data, not instructions.

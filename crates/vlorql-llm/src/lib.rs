@@ -40,7 +40,45 @@ pub(crate) const SSE_DONE: &str = "[DONE]";
 pub mod anthropic;
 pub mod deepseek;
 pub mod local;
+/// Parse pipeline: recover → canonicalize → build (`QueryPlan`).
+///
+/// Public helpers are re-exported at the crate root for compatibility:
+/// [`extract_json_content`], [`repair_query_plan_json`],
+/// [`detect_template_leak`].
+/// V2 parse pipeline: recover → canonicalize → build → validate → optimize.
+///
+/// A staged pipeline designed for multi-model compatibility.  Built
+/// alongside the existing `parse` module; will eventually replace it.
+// V2 pipeline (recommended for all new code).
+pub mod parser_v2;
+pub mod parse;
 pub mod zhipu;
+
+pub use parser_v2::recover::{detect_template_leak, extract_json_content};
+pub use parser_v2::builder::query_builder::{from_canonical_str, from_canonical_value};
+pub use parser_v2::pipeline::{
+    parse_query_plan, parse_query_plan_debug, parse_query_plan_lenient,
+    ParseError, ParseResult,
+};
+
+/// Parse LLM response text into a [`QueryPlan`] using the V2 pipeline.
+///
+/// This is the recommended internal helper for all `LlmClient` implementations.
+/// It runs the full V2 pipeline (recover → normalize → build → fix → validate → optimize)
+/// and converts errors to the crate's `VlorQLError` type.
+pub(crate) fn parse_llm_response(content: &str) -> Result<QueryPlan, VlorQLError> {
+    parser_v2::pipeline::parse_query_plan(content).map_err(|e| {
+        VlorQLError::llm(
+            LlmErrorKind::ParseError {
+                details: e.to_string(),
+            },
+            json!({
+                "source": "v2_pipeline",
+                "content": truncate(content, 4096),
+            }),
+        )
+    })
+}
 
 /// Supported LLM providers.
 ///
@@ -461,7 +499,16 @@ impl OpenAIClient {
                 )
             })?;
 
-        serde_json::from_str::<QueryPlan>(content).map_err(|error| {
+        serde_json::from_str(content).ok()
+            .and_then(|v: Value| {
+                v.get("content")
+                    .or_else(|| v.get("response"))
+                    .and_then(Value::as_str)
+                    .map(|s| s.to_owned())
+            })
+            .unwrap_or_else(|| content.to_owned());
+
+        parse_llm_response(&content).map_err(|error| {
             VlorQLError::llm(
                 LlmErrorKind::ParseError {
                     details: format!("assistant content is not a valid QueryPlan: {error}"),
@@ -794,7 +841,7 @@ fn simplified_query_plan_schema() -> Value {
                 "items": {
                     "type": "object",
                     "properties": {
-                        "type": { "type": "string", "enum": ["column", "expr", "star"] },
+                        "type": { "type": "string", "enum": ["column_ref", "expr", "star"] },
                         "table": { "type": "string" },
                         "column": { "type": "string" },
                         "expression": { "$ref": "#/definitions/Expression" },
@@ -1193,32 +1240,6 @@ pub(crate) fn extract_delta_content(value: &Value) -> Option<String> {
         .map(str::to_owned)
 }
 
-/// Returns a descriptive error message when `content` contains raw
-/// chat-template tokens (`<|im_start|>`, `<|im_end|>`), which indicate
-/// the model did not understand the output format constraint.
-#[must_use]
-pub fn detect_template_leak(content: &str) -> Option<String> {
-    let has_start = content.contains("<|im_start|>");
-    let has_end = content.contains("<|im_end|>");
-    if !has_start && !has_end {
-        return None;
-    }
-    Some(format!(
-        "Model returned raw chat-template tokens{}. \
-         This typically means the model does not support the `format` \
-         parameter with a full JSON Schema. \
-         Try setting `strict_json_schema = false` in `extra` of your \
-         LLM configuration, or use a model that supports structured output.",
-        if has_start && has_end {
-            " (`<|im_start|>`, `<|im_end|>`)"
-        } else if has_start {
-            " (`<|im_start|>`)"
-        } else {
-            " (`<|im_end|>`)"
-        }
-    ))
-}
-
 pub(crate) fn retry_backoff(base: Duration, retry_index: usize) -> Duration {
     let multiplier = 1u32
         .checked_shl(retry_index.min(31) as u32)
@@ -1407,7 +1428,7 @@ mod tests {
             select: vec![Projection::Star { table: None }],
             from: FromClause {
                 table: "users".to_owned(),
-                alias: None,
+                alias: Some("t1".to_owned()),
             },
             r#where: None,
             group_by: None,
@@ -1809,4 +1830,5 @@ mod tests {
         // The test verifies that the span instrumentation does not panic.
         drop(captured_clone.lock().expect("lock should not be poisoned"));
     }
+
 }

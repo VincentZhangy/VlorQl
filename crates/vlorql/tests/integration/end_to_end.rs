@@ -34,7 +34,7 @@ async fn query_runs_prompt_validation_and_compilation() {
         .expect("valid mock plan should compile");
 
     assert_eq!(compiled.dialect, SqlDialect::Sqlite);
-    assert_eq!(compiled.sql, "SELECT \"users\".\"id\" FROM \"users\"");
+    assert_eq!(compiled.sql, "SELECT \"t1\".\"id\" FROM \"users\" AS \"t1\"");
     assert!(compiled.parameters.is_empty());
 }
 
@@ -65,7 +65,7 @@ async fn query_emits_parameterized_where_clause() {
     assert_eq!(compiled.dialect, SqlDialect::Postgres);
     assert_eq!(
         compiled.sql,
-        "SELECT \"users\".\"id\" FROM \"users\" WHERE \"users\".\"id\" > $1"
+        "SELECT \"t1\".\"id\" FROM \"users\" AS \"t1\" WHERE \"t1\".\"id\" > $1"
     );
     assert_eq!(compiled.parameters.len(), 1);
     assert_eq!(compiled.parameters[0].value, json!(5));
@@ -176,7 +176,7 @@ async fn query_retries_after_retryable_validation_error() {
         .query("show user ids")
         .await
         .expect("second valid plan should be used after retry");
-    assert_eq!(compiled.sql, "SELECT \"users\".\"id\" FROM \"users\"");
+    assert_eq!(compiled.sql, "SELECT \"t1\".\"id\" FROM \"users\" AS \"t1\"");
 }
 
 /// `query()` retries the LLM up to the configured `max_retries` value
@@ -245,8 +245,8 @@ async fn query_does_not_retry_non_retryable_llm_errors() {
 /// rstest block demonstrates the same pattern locally and ensures the
 /// `rstest` dependency is exercised by `cargo test --test integration`.
 #[rstest]
-#[case::sqlite("sqlite", SqlDialect::Sqlite, "\"users\".\"id\"")]
-#[case::postgres("postgres", SqlDialect::Postgres, "\"users\".\"id\"")]
+#[case::sqlite("sqlite", SqlDialect::Sqlite, "\"t1\".\"id\"")]
+#[case::postgres("postgres", SqlDialect::Postgres, "\"t1\".\"id\"")]
 #[tokio::test]
 async fn dialect_smoke(
     #[case] dialect_name: &str,

@@ -48,15 +48,16 @@
 use std::error::Error;
 use std::sync::Arc;
 
+use bytes::BufMut;
 use vlorql::{SchemaSnapshot, SqlDialect, VlorQl};
 use vlorql_core::policy::PolicyConfig;
 use vlorql_core::prompt::PromptBuilder;
-use vlorql_core::schema::{ColumnSchema, DataType, SchemaMetadata, TableSchema};
 use vlorql_core::schema::{
-    ComparisonOperator, Expression, FromClause, JoinClause, JoinType, Predicate, Projection,
-    QueryPlan,
+    ColumnSchema, ComparisonOperator, DataType, Expression, ForeignKey, FromClause, InTarget,
+    JoinClause, JoinType, OrderByTerm, Predicate, Projection, QueryPlan, SchemaMetadata, TableSchema,
 };
-use vlorql_llm::{LlmClient, LlmConfig, LlmProvider, MockLlmClient, create_llm_client};
+use vlorql_core::validate::ValidatedPlan;
+use vlorql_llm::{LlmClient, LlmConfig, LlmProvider, create_llm_client};
 
 use rustls::SignatureScheme;
 use rustls::client::danger::{ServerCertVerified, ServerCertVerifier};
@@ -115,185 +116,84 @@ impl ServerCertVerifier for SkipVerify {
 // 1. 定义数据库 Schema
 // ============================================================================
 
+/// 辅助函数：创建一个普通列。
+fn col(name: &str, data_type: DataType, description: &str) -> ColumnSchema {
+    ColumnSchema {
+        name: name.to_owned(),
+        data_type,
+        nullable: false,
+        description: Some(description.to_owned()),
+        is_primary_key: false,
+        foreign_key: None,
+    }
+}
+
+/// 辅助函数：创建一个主键列（`INT` 类型）。
+fn pk(name: &str, description: &str) -> ColumnSchema {
+    ColumnSchema {
+        name: name.to_owned(),
+        data_type: DataType::Int,
+        nullable: false,
+        description: Some(description.to_owned()),
+        is_primary_key: true,
+        foreign_key: None,
+    }
+}
+
+/// 辅助函数：创建一个外键列（`INT` 类型）。
+fn fk(name: &str, foreign_table: &str, foreign_column: &str, description: &str) -> ColumnSchema {
+    ColumnSchema {
+        name: name.to_owned(),
+        data_type: DataType::Int,
+        nullable: false,
+        description: Some(description.to_owned()),
+        is_primary_key: false,
+        foreign_key: Some(ForeignKey {
+            foreign_table: foreign_table.to_owned(),
+            foreign_column: foreign_column.to_owned(),
+        }),
+    }
+}
+
+/// 辅助函数：创建一个表。
+fn table(name: &str, description: &str, columns: Vec<ColumnSchema>) -> TableSchema {
+    TableSchema {
+        name: name.to_owned(),
+        columns,
+        description: Some(description.to_owned()),
+        primary_key: Some(vec!["id".to_owned()]),
+    }
+}
+
 /// 电商数据库 Schema：users、orders、products、order_items 四张表。
 fn build_schema() -> Arc<SchemaSnapshot> {
     Arc::new(SchemaSnapshot::new(
         vec![
-            TableSchema {
-                name: "users".to_owned(),
-                columns: vec![
-                    ColumnSchema {
-                        name: "id".to_owned(),
-                        data_type: DataType::Int,
-                        nullable: false,
-                        description: Some("用户唯一标识符".to_owned()),
-                        is_primary_key: true,
-                        foreign_key: None,
-                    },
-                    ColumnSchema {
-                        name: "name".to_owned(),
-                        data_type: DataType::String,
-                        nullable: false,
-                        description: Some("用户显示名称".to_owned()),
-                        is_primary_key: false,
-                        foreign_key: None,
-                    },
-                    ColumnSchema {
-                        name: "email".to_owned(),
-                        data_type: DataType::String,
-                        nullable: false,
-                        description: Some("用户邮箱地址".to_owned()),
-                        is_primary_key: false,
-                        foreign_key: None,
-                    },
-                    ColumnSchema {
-                        name: "created_at".to_owned(),
-                        data_type: DataType::String,
-                        nullable: false,
-                        description: Some("用户注册时间 (ISO-8601)".to_owned()),
-                        is_primary_key: false,
-                        foreign_key: None,
-                    },
-                ],
-                description: Some("应用注册用户".to_owned()),
-                primary_key: Some(vec!["id".to_owned()]),
-            },
-            TableSchema {
-                name: "orders".to_owned(),
-                columns: vec![
-                    ColumnSchema {
-                        name: "id".to_owned(),
-                        data_type: DataType::Int,
-                        nullable: false,
-                        description: Some("订单唯一标识符".to_owned()),
-                        is_primary_key: true,
-                        foreign_key: None,
-                    },
-                    ColumnSchema {
-                        name: "user_id".to_owned(),
-                        data_type: DataType::Int,
-                        nullable: false,
-                        description: Some("关联到 users.id".to_owned()),
-                        is_primary_key: false,
-                        foreign_key: Some(vlorql_core::schema::ForeignKey {
-                            foreign_table: "users".to_owned(),
-                            foreign_column: "id".to_owned(),
-                        }),
-                    },
-                    ColumnSchema {
-                        name: "total".to_owned(),
-                        data_type: DataType::Float,
-                        nullable: false,
-                        description: Some("订单总金额".to_owned()),
-                        is_primary_key: false,
-                        foreign_key: None,
-                    },
-                    ColumnSchema {
-                        name: "status".to_owned(),
-                        data_type: DataType::String,
-                        nullable: false,
-                        description: Some(
-                            "订单状态: pending/shipped/completed/cancelled".to_owned(),
-                        ),
-                        is_primary_key: false,
-                        foreign_key: None,
-                    },
-                    ColumnSchema {
-                        name: "created_at".to_owned(),
-                        data_type: DataType::String,
-                        nullable: false,
-                        description: Some("下单时间 (ISO-8601)".to_owned()),
-                        is_primary_key: false,
-                        foreign_key: None,
-                    },
-                ],
-                description: Some("客户订单记录".to_owned()),
-                primary_key: Some(vec!["id".to_owned()]),
-            },
-            TableSchema {
-                name: "products".to_owned(),
-                columns: vec![
-                    ColumnSchema {
-                        name: "id".to_owned(),
-                        data_type: DataType::Int,
-                        nullable: false,
-                        description: Some("产品唯一标识符".to_owned()),
-                        is_primary_key: true,
-                        foreign_key: None,
-                    },
-                    ColumnSchema {
-                        name: "name".to_owned(),
-                        data_type: DataType::String,
-                        nullable: false,
-                        description: Some("产品名称".to_owned()),
-                        is_primary_key: false,
-                        foreign_key: None,
-                    },
-                    ColumnSchema {
-                        name: "price".to_owned(),
-                        data_type: DataType::Float,
-                        nullable: false,
-                        description: Some("产品单价".to_owned()),
-                        is_primary_key: false,
-                        foreign_key: None,
-                    },
-                ],
-                description: Some("产品目录".to_owned()),
-                primary_key: Some(vec!["id".to_owned()]),
-            },
-            TableSchema {
-                name: "order_items".to_owned(),
-                columns: vec![
-                    ColumnSchema {
-                        name: "id".to_owned(),
-                        data_type: DataType::Int,
-                        nullable: false,
-                        description: Some("明细唯一标识符".to_owned()),
-                        is_primary_key: true,
-                        foreign_key: None,
-                    },
-                    ColumnSchema {
-                        name: "order_id".to_owned(),
-                        data_type: DataType::Int,
-                        nullable: false,
-                        description: Some("关联到 orders.id".to_owned()),
-                        is_primary_key: false,
-                        foreign_key: Some(vlorql_core::schema::ForeignKey {
-                            foreign_table: "orders".to_owned(),
-                            foreign_column: "id".to_owned(),
-                        }),
-                    },
-                    ColumnSchema {
-                        name: "product_id".to_owned(),
-                        data_type: DataType::Int,
-                        nullable: false,
-                        description: Some("关联到 products.id".to_owned()),
-                        is_primary_key: false,
-                        foreign_key: Some(vlorql_core::schema::ForeignKey {
-                            foreign_table: "products".to_owned(),
-                            foreign_column: "id".to_owned(),
-                        }),
-                    },
-                    ColumnSchema {
-                        name: "quantity".to_owned(),
-                        data_type: DataType::Int,
-                        nullable: false,
-                        description: Some("购买数量".to_owned()),
-                        is_primary_key: false,
-                        foreign_key: None,
-                    },
-                    ColumnSchema {
-                        name: "unit_price".to_owned(),
-                        data_type: DataType::Float,
-                        nullable: false,
-                        description: Some("购买时单价".to_owned()),
-                        is_primary_key: false,
-                        foreign_key: None,
-                    },
-                ],
-                description: Some("订单中的商品明细".to_owned()),
-                primary_key: Some(vec!["id".to_owned()]),
-            },
+            table("users", "应用注册用户", vec![
+                pk("id", "用户唯一标识符"),
+                col("name", DataType::String, "用户显示名称"),
+                col("email", DataType::String, "用户邮箱地址"),
+                col("created_at", DataType::String, "用户注册时间 (ISO-8601)"),
+            ]),
+            table("orders", "客户订单记录", vec![
+                pk("id", "订单唯一标识符"),
+                fk("user_id", "users", "id", "关联到 users.id"),
+                col("total", DataType::Float, "订单总金额"),
+                col("status", DataType::String, "订单状态: pending/shipped/completed/cancelled"),
+                col("created_at", DataType::String, "下单时间 (ISO-8601)"),
+            ]),
+            table("products", "产品目录", vec![
+                pk("id", "产品唯一标识符"),
+                col("name", DataType::String, "产品名称"),
+                col("price", DataType::Float, "产品单价"),
+            ]),
+            table("order_items", "订单中的商品明细", vec![
+                pk("id", "明细唯一标识符"),
+                fk("order_id", "orders", "id", "关联到 orders.id"),
+                fk("product_id", "products", "id", "关联到 products.id"),
+                col("quantity", DataType::Int, "购买数量"),
+                col("unit_price", DataType::Float, "购买时单价"),
+            ]),
         ],
         SchemaMetadata {
             version: Some("1.0".to_owned()),
@@ -308,12 +208,12 @@ fn build_schema() -> Arc<SchemaSnapshot> {
 // ============================================================================
 //
 // 「真实 LLM 模式」：设置 OPENAI_API_KEY（或 LLM_PROVIDER），
-// 框架自动调用 LLM 生成 QueryPlan，您无需手动构建。
+// 框架自动调用 LLM 为每个问题生成 QueryPlan。
 //
-// 「离线演示模式」：未设置 API Key 时使用 MockLlmClient，
-// 它会返回一个预设的 QueryPlan 来模拟 LLM 输出。
+// 「离线演示模式」：不设置 API Key，使用预设的 QueryPlan 通过
+// compile_only() 直接编译，无需 LLM。
 
-fn select_llm_client() -> Box<dyn LlmClient> {
+fn select_llm_client() -> Option<Box<dyn LlmClient>> {
     // 优先使用真实的 OpenAI 兼容 API
     if let Ok(api_key) = std::env::var("OPENAI_API_KEY")
         && !api_key.trim().is_empty()
@@ -331,8 +231,8 @@ fn select_llm_client() -> Box<dyn LlmClient> {
             "[INFO] 真实 LLM 模式：使用 OpenAI 兼容客户端 (model={})",
             config.model
         );
-        eprintln!("       您只需要输入自然语言，QueryPlan 由 LLM 自动生成\n");
-        return create_llm_client(config).expect("创建 OpenAI 客户端失败");
+        eprintln!("       所有查询都将通过 LLM 自动生成 QueryPlan\n");
+        return Some(create_llm_client(config).expect("创建 OpenAI 客户端失败"));
     }
 
     // 也支持其他 Provider
@@ -370,26 +270,41 @@ fn select_llm_client() -> Box<dyn LlmClient> {
             ..LlmConfig::default()
         };
         eprintln!("[INFO] 真实 LLM 模式：使用 {provider} 客户端\n");
-        return create_llm_client(config).expect("创建 LLM 客户端失败");
+        return Some(create_llm_client(config).expect("创建 LLM 客户端失败"));
     }
 
     // 未设置 API Key → 离线演示模式
-    eprintln!("[INFO] 离线演示模式：未检测到 API Key，使用 MockLlmClient");
-    eprintln!("       Mock 模式需要预设一个 QueryPlan 来模拟 LLM 输出。");
+    eprintln!("[INFO] 离线演示模式：未检测到 API Key");
+    eprintln!("       使用预设的 QueryPlan 通过 compile_only() 直接编译。");
     eprintln!("       设置 OPENAI_API_KEY 即可切换到真实 LLM 模式，无需手动构建 QueryPlan。\n");
-    Box::new(MockLlmClient::success(build_demo_plan()))
+    None
 }
 
 // ============================================================================
-// 3. 离线演示模式：预设 QueryPlan（仅 Mock 模式需要）
+// 3. 预设 QueryPlan（仅离线模式需要）
 // ============================================================================
 //
-// 注意：这段代码仅用于「离线演示模式」。
 // 在真实 LLM 模式下，QueryPlan 由 LLM 自动生成，完全不需要这段代码。
-//
-// 预设 QueryPlan 对应自然语言问题：
-//   "列出总金额超过150的已完成订单，显示订单号、客户名和总金额"
+// 离线演示模式使用 compile_only() 直接编译这些预设的 Plan。
 
+const QUESTIONS: [&str; 4] = [
+    "列出总金额超过150的已完成订单，显示订单号、客户名和总金额，按金额从高到低排序，最多10条",
+    "查询状态为已完成或已发货的订单，显示订单号、金额、状态和客户名",
+    "哪些商品从未被购买过？",
+    "每种产品卖了多少件？",
+];
+
+/// 返回所有预设的 QueryPlan（离线模式使用）。
+fn build_all_plans() -> Vec<QueryPlan> {
+    vec![
+        build_demo_plan(),
+        build_in_predicate_plan(),
+        build_is_null_plan(),
+        build_aggregate_plan(),
+    ]
+}
+
+/// Plan 1: 基础查询 —— 已完成的订单（总金额 > 150）
 fn build_demo_plan() -> QueryPlan {
     QueryPlan {
         select: vec![
@@ -470,11 +385,363 @@ fn build_demo_plan() -> QueryPlan {
     }
 }
 
+/// Plan 2: IN 谓词 —— 查询状态为 completed 或 shipped 的订单
+///
+/// 对应的 SQL:
+/// ```sql
+/// SELECT "orders"."id", "orders"."total", "orders"."status", "users"."name"
+/// FROM "orders"
+/// INNER JOIN "users" ON "orders"."user_id" = "users"."id"
+/// WHERE "orders"."status" IN ('completed', 'shipped')
+/// ORDER BY "orders"."created_at" DESC
+/// ```
+fn build_in_predicate_plan() -> QueryPlan {
+    QueryPlan {
+        select: vec![
+            Projection::Column {
+                table: Some("orders".to_owned()),
+                column: "id".to_owned(),
+                alias: None,
+            },
+            Projection::Column {
+                table: Some("orders".to_owned()),
+                column: "total".to_owned(),
+                alias: None,
+            },
+            Projection::Column {
+                table: Some("orders".to_owned()),
+                column: "status".to_owned(),
+                alias: None,
+            },
+            Projection::Column {
+                table: Some("users".to_owned()),
+                column: "name".to_owned(),
+                alias: None,
+            },
+        ],
+        from: FromClause {
+            table: "orders".to_owned(),
+            alias: Some("o".to_owned()),
+        },
+        joins: Some(vec![JoinClause {
+            join_type: JoinType::Inner,
+            right_table: FromClause {
+                table: "users".to_owned(),
+                alias: Some("u".to_owned()),
+            },
+            on: Predicate::Comparison {
+                left: Expression::ColumnRef {
+                    table: Some("orders".to_owned()),
+                    column: "user_id".to_owned(),
+                },
+                op: ComparisonOperator::Eq,
+                right: Expression::ColumnRef {
+                    table: Some("users".to_owned()),
+                    column: "id".to_owned(),
+                },
+            },
+        }]),
+        r#where: Some(Predicate::In {
+            expr: Expression::ColumnRef {
+                table: Some("orders".to_owned()),
+                column: "status".to_owned(),
+            },
+            target: InTarget::Values(vec![
+                Expression::Literal {
+                    value: serde_json::json!("completed"),
+                    data_type: DataType::String,
+                },
+                Expression::Literal {
+                    value: serde_json::json!("shipped"),
+                    data_type: DataType::String,
+                },
+            ]),
+        }),
+        group_by: None,
+        having: None,
+        order_by: Some(vec![OrderByTerm {
+            expr: Expression::ColumnRef {
+                table: Some("orders".to_owned()),
+                column: "created_at".to_owned(),
+            },
+            descending: true,
+        }]),
+        limit: None,
+        offset: None,
+        ctes: None,
+    }
+}
+
+/// Plan 3: IS NULL + LEFT JOIN —— 查找从未被购买过的商品
+///
+/// 对应的 SQL:
+/// ```sql
+/// SELECT "products"."id", "products"."name", "products"."price"
+/// FROM "products"
+/// LEFT JOIN "order_items" ON "products"."id" = "order_items"."product_id"
+/// WHERE "order_items"."id" IS NULL
+/// ```
+fn build_is_null_plan() -> QueryPlan {
+    QueryPlan {
+        select: vec![
+            Projection::Column {
+                table: Some("products".to_owned()),
+                column: "id".to_owned(),
+                alias: None,
+            },
+            Projection::Column {
+                table: Some("products".to_owned()),
+                column: "name".to_owned(),
+                alias: None,
+            },
+            Projection::Column {
+                table: Some("products".to_owned()),
+                column: "price".to_owned(),
+                alias: None,
+            },
+        ],
+        from: FromClause {
+            table: "products".to_owned(),
+            alias: Some("p".to_owned()),
+        },
+        joins: Some(vec![JoinClause {
+            join_type: JoinType::Left,
+            right_table: FromClause {
+                table: "order_items".to_owned(),
+                alias: Some("oi".to_owned()),
+            },
+            on: Predicate::Comparison {
+                left: Expression::ColumnRef {
+                    table: Some("products".to_owned()),
+                    column: "id".to_owned(),
+                },
+                op: ComparisonOperator::Eq,
+                right: Expression::ColumnRef {
+                    table: Some("order_items".to_owned()),
+                    column: "product_id".to_owned(),
+                },
+            },
+        }]),
+        r#where: Some(Predicate::IsNull {
+            expr: Expression::ColumnRef {
+                table: Some("order_items".to_owned()),
+                column: "id".to_owned(),
+            },
+        }),
+        group_by: None,
+        having: None,
+        order_by: None,
+        limit: None,
+        offset: None,
+        ctes: None,
+    }
+}
+
+/// Plan 4: GROUP BY + 聚合函数 —— 每种产品的累计销售量
+///
+/// 对应的 SQL:
+/// ```sql
+/// SELECT "products"."name", SUM("order_items"."quantity") AS "total_sold"
+/// FROM "products"
+/// INNER JOIN "order_items" ON "products"."id" = "order_items"."product_id"
+/// GROUP BY "products"."name"
+/// ```
+fn build_aggregate_plan() -> QueryPlan {
+    QueryPlan {
+        select: vec![
+            Projection::Column {
+                table: Some("products".to_owned()),
+                column: "name".to_owned(),
+                alias: None,
+            },
+            Projection::Expr {
+                expression: Expression::FunctionCall {
+                    name: "SUM".to_owned(),
+                    args: vec![Expression::ColumnRef {
+                        table: Some("order_items".to_owned()),
+                        column: "quantity".to_owned(),
+                    }],
+                    distinct: false,
+                },
+                alias: Some("total_sold".to_owned()),
+            },
+        ],
+        from: FromClause {
+            table: "products".to_owned(),
+            alias: Some("p".to_owned()),
+        },
+        joins: Some(vec![JoinClause {
+            join_type: JoinType::Inner,
+            right_table: FromClause {
+                table: "order_items".to_owned(),
+                alias: Some("oi".to_owned()),
+            },
+            on: Predicate::Comparison {
+                left: Expression::ColumnRef {
+                    table: Some("products".to_owned()),
+                    column: "id".to_owned(),
+                },
+                op: ComparisonOperator::Eq,
+                right: Expression::ColumnRef {
+                    table: Some("order_items".to_owned()),
+                    column: "product_id".to_owned(),
+                },
+            },
+        }]),
+        r#where: None,
+        group_by: Some(vec![Expression::ColumnRef {
+            table: Some("products".to_owned()),
+            column: "name".to_owned(),
+        }]),
+        having: None,
+        order_by: None,
+        limit: None,
+        offset: None,
+        ctes: None,
+    }
+}
+
 // ============================================================================
-// 4. 在 PostgreSQL 上执行（可选）
+// 5. 在 PostgreSQL 上执行（可选）
 // ============================================================================
 
-async fn execute_on_postgres(compiled: &vlorql::CompiledQuery) -> Result<(), Box<dyn Error>> {
+/// A wrapper that lets an `i64` value be serialized across PostgreSQL
+/// integer types (`INT2`, `INT4`, `INT8`) and gracefully falls back to
+/// `TEXT`.
+///
+/// PostgreSQL's extended-query protocol infers parameter types during
+/// Parse.  In ambiguous positions (e.g. `ORDER BY $1` when `$1` holds a
+/// bare literal, not a column reference) the server defaults to `TEXT`.
+/// Without the TEXT fallback tokio-postgres raises
+/// "error serializing parameter".  This wrapper handles all four.
+///
+/// Macro to generate a thin wrapper type implementing `ToSql` for multiple PG types.
+macro_rules! make_pg_num {
+    ($name:ident, $inner:ty, |$val:ident, $ty:ident, $out:ident| $body:block,
+     $( $accept:ident )|+, $label:expr) => {
+        #[derive(Debug)]
+        struct $name($inner);
+
+        impl tokio_postgres::types::ToSql for $name {
+            fn to_sql(
+                &self,
+                $ty: &tokio_postgres::types::Type,
+                $out: &mut bytes::BytesMut,
+            ) -> Result<tokio_postgres::types::IsNull, Box<dyn std::error::Error + Sync + Send>> {
+                use tokio_postgres::types::IsNull;
+                let $val = self.0;
+                $body
+                Ok(IsNull::No)
+            }
+
+            fn accepts(ty: &tokio_postgres::types::Type) -> bool {
+                matches!(*ty, $( tokio_postgres::types::Type::$accept )|+)
+            }
+
+            fn to_sql_checked(
+                &self,
+                ty: &tokio_postgres::types::Type,
+                out: &mut bytes::BytesMut,
+            ) -> Result<tokio_postgres::types::IsNull, Box<dyn std::error::Error + Sync + Send>> {
+                if !Self::accepts(ty) {
+                    return Err(Box::new(std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        format!("{} does not accept type {}", $label, ty),
+                    )));
+                }
+                self.to_sql(ty, out)
+            }
+        }
+    };
+}
+
+make_pg_num!(PgInt, i64, |val, ty, out| {
+    if *ty == tokio_postgres::types::Type::INT2 {
+        out.put_i16(val as i16);
+    } else if *ty == tokio_postgres::types::Type::INT4 {
+        out.put_i32(val as i32);
+    } else if *ty == tokio_postgres::types::Type::INT8 {
+        out.put_i64(val);
+    } else {
+        out.extend_from_slice(val.to_string().as_bytes());
+    }
+}, INT2 | INT4 | INT8 | TEXT, "PgInt");
+
+make_pg_num!(PgFloat, f64, |val, ty, out| {
+    if *ty == tokio_postgres::types::Type::FLOAT4 {
+        out.put_f32(val as f32);
+    } else if *ty == tokio_postgres::types::Type::FLOAT8 {
+        out.put_f64(val);
+    } else {
+        out.extend_from_slice(val.to_string().as_bytes());
+    }
+}, FLOAT4 | FLOAT8 | TEXT, "PgFloat");
+
+/// Convert a `Parameter` to a boxed `ToSql` value for tokio-postgres.
+fn to_pg_param(p: &vlorql::Parameter) -> Box<dyn tokio_postgres::types::ToSql + Sync> {
+    match &p.value {
+        serde_json::Value::Number(n) => match p.data_type {
+            DataType::Float => Box::new(PgFloat(n.as_f64().unwrap_or(0.0))),
+            DataType::Int => Box::new(PgInt(n.as_i64().unwrap_or(0))),
+            _ => {
+                if let Some(f) = n.as_f64() {
+                    Box::new(PgFloat(f))
+                } else {
+                    Box::new(PgInt(n.as_i64().unwrap_or(0)))
+                }
+            }
+        },
+        serde_json::Value::String(s) => Box::new(s.clone()),
+        serde_json::Value::Bool(b) => Box::new(*b),
+        _ => panic!("不支持的参数类型: {:?} (value: {:?})", p.data_type, p.value),
+    }
+}
+
+/// Print query results in a simple table format.
+fn print_results(qidx: usize, rows: &[tokio_postgres::Row]) {
+    println!("\n========== 查询 {} 结果 ==========", qidx + 1);
+    println!("返回 {} 行数据:", rows.len());
+    println!();
+
+    if rows.is_empty() {
+        return;
+    }
+
+    let columns = rows[0].columns();
+    let col_names: Vec<&str> = columns.iter().map(|c| c.name()).collect();
+    println!("  │ {} │", col_names.join(" │ "));
+    println!(
+        "  ├{}┤",
+        col_names
+            .iter()
+            .map(|_| "───────")
+            .collect::<Vec<_>>()
+            .join("─┼─")
+    );
+
+    for row in rows {
+        let values: Vec<String> = (0..row.len())
+            .map(|i| {
+                // PG 二进制协议不支持隐式类型转换，需逐类型尝试
+                if let Ok(v) = row.try_get::<_, i32>(i) {
+                    v.to_string()
+                } else if let Ok(v) = row.try_get::<_, i64>(i) {
+                    v.to_string()
+                } else if let Ok(v) = row.try_get::<_, f64>(i) {
+                    v.to_string()
+                } else if let Ok(v) = row.try_get::<_, String>(i) {
+                    v
+                } else {
+                    "NULL".to_string()
+                }
+            })
+            .collect();
+        println!("  │ {} │", values.join(" │ "));
+    }
+    println!("===============================");
+}
+
+async fn execute_on_postgres(queries: &[vlorql::CompiledQuery]) -> Result<(), Box<dyn Error>> {
     let database_url = match std::env::var("DATABASE_URL") {
         Ok(url) => url,
         Err(_) => {
@@ -571,110 +838,43 @@ async fn execute_on_postgres(compiled: &vlorql::CompiledQuery) -> Result<(), Box
         eprintln!("[OK] 测试数据已插入");
     }
 
-    // 执行编译后的参数化 SQL
-    eprintln!("\n[EXEC] 执行 SQL: {}", compiled.sql);
-    if compiled.parameters.is_empty() {
-        eprintln!("[EXEC] 参数: (无)");
-    } else {
-        eprintln!("[EXEC] 参数:");
-        for (i, param) in compiled.parameters.iter().enumerate() {
-            eprintln!(
-                "       ${}: {} (类型: {:?})",
-                i + 1,
-                param.value,
-                param.data_type
-            );
+    // 依次执行所有编译后的参数化 SQL
+    for (qidx, compiled) in queries.iter().enumerate() {
+        eprintln!("\n═══════════════════════════════════════════════");
+        eprintln!("  查询 {} / {}", qidx + 1, queries.len());
+        eprintln!("═══════════════════════════════════════════════");
+        eprintln!("[EXEC] SQL: {}", compiled.sql);
+        if compiled.parameters.is_empty() {
+            eprintln!("[EXEC] 参数: (无)");
+        } else {
+            eprintln!("[EXEC] 参数:");
+            for (i, param) in compiled.parameters.iter().enumerate() {
+                eprintln!(
+                    "       ${}: {} (类型: {:?})",
+                    i + 1,
+                    param.value,
+                    param.data_type
+                );
+            }
+        }
+
+        // 将参数转换为 tokio-postgres 可接受的类型
+        let param_values: Vec<Box<dyn tokio_postgres::types::ToSql + Sync>> = compiled
+            .parameters
+            .iter()
+            .map(|p| to_pg_param(p))
+            .collect::<Vec<_>>();
+
+        let params: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> =
+            param_values.iter().map(|v| v.as_ref()).collect();
+
+        match client.query(&compiled.sql, &params).await {
+            Ok(rows) => print_results(qidx, &rows),
+            Err(e) => {
+                eprintln!("[ERROR] 查询 {} 执行失败: {}", qidx + 1, e);
+            }
         }
     }
-
-    // 将参数转换为 tokio-postgres 可接受的类型
-    let param_values: Vec<Box<dyn tokio_postgres::types::ToSql + Sync>> = compiled
-        .parameters
-        .iter()
-        .map(|p| {
-            let val: Box<dyn tokio_postgres::types::ToSql + Sync> = match &p.value {
-                serde_json::Value::Number(n) => {
-                    // 根据参数声明的类型决定转换
-                    match p.data_type {
-                        DataType::Float => {
-                            if let Some(f) = n.as_f64() {
-                                Box::new(f) as Box<dyn tokio_postgres::types::ToSql + Sync>
-                            } else {
-                                Box::new(0.0) as Box<dyn tokio_postgres::types::ToSql + Sync>
-                            }
-                        }
-                        DataType::Int => {
-                            if let Some(i) = n.as_i64() {
-                                Box::new(i) as Box<dyn tokio_postgres::types::ToSql + Sync>
-                            } else {
-                                // 如果整数超出 i64 范围，回退
-                                Box::new(0i64) as Box<dyn tokio_postgres::types::ToSql + Sync>
-                            }
-                        }
-                        _ => {
-                            // 未知类型，尝试 f64
-                            if let Some(f) = n.as_f64() {
-                                Box::new(f) as Box<dyn tokio_postgres::types::ToSql + Sync>
-                            } else if let Some(i) = n.as_i64() {
-                                Box::new(i) as Box<dyn tokio_postgres::types::ToSql + Sync>
-                            } else {
-                                Box::new(0i64) as Box<dyn tokio_postgres::types::ToSql + Sync>
-                            }
-                        }
-                    }
-                }
-                serde_json::Value::String(s) => {
-                    Box::new(s.clone()) as Box<dyn tokio_postgres::types::ToSql + Sync>
-                }
-                serde_json::Value::Bool(b) => {
-                    Box::new(*b) as Box<dyn tokio_postgres::types::ToSql + Sync>
-                }
-                _ => Box::new(String::new()) as Box<dyn tokio_postgres::types::ToSql + Sync>,
-            };
-            val
-        })
-        .collect::<Vec<_>>();
-
-    let params: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> =
-        param_values.iter().map(|v| v.as_ref()).collect();
-
-    let rows = client.query(&compiled.sql, &params).await?;
-    println!("\n========== 查询结果 ==========");
-    println!("返回 {} 行数据:", rows.len());
-    println!();
-
-    if !rows.is_empty() {
-        let columns = rows[0].columns();
-        let col_names: Vec<&str> = columns.iter().map(|c| c.name()).collect();
-        println!("  │ {} │", col_names.join(" │ "));
-        println!(
-            "  ├{}┤",
-            col_names
-                .iter()
-                .map(|_| "───────")
-                .collect::<Vec<_>>()
-                .join("─┼─")
-        );
-    }
-
-    for row in &rows {
-        let values: Vec<String> = (0..row.len())
-            .map(|i| {
-                // 按顺序尝试：i64 -> f64 -> String -> 最后回退到 "NULL"
-                if let Ok(v) = row.try_get::<_, i64>(i) {
-                    v.to_string()
-                } else if let Ok(v) = row.try_get::<_, f64>(i) {
-                    v.to_string()
-                } else if let Ok(v) = row.try_get::<_, String>(i) {
-                    v
-                } else {
-                    "NULL".to_string()
-                }
-            })
-            .collect();
-        println!("  │ {} │", values.join(" │ "));
-    }
-    println!("===============================");
 
     Ok(())
 }
@@ -724,35 +924,54 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // B. 构建 VlorQl Facade
     // ──────────────────────────────────────────────────────────────
     println!("─── 步骤 B: 构建 VlorQl Facade ───\n");
-    let vlorql = VlorQl::builder()
+    let llm_client = select_llm_client();
+    let is_llm_mode = llm_client.is_some();
+    let mut builder = VlorQl::builder()
         .with_schema(Arc::clone(&schema))
         .with_dialect_name("postgres")
         .with_policy(PolicyConfig::default())
-        .with_llm_client(select_llm_client())
-        .with_max_retries(2)
-        .build()?;
+        .with_max_retries(3);
+    if let Some(client) = llm_client {
+        builder = builder.with_llm_client(client);
+    }
+    let vlorql = builder.build()?;
     println!("[OK] VlorQl Facade 已构建\n");
 
     // ──────────────────────────────────────────────────────────────
-    // C. 发送自然语言查询 —— 这就是您唯一需要做的事情
+    // C. 编译全部自然语言查询
     // ──────────────────────────────────────────────────────────────
-    println!("─── 步骤 C: 发送自然语言查询 ───\n");
-    let user_question =
-        "列出总金额超过150的已完成订单，显示订单号、客户名和总金额，按金额从高到低排序，最多10条";
-    println!("用户问题: \"{user_question}\"");
-    println!();
-    println!("[INFO] VlorQl 内部自动完成以下步骤：");
-    println!("       1. 构建系统提示词（Schema + 方言 + 策略）");
-    println!("       2. 调用 LLM 生成结构化 QueryPlan");
-    println!("       3. 验证 QueryPlan（Schema → 策略 → 类型 → 方言）");
-    println!("       4. 编译为参数化 SQL");
-    if std::env::var("OPENAI_API_KEY").is_ok() || std::env::var("LLM_PROVIDER").is_ok() {
-        println!("       5. 如果验证失败，自动带错误信息重试 LLM");
-    }
-    println!();
+    let count = QUESTIONS.len();
 
-    let compiled = vlorql.query(user_question).await?;
-    println!("[OK] 查询完成\n");
+    if is_llm_mode {
+        println!("─── 步骤 C: 使用 LLM 生成全部 {count} 条查询 ───\n");
+        println!("[INFO] 每条查询都通过 VlorQl 完整流程：");
+        println!("       1. 构建系统提示词（Schema + 方言 + 策略）");
+        println!("       2. 调用 LLM 生成结构化 QueryPlan");
+        println!("       3. 验证 QueryPlan（Schema → 策略 → 类型 → 方言）");
+        println!("       4. 编译为参数化 SQL");
+        println!("       5. 如果验证失败，自动带错误信息重试 LLM");
+        println!();
+    } else {
+        println!("─── 步骤 C: 使用预设 QueryPlan 编译全部 {count} 条查询 ───\n");
+        println!("[INFO] 离线模式：使用 compile_only() 直接编译预设 Plan。");
+        println!("       设置 OPENAI_API_KEY 即可让 LLM 动态生成每个查询。\n");
+    }
+
+    let mut all_compiled = Vec::with_capacity(count);
+    if is_llm_mode {
+        for (i, question) in QUESTIONS.iter().enumerate() {
+            println!("[{}/{}] 查询: \"{}\"", i + 1, count, question);
+            let compiled = vlorql.query(question).await?;
+            println!("[OK]\n");
+            all_compiled.push(compiled);
+        }
+    } else {
+        for plan in build_all_plans() {
+            let validated = ValidatedPlan(Arc::new(plan));
+            let compiled = vlorql.compile_only(&validated)?;
+            all_compiled.push(compiled);
+        }
+    }
 
     // ──────────────────────────────────────────────────────────────
     // D. 查看编译结果
@@ -760,34 +979,39 @@ async fn main() -> Result<(), Box<dyn Error>> {
     println!("─── 步骤 D: 编译后的参数化 SQL ───\n");
     println!("方言: {:?}", SqlDialect::Postgres);
     println!();
-    println!("SQL:");
-    println!("─────────────────────────────────────────────");
-    println!("{}", compiled.sql);
-    println!("─────────────────────────────────────────────");
-    println!();
-    if compiled.parameters.is_empty() {
-        println!("参数: (无)");
-    } else {
-        println!("参数:");
-        for (i, param) in compiled.parameters.iter().enumerate() {
-            println!(
-                "  ${}: value={}, type={:?}",
-                i + 1,
-                param.value,
-                param.data_type
-            );
+
+    for (i, compiled) in all_compiled.iter().enumerate() {
+        let question = QUESTIONS[i];
+        println!("查询 {}: \"{}\"", i + 1, question);
+        println!();
+        println!("  SQL:");
+        println!("  ─────────────────────────────────────────────");
+        println!("  {}", compiled.sql);
+        println!("  ─────────────────────────────────────────────");
+        if compiled.parameters.is_empty() {
+            println!("  参数: (无)");
+        } else {
+            println!("  参数:");
+            for (j, param) in compiled.parameters.iter().enumerate() {
+                println!(
+                    "    ${}: value={}, type={:?}",
+                    j + 1,
+                    param.value,
+                    param.data_type
+                );
+            }
         }
+        println!();
     }
-    println!();
 
     // ──────────────────────────────────────────────────────────────
     // E. 在 PostgreSQL 上执行（可选）
     // ──────────────────────────────────────────────────────────────
-    println!("─── 步骤 E: 在 PostgreSQL 上执行 ───\n");
-    execute_on_postgres(&compiled).await?;
+    println!("─── 步骤 E: 在 PostgreSQL 上执行全部查询 ───\n");
+    execute_on_postgres(&all_compiled).await?;
 
     println!("\n═══════════════════════════════════════════════════════");
-    println!("  示例运行完毕");
+    println!("  示例运行完毕，共编译 {} 条查询", all_compiled.len());
     println!("═══════════════════════════════════════════════════════");
 
     Ok(())

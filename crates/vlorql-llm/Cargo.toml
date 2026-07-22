@@ -29,3 +29,43 @@ tracing-subscriber.workspace = true
 [[test]]
 name = "multi_provider"
 path = "tests/integration/multi_provider.rs"
+
+[[test]]
+name = "parser_v2_recover"
+path = "tests/parser_v2/recover_test.rs"
+
+[[test]]
+name = "parser_v2_normalize"
+path = "tests/parser_v2/normalize_test.rs"
+
+[[test]]
+name = "parser_v2_structure"
+path = "tests/parser_v2/structure_test.rs"
+
+[[test]]
+name = "parser_v2_expression"
+path = "tests/parser_v2/expression_test.rs"
+
+[[test]]
+name = "parser_v2_pipeline"
+path = "tests/parser_v2/pipeline_test.rs"
+
+[[test]]
+name = "parser_v2_validate"
+path = "tests/parser_v2/validate_test.rs"
+
+[[test]]
+name = "parser_v2_fix"
+path = "tests/parser_v2/fix_test.rs"
+
+[[test]]
+name = "parser_v2_optimize"
+path = "tests/parser_v2/optimize_test.rs"
+
+[[test]]
+name = "golden_test"
+path = "tests/golden_test.rs"
+
+[[test]]
+name = "bench_profile"
+path = "tests/bench_profile.rs"

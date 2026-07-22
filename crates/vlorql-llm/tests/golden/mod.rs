@@ -1,0 +1,263 @@
+//! Golden test data: realistic LLM outputs for each supported model.
+//!
+//! Each entry contains:
+//!
+//! - `name`: test case name
+//! - `input`: raw LLM output text (exactly what the model returns)
+//! - `expected_canonical`: the canonical JSON after the normalize pipeline
+//! - `expected_select_len`: expected number of SELECT items
+//! - `expected_from_table`: expected FROM table name
+//! - `expected_has_where`: whether the plan should have a WHERE clause
+//! - `expected_has_order_by`: whether the plan should have an ORDER BY clause
+//! - `expected_has_joins`: whether the plan should have JOINs
+//! - `expected_has_ctes`: whether the plan should have CTEs
+//! - `expected_limit`: expected LIMIT value (None if not present)
+//! - `expected_alias`: expected FROM alias (None if not present)
+
+pub struct GoldenTestCase {
+    pub name: &'static str,
+    pub input: &'static str,
+    pub expected_select_len: usize,
+    pub expected_from_table: &'static str,
+    pub expected_has_where: bool,
+    pub expected_has_order_by: bool,
+    pub expected_has_joins: bool,
+    pub expected_has_ctes: bool,
+    pub expected_limit: Option<u64>,
+    pub expected_alias: Option<&'static str>,
+}
+
+/// All golden test cases.
+pub const ALL_CASES: &[GoldenTestCase] = &[
+    // ── OpenAI style ─────────────────────────────────────────────────
+    GoldenTestCase {
+        name: "openai_simple_star",
+        input: r#"{"select":[{"type":"star"}],"from":{"table":"users"}}"#,
+        expected_select_len: 1,
+        expected_from_table: "users",
+        expected_has_where: false,
+        expected_has_order_by: false,
+        expected_has_joins: false,
+        expected_has_ctes: false,
+        expected_limit: None,
+        expected_alias: Some("t1"),
+    },
+    GoldenTestCase {
+        name: "openai_with_where",
+        input: r#"{"select":[{"type":"column_ref","table":"users","column":"name"}],"from":{"table":"users"},"where":{"type":"comparison","left":{"type":"column_ref","column":"age"},"op":"gt","right":{"type":"literal","value":18,"data_type":"int"}}}"#,
+        expected_select_len: 1,
+        expected_from_table: "users",
+        expected_has_where: true,
+        expected_has_order_by: false,
+        expected_has_joins: false,
+        expected_has_ctes: false,
+        expected_limit: None,
+        expected_alias: Some("t1"),
+    },
+    GoldenTestCase {
+        name: "openai_with_join",
+        input: r#"{"select":[{"type":"column_ref","column":"u.name"},{"type":"column_ref","column":"o.total"}],"from":{"table":"users","alias":"u"},"joins":[{"join_type":"inner","right_table":{"table":"orders","alias":"o"},"on":{"type":"comparison","left":{"type":"column_ref","column":"u.id"},"op":"eq","right":{"type":"column_ref","column":"o.user_id"}}}],"where":{"type":"comparison","left":{"type":"column_ref","column":"o.status"},"op":"eq","right":{"type":"literal","value":"completed","data_type":"string"}},"order_by":[{"expr":{"type":"column_ref","column":"o.total"},"descending":true}],"limit":10}"#,
+        expected_select_len: 2,
+        expected_from_table: "users",
+        expected_has_where: true,
+        expected_has_order_by: true,
+        expected_has_joins: true,
+        expected_has_ctes: false,
+        expected_limit: Some(10),
+        expected_alias: Some("u"),
+    },
+
+    // ── DeepSeek style (uses "filter" instead of "where") ────────────
+    GoldenTestCase {
+        name: "deepseek_filter_alias",
+        input: r#"{"select":[{"type":"star"}],"from":{"table":"orders"},"filter":{"type":"comparison","left":{"column":"status"},"op":"eq","right":{"value":"active"}}}"#,
+        expected_select_len: 1,
+        expected_from_table: "orders",
+        expected_has_where: true,
+        expected_has_order_by: false,
+        expected_has_joins: false,
+        expected_has_ctes: false,
+        expected_limit: None,
+        expected_alias: Some("t1"),
+    },
+    GoldenTestCase {
+        name: "deepseek_with_operator_aliases",
+        input: r#"{"select":[{"type":"star"}],"from":{"table":"products"},"filter":{"type":"comparison","left":{"column":"price"},"operator":"greater_than","right":{"value":100}}}"#,
+        expected_select_len: 1,
+        expected_from_table: "products",
+        expected_has_where: true,
+        expected_has_order_by: false,
+        expected_has_joins: false,
+        expected_has_ctes: false,
+        expected_limit: None,
+        expected_alias: Some("t1"),
+    },
+
+    // ── Qwen style (string projections, non-standard names) ──────────
+    GoldenTestCase {
+        name: "qwen_string_projections",
+        input: r#"{"projection":["id","name","email"],"source":"users","filter":{"type":"comparison","left":{"column":"age"},"op":"gt","right":{"value":18,"data_type":"integer"}}}"#,
+        expected_select_len: 3,
+        expected_from_table: "users",
+        expected_has_where: true,
+        expected_has_order_by: false,
+        expected_has_joins: false,
+        expected_has_ctes: false,
+        expected_limit: None,
+        expected_alias: Some("t1"),
+    },
+    GoldenTestCase {
+        name: "qwen_array_wrapped",
+        input: r#"{"projection":["id","name"],"source":"users","sort":[{"expr":{"column":"name"},"descending":true}],"limit":5}"#,
+        expected_select_len: 2,
+        expected_from_table: "users",
+        expected_has_where: false,
+        expected_has_order_by: true,
+        expected_has_joins: false,
+        expected_has_ctes: false,
+        expected_limit: Some(5),
+        expected_alias: Some("t1"),
+    },
+
+    // ── Claude / Anthropic style ─────────────────────────────────────
+    GoldenTestCase {
+        name: "claude_standard",
+        input: r#"{"select":[{"type":"star"}],"from":{"table":"users"},"where":{"type":"comparison","left":{"type":"column_ref","column":"status"},"op":"eq","right":{"type":"literal","value":"active","data_type":"string"}}}"#,
+        expected_select_len: 1,
+        expected_from_table: "users",
+        expected_has_where: true,
+        expected_has_order_by: false,
+        expected_has_joins: false,
+        expected_has_ctes: false,
+        expected_limit: None,
+        expected_alias: Some("t1"),
+    },
+    GoldenTestCase {
+        name: "claude_with_limit_and_offset",
+        input: r#"{"select":[{"type":"column_ref","column":"id"},{"type":"column_ref","column":"name"}],"from":{"table":"users"},"where":{"type":"comparison","left":{"type":"column_ref","column":"age"},"op":"gt","right":{"type":"literal","value":18,"data_type":"int"}},"order_by":[{"expr":{"type":"column_ref","column":"name"},"descending":true}],"limit":10,"offset":20}"#,
+        expected_select_len: 2,
+        expected_from_table: "users",
+        expected_has_where: true,
+        expected_has_order_by: true,
+        expected_has_joins: false,
+        expected_has_ctes: false,
+        expected_limit: Some(10),
+        expected_alias: Some("t1"),
+    },
+
+    // ── GLM / Zhipu style (uses "conditions", "fields") ──────────────
+    GoldenTestCase {
+        name: "glm_conditions_and_fields",
+        input: r#"{"fields":[{"type":"column_ref","column":"id"}],"from":{"table":"users"},"conditions":[{"type":"comparison","left":{"column":"age"},"op":"gt","right":{"value":18}}]}"#,
+        expected_select_len: 1,
+        expected_from_table: "users",
+        expected_has_where: true,
+        expected_has_order_by: false,
+        expected_has_joins: false,
+        expected_has_ctes: false,
+        expected_limit: None,
+        expected_alias: Some("t1"),
+    },
+    GoldenTestCase {
+        name: "glm_with_group_by",
+        input: r#"{"fields":[{"type":"column_ref","column":"status"},{"type":"expr","expression":{"type":"function_call","name":"count","args":[{"type":"star"}]}}],"from":{"table":"orders"},"conditions":[{"type":"comparison","left":{"column":"created_at"},"op":"gt","right":{"value":"2024-01-01"}}],"group":{"type":"column_ref","column":"status"}}"#,
+        expected_select_len: 2,
+        expected_from_table: "orders",
+        expected_has_where: true,
+        expected_has_order_by: false,
+        expected_has_joins: false,
+        expected_has_ctes: false,
+        expected_limit: None,
+        expected_alias: Some("t1"),
+    },
+
+    // ── Llama style (markdown fence, where as array) ─────────────────
+    GoldenTestCase {
+        name: "llama_markdown_fence",
+        input: "```json\n{\"select\": [{\"type\": \"star\"}], \"from\": {\"table\": \"products\"}, \"where\": [{\"type\": \"comparison\", \"left\": {\"column\": \"price\"}, \"op\": \"lt\", \"right\": {\"value\": 100}}], \"sort\": [{\"expr\": {\"column\": \"name\"}, \"descending\": true}]}\n```",
+        expected_select_len: 1,
+        expected_from_table: "products",
+        expected_has_where: true,
+        expected_has_order_by: true,
+        expected_has_joins: false,
+        expected_has_ctes: false,
+        expected_limit: None,
+        expected_alias: Some("t1"),
+    },
+    GoldenTestCase {
+        name: "llama_where_array_with_garbage",
+        input: r#"{"select":[{"type":"star"}],"from":{"table":"users"},"where":[{"type":"comparison","left":{"column":"age"},"op":"gt","right":{"value":18}},"extra text",42],"sort":[{"expr":{"column":"name"},"descending":true}]}"#,
+        expected_select_len: 1,
+        expected_from_table: "users",
+        expected_has_where: true,
+        expected_has_order_by: true,
+        expected_has_joins: false,
+        expected_has_ctes: false,
+        expected_limit: None,
+        expected_alias: Some("t1"),
+    },
+
+    // ── Mistral style ────────────────────────────────────────────────
+    GoldenTestCase {
+        name: "mistral_standard",
+        input: r#"{"select":[{"type":"star"}],"from":{"table":"users"},"where":{"type":"comparison","left":{"column":"age"},"op":"gt","right":{"value":18}},"order_by":[{"expr":{"column":"name"},"descending":true}],"limit":10}"#,
+        expected_select_len: 1,
+        expected_from_table: "users",
+        expected_has_where: true,
+        expected_has_order_by: true,
+        expected_has_joins: false,
+        expected_has_ctes: false,
+        expected_limit: Some(10),
+        expected_alias: Some("t1"),
+    },
+    GoldenTestCase {
+        name: "mistral_with_join_and_cte",
+        input: r#"{"select":[{"type":"column_ref","column":"u.name"},{"type":"column_ref","column":"o.total"}],"from":{"table":"users","alias":"u"},"joins":[{"join_type":"inner","right_table":{"table":"orders","alias":"o"},"on":{"type":"comparison","left":{"type":"column_ref","column":"u.id"},"op":"eq","right":{"type":"column_ref","column":"o.user_id"}}}],"ctes":[{"name":"recent_orders","query":{"select":[{"type":"star"}],"from":{"table":"orders"},"where":{"type":"comparison","left":{"type":"column_ref","column":"created_at"},"op":"gt","right":{"type":"literal","value":"2024-01-01","data_type":"string"}}}}]}"#,
+        expected_select_len: 2,
+        expected_from_table: "users",
+        expected_has_where: false,
+        expected_has_order_by: false,
+        expected_has_joins: true,
+        expected_has_ctes: true,
+        expected_limit: None,
+        expected_alias: Some("u"),
+    },
+
+    // ── Edge cases ───────────────────────────────────────────────────
+    GoldenTestCase {
+        name: "edge_empty_group_by",
+        input: r#"{"select":[{"type":"star"}],"from":{"table":"users"},"group_by":[]}"#,
+        expected_select_len: 1,
+        expected_from_table: "users",
+        expected_has_where: false,
+        expected_has_order_by: false,
+        expected_has_joins: false,
+        expected_has_ctes: false,
+        expected_limit: None,
+        expected_alias: Some("t1"),
+    },
+    GoldenTestCase {
+        name: "edge_missing_data_type",
+        input: r#"{"select":[{"type":"star"}],"from":{"table":"users"},"where":{"type":"comparison","left":{"column":"age"},"op":"gt","right":{"value":18}}}"#,
+        expected_select_len: 1,
+        expected_from_table: "users",
+        expected_has_where: true,
+        expected_has_order_by: false,
+        expected_has_joins: false,
+        expected_has_ctes: false,
+        expected_limit: None,
+        expected_alias: Some("t1"),
+    },
+    GoldenTestCase {
+        name: "edge_limit_zero_fixed",
+        input: r#"{"select":[{"type":"star"}],"from":{"table":"users"},"limit":0}"#,
+        expected_select_len: 1,
+        expected_from_table: "users",
+        expected_has_where: false,
+        expected_has_order_by: false,
+        expected_has_joins: false,
+        expected_has_ctes: false,
+        expected_limit: None, // fixer removes limit=0
+        expected_alias: Some("t1"),
+    },
+];

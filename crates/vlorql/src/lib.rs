@@ -37,7 +37,10 @@ pub use vlorql_core::errors::{ErrorResponse, ValidationErrors};
 pub use vlorql_core::optimizer::QueryOptimizer as QueryOptimizerCore;
 pub use vlorql_core::schema::{DialectProfile, SchemaSnapshot, SqlDialect};
 pub use vlorql_core::validate::{OptimizedPlan, ValidatedPlan};
-pub use vlorql_llm::{LlmClient, LlmConfig, LlmProvider, create_llm_client, detect_template_leak};
+pub use vlorql_llm::{
+    LlmClient, LlmConfig, LlmProvider, create_llm_client, detect_template_leak,
+    parse_query_plan, parse_query_plan_lenient,
+};
 
 const DEFAULT_MAX_RETRIES: usize = 2;
 
@@ -270,10 +273,11 @@ impl VlorQl {
                         return Ok(compiled);
                     }
                     Err(errors) => {
+                        let plan_json = serde_json::to_string(&plan).unwrap_or_default();
                         tracing::error!(
-                            errors = ?errors,
-                            "Validation failed with {} errors",
-                            errors.len()
+                            plan_json,
+                            error_count = errors.len(),
+                            "Schema validation failed"
                         );
                         if let Some(ref m) = self.metrics {
                             m.error_counter.add(
@@ -695,6 +699,7 @@ impl VlorQlBuilder {
 
     /// Builds the facade and verifies the required schema and dialect/compiler setup.
     pub fn build(self) -> Result<VlorQl, VlorQLError> {
+        vlorql_core::observability::init_console_logging();
         let schema = self.schema.ok_or_else(|| {
             VlorQLError::config(
                 ConfigErrorKind::MissingSchema,
@@ -781,8 +786,14 @@ fn parse_dialect_name(name: &str) -> Result<DialectProfile, VlorQLError> {
 fn format_retry_question_str(question: &str, error: &VlorQLError) -> String {
     let response = error.to_error_response();
     let feedback = serde_json::to_string(&response).unwrap_or_else(|_| error.to_string());
+    let hint = match error {
+        VlorQLError::Llm { kind: vlorql_core::errors::LlmErrorKind::ParseError { .. }, .. } => {
+            " TIP: If the previous query used NOT EXISTS with a subquery, replace it with LEFT JOIN + IS NULL — it is simpler and avoids JSON nesting issues."
+        }
+        _ => "",
+    };
     format!(
-        "{question}\n\nThe previous QueryPlan failed validation. Correct it and return only a new JSON QueryPlan. Structured feedback:\n{feedback}"
+        "{question}\n\nThe previous QueryPlan failed validation. Correct it and return only a new JSON QueryPlan. Structured feedback:\n{feedback}{hint}"
     )
 }
 
@@ -904,7 +915,7 @@ fn process_assembled_text(
             }),
         ));
     }
-    let plan: QueryPlan = match serde_json::from_str(&buffer) {
+    let plan: QueryPlan = match vlorql_llm::parse_query_plan(&buffer) {
         Ok(plan) => plan,
         Err(error) => {
             return StreamEvent::Error(VlorQLError::llm(
@@ -979,7 +990,7 @@ mod tests {
             }],
             from: FromClause {
                 table: "users".to_owned(),
-                alias: None,
+                alias: Some("t1".to_owned()),
             },
             r#where: None,
             group_by: None,
@@ -1015,7 +1026,7 @@ mod tests {
             .await
             .expect("valid mock plan should compile");
         assert_eq!(compiled.dialect, SqlDialect::Sqlite);
-        assert_eq!(compiled.sql, "SELECT \"users\".\"id\" FROM \"users\"");
+        assert_eq!(compiled.sql, "SELECT \"t1\".\"id\" FROM \"users\" AS \"t1\"");
     }
 
     #[tokio::test]
@@ -1223,7 +1234,7 @@ mod tests {
             .expect("valid mock plan should compile");
 
         assert_eq!(compiled.dialect, SqlDialect::Sqlite);
-        assert_eq!(compiled.sql, "SELECT \"users\".\"id\" FROM \"users\"");
+        assert_eq!(compiled.sql, "SELECT \"t1\".\"id\" FROM \"users\" AS \"t1\"");
         // The test verifies that the query completes without error under
         // a tracing subscriber; span hierarchy is validated by inspecting
         // the subscriber output (stderr) when `RUST_LOG` is set.

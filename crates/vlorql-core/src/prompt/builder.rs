@@ -3,10 +3,9 @@
 use crate::cache::{PromptCache, PromptCacheKey, hash_policy};
 use crate::policy::{PolicyConfig, TablePolicy};
 use crate::schema::{
-    ColumnSchema, DataType, DialectProfile, JoinType, QueryPlan, SchemaSnapshot, SqlDialect,
+    ColumnSchema, DataType, DialectProfile, JoinType, SchemaSnapshot, SqlDialect,
     TableSchema,
 };
-use schemars::schema_for;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
 use std::hash::{Hash, Hasher};
@@ -104,6 +103,7 @@ impl PromptBuilder {
         );
         self.push_schema_description(&mut prompt, relevant_tables);
         self.push_dialect_constraints(&mut prompt);
+        self.push_planning_rules(&mut prompt);
         self.push_output_schema(&mut prompt);
         self.push_type_guidance(&mut prompt);
         if self.include_examples {
@@ -253,7 +253,13 @@ impl PromptBuilder {
                 .columns
                 .iter()
                 .filter(|c| self.column_visible(table, c, policy))
-                .map(|c| format!("{} {}", c.name, data_type_name(c.data_type)))
+                .map(|c| {
+                    let mut desc = format!("{} {}", c.name, data_type_name(c.data_type));
+                    if let Some(ref fk) = c.foreign_key {
+                        let _ = write!(desc, " → {}.{}", fk.foreign_table, fk.foreign_column);
+                    }
+                    desc
+                })
                 .collect();
 
             if cols.is_empty() {
@@ -268,6 +274,37 @@ impl PromptBuilder {
             prompt.push_str("(none available)\n");
         }
         prompt.push('\n');
+
+        // ── Relationships section ────────────────────────────────
+        // List foreign-key relationships explicitly so the LLM knows
+        // which tables can be joined and on which columns.
+        let mut rels: Vec<String> = Vec::new();
+        for table_name in relevant_tables {
+            let Some(table) = self.schema.get_table(table_name) else {
+                continue;
+            };
+            let policy = self.policy.table_policies.get(&table.name);
+            if policy.is_some_and(|p| !p.allowed) {
+                continue;
+            }
+            for column in &table.columns {
+                if let Some(ref fk) = column.foreign_key {
+                    if relevant_tables.contains(&fk.foreign_table) {
+                        rels.push(format!(
+                            "{}.{} → {}.{}",
+                            table.name, column.name, fk.foreign_table, fk.foreign_column
+                        ));
+                    }
+                }
+            }
+        }
+        if !rels.is_empty() {
+            prompt.push_str("## Relationships\n");
+            for rel in &rels {
+                let _ = writeln!(prompt, "{rel}");
+            }
+            prompt.push('\n');
+        }
     }
 
     fn push_dialect_constraints(&self, prompt: &mut String) {
@@ -330,27 +367,42 @@ impl PromptBuilder {
         );
     }
 
+    /// Planning heuristics that keep plans simple and JSON-safe for small models.
+    fn push_planning_rules(&self, prompt: &mut String) {
+        prompt.push_str(
+            "## Planning Rules\n\
+             1. Prefer the simplest plan. Fewer joins, shallower nesting.\n\
+             2. \"never / not / without / anti-join\" questions: MUST use LEFT JOIN + `is_null` on the right key. NEVER use `NOT EXISTS`.\n\
+             3. Every table in `select` / `where` must be in `from` or `joins`. Never reference an unjoined table. Example: selecting `users.name` requires joining `users`.\n\
+             4. `limit` / `order_by` / `offset` only at top level, never inside `where` or subqueries.\n\
+             5. Only use GROUP BY when the question asks for \"each / every / per\" (e.g. \"per product\" → GROUP BY + SUM/COUNT). For other queries, omit GROUP BY entirely.\n\
+             6. Output valid JSON: keys unescaped (`\"where\":` not `\"where\\\":`). No backslash-escaped quotes, no fences.\n\
+             \n",
+        );
+    }
+
     fn push_output_schema(&self, prompt: &mut String) {
-        let root_schema = schema_for!(QueryPlan);
-        let json_schema = serde_json::to_value(root_schema)
-            .map(|mut schema| {
-                remove_schema_descriptions(&mut schema);
-                schema
-            })
-            .and_then(|schema| serde_json::to_string(&schema))
-            .unwrap_or_else(|error| {
-                format!(
-                    "{{\"schema_generation_error\":\"{}\"}}",
-                    json_string_fragment(&error.to_string())
-                )
-            });
         prompt.push_str(
             "## Required JSON Output\n\
-             Return a JSON object matching the schema below. Output JSON only: no fences, comments, or raw SQL.\n\
+             Structure:\n\
+             - select: [Projection] (type: column_ref → {table?, column, alias?} | expr → {expression, alias?} | star → {table?})\n\
+             - from: {table, alias?}\n\
+             - where: optional Predicate — type and|or: {left: Predicate, right: Predicate}; comparison: {left: Expression, op, right: Expression}; not: {child: Predicate}; between: {expr, low, high: Expression}; is_null: {expr: Expression}; exists: {query: QueryPlan}\n\
+             - joins: optional [{join_type, right_table: FromClause, on: Predicate}]\n\
+             - group_by: optional [Expression] | having: optional Predicate\n\
+             - order_by: optional [{expr: Expression, descending: bool}]\n\
+             - limit, offset: optional integer | ctes: optional [{name, query: QueryPlan}]\n\
              \n\
+             CRITICAL: `where`, `left`, `right`, `child` must each be a SINGLE Predicate object (NOT an array). `left` and `right` inside `and`/`or` are single {{...}} objects, never arrays.\n\
+             CRITICAL: `order_by`, `limit`, `offset` go at the top level of the response, never inside `where`.\n\
+             CRITICAL: Emit parseable JSON only — never escape object keys, never wrap the whole plan in a string, never invent trailing `}`.\n\
+             Use the tagged type variants. Return a data instance — not a schema definition.\n\
+             Output JSON only: no fences, comments, or raw SQL.\n\
+             \n\
+             Compact JSON Schema (every field is inlined, no $ref):\n\
              ```json\n",
         );
-        prompt.push_str(&json_schema);
+        prompt.push_str(compact_output_schema());
         prompt.push_str("\n```\n\n");
     }
 
@@ -373,7 +425,7 @@ impl PromptBuilder {
 
         let example_json = serde_json::json!({
             "select": [{
-                "type": "column",
+                "type": "column_ref",
                 "table": table.name,
                 "column": column.name,
                 "alias": null
@@ -387,9 +439,55 @@ impl PromptBuilder {
             prompt,
             "## Example\n\
              Q: Select {} from {}\n\
-             A: {example_json}\n\
-             The real response must obey the current schema and dialect.\n",
+             A: {example_json}\n",
             column.name, table.name
+        );
+        let _ = writeln!(
+            prompt,
+             "Q: Orders with total > 150, sorted by total desc\n\
+              A: {{\"select\":[{{\"type\":\"column_ref\",\"table\":\"orders\",\"column\":\"id\",\"alias\":null}},{{\"type\":\"column_ref\",\"table\":\"orders\",\"column\":\"total\",\"alias\":null}}],\"from\":{{\"table\":\"orders\",\"alias\":null}},\"where\":{{\"type\":\"comparison\",\"left\":{{\"type\":\"column_ref\",\"column\":\"total\",\"table\":\"orders\"}},\"op\":\"gt\",\"right\":{{\"type\":\"literal\",\"value\":150,\"data_type\":\"float\"}}}},\"order_by\":[{{\"expr\":{{\"type\":\"column_ref\",\"column\":\"total\",\"table\":\"orders\"}},\"descending\":true}}],\"limit\":10}}\n"
+        );
+        // Add a JOIN example if there are at least 2 relevant tables
+        // with a foreign-key relationship.
+        let has_join_example = relevant_tables.len() >= 2
+            && relevant_tables.iter().any(|t1| {
+                self.schema.get_table(t1).is_some_and(|table| {
+                    table.columns.iter().any(|c| {
+                        c.foreign_key
+                            .as_ref()
+                            .is_some_and(|fk| relevant_tables.contains(&fk.foreign_table))
+                    })
+                })
+            });
+        if has_join_example {
+            let _ = writeln!(
+                prompt,
+                 "Q: List users with their order totals\n\
+                  A: {{\"select\":[{{\"type\":\"column_ref\",\"table\":\"users\",\"column\":\"name\",\"alias\":null}},{{\"type\":\"column_ref\",\"table\":\"orders\",\"column\":\"total\",\"alias\":null}}],\"from\":{{\"table\":\"users\",\"alias\":null}},\"joins\":[{{\"join_type\":\"inner\",\"right_table\":{{\"table\":\"orders\",\"alias\":null}},\"on\":{{\"type\":\"comparison\",\"left\":{{\"type\":\"column_ref\",\"column\":\"id\",\"table\":\"users\"}},\"op\":\"eq\",\"right\":{{\"type\":\"column_ref\",\"column\":\"user_id\",\"table\":\"orders\"}}}}}}],\"limit\":10}}\n"
+            );
+            // Anti-join: preferred pattern for "never / without" questions.
+            let _ = writeln!(
+                prompt,
+                 "Q: Users who never placed an order\n\
+                  A: {{\"select\":[{{\"type\":\"column_ref\",\"table\":\"users\",\"column\":\"id\",\"alias\":null}},{{\"type\":\"column_ref\",\"table\":\"users\",\"column\":\"name\",\"alias\":null}}],\"from\":{{\"table\":\"users\",\"alias\":null}},\"joins\":[{{\"join_type\":\"left\",\"right_table\":{{\"table\":\"orders\",\"alias\":null}},\"on\":{{\"type\":\"comparison\",\"left\":{{\"type\":\"column_ref\",\"column\":\"id\",\"table\":\"users\"}},\"op\":\"eq\",\"right\":{{\"type\":\"column_ref\",\"column\":\"user_id\",\"table\":\"orders\"}}}}}}],\"where\":{{\"type\":\"is_null\",\"expr\":{{\"type\":\"column_ref\",\"column\":\"id\",\"table\":\"orders\"}}}},\"limit\":10}}\n"
+            );
+            // Minimal NOT EXISTS form (only if LEFT JOIN is unavailable).
+            let _ = writeln!(
+                prompt,
+                 "Q: Users with no orders (NOT EXISTS form)\n\
+                  A: {{\"select\":[{{\"type\":\"column_ref\",\"table\":\"users\",\"column\":\"id\",\"alias\":null}}],\"from\":{{\"table\":\"users\",\"alias\":null}},\"where\":{{\"type\":\"not\",\"child\":{{\"type\":\"exists\",\"query\":{{\"select\":[{{\"type\":\"star\"}}],\"from\":{{\"table\":\"orders\",\"alias\":null}},\"where\":{{\"type\":\"comparison\",\"left\":{{\"type\":\"column_ref\",\"column\":\"user_id\",\"table\":\"orders\"}},\"op\":\"eq\",\"right\":{{\"type\":\"column_ref\",\"column\":\"id\",\"table\":\"users\"}}}}}}}}}},\"limit\":10}}\n"
+            );
+            // GROUP BY + aggregate: "each / every / per" questions.
+            let _ = writeln!(
+                prompt,
+                 "Q: How many items were sold per product?\n\
+                  A: {{\"select\":[{{\"type\":\"column_ref\",\"table\":\"products\",\"column\":\"name\",\"alias\":\"product\"}},{{\"type\":\"expr\",\"expression\":{{\"type\":\"function_call\",\"name\":\"sum\",\"args\":[{{\"type\":\"column_ref\",\"column\":\"quantity\",\"table\":\"order_items\"}}],\"distinct\":false}},\"alias\":\"total_sold\"}}],\"from\":{{\"table\":\"products\",\"alias\":null}},\"joins\":[{{\"join_type\":\"inner\",\"right_table\":{{\"table\":\"order_items\",\"alias\":null}},\"on\":{{\"type\":\"comparison\",\"left\":{{\"type\":\"column_ref\",\"column\":\"id\",\"table\":\"products\"}},\"op\":\"eq\",\"right\":{{\"type\":\"column_ref\",\"column\":\"product_id\",\"table\":\"order_items\"}}}}}}],\"group_by\":[{{\"type\":\"column_ref\",\"table\":\"products\",\"column\":\"name\"}}]}}\n"
+            );
+        }
+        let _ = writeln!(
+            prompt,
+             "\n\
+              The real response must obey the current schema and dialect.\n",
         );
     }
 
@@ -402,6 +500,17 @@ impl PromptBuilder {
         prompt.push_str(
             "## JSON Type Reminder\n\
              Every tagged object must include a `\"type\"` field matching the JSON Schema above.\n\
+             \n\
+             Notes:\n\
+             - `data_type` only belongs inside `literal` objects.\n\
+             - `order_by`, `limit`, `offset` go at the top level, never inside `where`.\n\
+             - Predicate keys (`where`/`left`/`right`/`child`/`on`) are normal JSON keys — write `\"where\":{{...}}`, never `\"where\\\\\":`.\n\
+             \n\
+             Nested `WHERE` (and/or):\n\
+             {{\"where\":{{\"type\":\"and\",\"left\":{{\"type\":\"comparison\",\"left\":{{\"type\":\"column_ref\",\"column\":\"total\",\"table\":\"orders\"}},\"op\":\"gt\",\"right\":{{\"type\":\"literal\",\"value\":150,\"data_type\":\"float\"}}}},\"right\":{{\"type\":\"comparison\",\"left\":{{\"type\":\"column_ref\",\"column\":\"status\",\"table\":\"orders\"}},\"op\":\"eq\",\"right\":{{\"type\":\"literal\",\"value\":\"completed\",\"data_type\":\"string\"}}}}}}}\n\
+             \n\
+             Anti-join (`LEFT` + `is_null`):\n\
+             {{\"joins\":[{{\"join_type\":\"left\",\"right_table\":{{\"table\":\"orders\"}},\"on\":{{\"type\":\"comparison\",\"left\":{{\"type\":\"column_ref\",\"column\":\"id\",\"table\":\"users\"}},\"op\":\"eq\",\"right\":{{\"type\":\"column_ref\",\"column\":\"user_id\",\"table\":\"orders\"}}}}}}],\"where\":{{\"type\":\"is_null\",\"expr\":{{\"type\":\"column_ref\",\"column\":\"id\",\"table\":\"orders\"}}}}}\n\
              \n",
         );
     }
@@ -622,29 +731,74 @@ fn join_type_name(join_type: &JoinType) -> &'static str {
     }
 }
 
-fn remove_schema_descriptions(value: &mut serde_json::Value) {
-    match value {
-        serde_json::Value::Object(object) => {
-            object.remove("description");
-            for value in object.values_mut() {
-                remove_schema_descriptions(value);
-            }
-        }
-        serde_json::Value::Array(values) => {
-            for value in values {
-                remove_schema_descriptions(value);
-            }
-        }
-        _ => {}
-    }
-}
-
-fn json_string_fragment(value: &str) -> String {
-    value
-        .replace('\\', "\\\\")
-        .replace('"', "\\\"")
-        .replace('\n', "\\n")
-        .replace('\r', "\\r")
+fn compact_output_schema() -> &'static str {
+    use std::sync::OnceLock;
+    static SCHEMA: OnceLock<String> = OnceLock::new();
+    SCHEMA.get_or_init(|| {
+        serde_json::to_string(&serde_json::json!({
+            "type": "object",
+            "properties": {
+                "select": {
+                    "type": "array",
+                    "items": {
+                        "oneOf": [
+                            {"type": "object", "properties": {"type": {"enum": ["column_ref"]}, "table": {"type": "string"}, "column": {"type": "string"}, "alias": {"type": "string"}}, "required": ["type", "column"]},
+                            {"type": "object", "properties": {"type": {"enum": ["expr"]}, "expression": {"type": "object"}, "alias": {"type": "string"}}, "required": ["type", "expression"]},
+                            {"type": "object", "properties": {"type": {"enum": ["star"]}, "table": {"type": "string"}}, "required": ["type"]}
+                        ]
+                    }
+                },
+                "from": {"type": "object", "properties": {"table": {"type": "string"}, "alias": {"type": "string"}}, "required": ["table"]},
+                "where": {
+                    "oneOf": [
+                        {"type": "object", "properties": {"type": {"enum": ["comparison"]}, "left": {"type": "object"}, "op": {"enum": ["eq","neq","gt","gte","lt","lte","like","ilike","in","between"]}, "right": {"type": "object"}}, "required": ["type","left","op","right"]},
+                        {"type": "object", "properties": {"type": {"enum": ["and"]}, "left": {"type": "object"}, "right": {"type": "object"}}, "required": ["type","left","right"]},
+                        {"type": "object", "properties": {"type": {"enum": ["or"]}, "left": {"type": "object"}, "right": {"type": "object"}}, "required": ["type","left","right"]},
+                        {"type": "object", "properties": {"type": {"enum": ["not"]}, "child": {"type": "object"}}, "required": ["type","child"]},
+                        {"type": "object", "properties": {"type": {"enum": ["between"]}, "expr": {"type": "object"}, "low": {"type": "object"}, "high": {"type": "object"}}, "required": ["type","expr","low","high"]},
+                        {"type": "object", "properties": {"type": {"enum": ["in"]}, "expr": {"type": "object"}, "target": {"type": "array","items": {"type": "object"}}}, "required": ["type","expr","target"]},
+                        {"type": "object", "properties": {"type": {"enum": ["like"]}, "expr": {"type": "object"}, "pattern": {"type": "string"}}, "required": ["type","expr","pattern"]},
+                        {"type": "object", "properties": {"type": {"enum": ["is_null"]}, "expr": {"type": "object"}}, "required": ["type","expr"]},
+                        {"type": "object", "properties": {"type": {"enum": ["exists"]}, "query": {"type": "object"}}, "required": ["type","query"]}
+                    ]
+                },
+                "joins": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "join_type": {"enum": ["inner","left","right","full","cross"]},
+                            "right_table": {"type": "object", "properties": {"table": {"type": "string"}, "alias": {"type": "string"}}, "required": ["table"]},
+                            "on": {"type": "object"}
+                        },
+                        "required": ["join_type","right_table","on"]
+                    }
+                },
+                "group_by": {"type": "array", "items": {"type": "object"}},
+                "having": {"type": "object"},
+                "order_by": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {"expr": {"type": "object"}, "descending": {"type": "boolean"}},
+                        "required": ["expr","descending"]
+                    }
+                },
+                "limit": {"type": "integer"},
+                "offset": {"type": "integer"},
+                "ctes": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {"name": {"type": "string"}, "query": {"type": "object"}},
+                        "required": ["name","query"]
+                    }
+                }
+            },
+            "required": ["select", "from"]
+        }))
+        .expect("compact output schema must serialize to JSON")
+    })
 }
 
 /// Builds a reverse foreign-key index: maps each `foreign_table` → list of
