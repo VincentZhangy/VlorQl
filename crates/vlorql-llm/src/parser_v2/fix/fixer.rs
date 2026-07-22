@@ -26,6 +26,7 @@ pub fn fix_plan(plan: &mut QueryPlan) -> bool {
     changed |= fix_limit_zero(plan);
     changed |= fix_empty_select(plan);
     changed |= fix_missing_aggregate(plan);
+    changed |= fix_missing_group_by(plan);
     // fix_missing_aliases must run last because it adds new aliases.
     changed |= fix_missing_aliases(plan);
     // Recursively fix CTE subqueries.
@@ -176,6 +177,40 @@ fn is_aggregate_expr(expr: &Expression) -> bool {
         }
         _ => false,
     }
+}
+
+/// When SELECT has both aggregate functions and bare column references
+/// but no GROUP BY, add GROUP BY based on the non-aggregated columns.
+///
+/// Small LLMs sometimes generate `SELECT name, count(qty) FROM ...`
+/// without `GROUP BY name` — valid SQL but semantically wrong for
+/// "each/every/per" questions.
+#[must_use]
+fn fix_missing_group_by(plan: &mut QueryPlan) -> bool {
+    // Skip if GROUP BY already exists.
+    if plan.group_by.as_ref().is_some_and(|g| !g.is_empty()) {
+        return false;
+    }
+    // Check: SELECT has at least one aggregate AND at least one bare column.
+    let has_agg = plan.select.iter().any(|p| match p {
+        Projection::Expr { expression, .. } => is_aggregate_expr(expression),
+        _ => false,
+    });
+    if !has_agg {
+        return false;
+    }
+    let bare_cols: Vec<Expression> = plan.select.iter().filter_map(|p| match p {
+        Projection::Column { table, column, .. } => Some(Expression::ColumnRef {
+            table: table.clone(),
+            column: column.clone(),
+        }),
+        _ => None,
+    }).collect();
+    if bare_cols.is_empty() {
+        return false;
+    }
+    plan.group_by = Some(bare_cols);
+    true
 }
 
 /// Auto-generate missing aliases for tables in FROM and JOIN clauses.

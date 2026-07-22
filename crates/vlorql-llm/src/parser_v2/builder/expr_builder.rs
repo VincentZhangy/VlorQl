@@ -275,7 +275,31 @@ pub fn build_expression(val: &Value) -> Result<Expression, BuildError> {
                 query: Box::new(query),
             })
         }
-        other => Err(BuildError::new("type", format!("unknown Expression variant `{other}`"))),
+        _ => {
+            // Fallback: if type_str is a known aggregate function name,
+            // treat it as a FunctionCall.  The LLM sometimes emits
+            // {"type": "sum", "args": [...]} instead of the canonical
+            // {"type": "function_call", "name": "sum", ...}.
+            const AGGREGATES: &[&str] = &["sum", "count", "avg", "min", "max", "string_agg", "array_agg"];
+            if AGGREGATES.contains(&type_str) {
+                let args_arr = req_arr(obj.get("args").ok_or_else(|| {
+                    BuildError::new("args", format!("aggregate '{}' missing `args` field", type_str))
+                })?, "args")?;
+                let args = args_arr
+                    .iter()
+                    .enumerate()
+                    .map(|(i, v)| build_expression(v).map_err(|e| e.at(&format!("args[{i}]"))))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let distinct = obj.get("distinct").and_then(|v| v.as_bool()).unwrap_or(false);
+                Ok(Expression::FunctionCall {
+                    name: type_str.to_owned(),
+                    args,
+                    distinct,
+                })
+            } else {
+                Err(BuildError::new("type", format!("unknown Expression variant `{type_str}`")))
+            }
+        }
     }
 }
 
