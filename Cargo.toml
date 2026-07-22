@@ -7,6 +7,12 @@ members = [
 ]
 resolver = "2"
 
+[workspace.package]
+version = "0.2.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+description = "VlorQl — natural language to SQL query engine"
+
 [workspace.dependencies]
 thiserror = "1.0"
 serde = { version = "1.0", features = ["derive"] }
