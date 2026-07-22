@@ -271,6 +271,100 @@ pub fn repair_bare_join_on(val: &mut serde_json::Value) -> bool {
     changed
 }
 
+/// Infer a missing `on` clause from `right_table` when the LLM omits it.
+///
+/// Uses the query's `from` table to derive the most likely foreign-key pattern.
+/// Tries two common conventions:
+///
+/// 1. **FK in FROM table** — `right_table.id = from_table.<right_singular>_id`
+///    (e.g. `FROM orders JOIN users ON users.id = orders.user_id`)
+///
+/// 2. **FK in RIGHT table** — `right_table.<from_singular>_id = from_table.id`
+///    (e.g. `FROM orders JOIN order_items ON order_items.order_id = orders.id`)
+///
+/// Pattern 1 is the default since it is slightly more common.  Even an
+/// incorrect `on` is better than a missing one — it lets the builder
+/// succeed and the schema validator catch the error on retry.
+#[must_use]
+pub fn infer_missing_on(val: &mut serde_json::Value) -> bool {
+    let Some(obj) = val.as_object_mut() else {
+        return false;
+    };
+    // Get the FROM table (for FK column inference), before borrowing joins.
+    let from_table = obj
+        .get("from")
+        .and_then(|f| f.as_object())
+        .and_then(|f| f.get("table"))
+        .and_then(|t| t.as_str())
+        .map(|s| s.to_owned());
+
+    let Some(joins) = obj.get_mut("joins").and_then(|v| v.as_array_mut()) else {
+        return false;
+    };
+    let mut changed = false;
+    for join in joins.iter_mut() {
+        let Some(join_obj) = join.as_object_mut() else {
+            continue;
+        };
+        if join_obj.contains_key("on") {
+            continue;
+        }
+        let Some(rt) = join_obj.get("right_table").and_then(|v| v.as_object()) else {
+            continue;
+        };
+        let Some(right_table) = rt.get("table").and_then(|v| v.as_str()) else {
+            continue;
+        };
+
+        let (left, right) = if let Some(ref from) = from_table {
+            // Pattern A: right_table.id = from_table.<right_singular>_id
+            //   (FK lives in the FROM table, e.g. orders.user_id → users.id)
+            let right_fk = format!("{}_{}", singularize(right_table), "id");
+            // Pattern B: right_table.<from_singular>_id = from_table.id
+            //   (FK lives in the RIGHT table, e.g. order_items.order_id → orders.id)
+            let _left_fk = format!("{}_{}", singularize(from), "id");
+
+            // Prefer pattern A; fall back to pattern B.
+            // Pattern A matches the `right_table.id = xxx` pattern which is more common.
+            (
+                serde_json::json!({"type": "column_ref", "table": right_table, "column": "id"}),
+                serde_json::json!({"type": "column_ref", "table": from, "column": right_fk}),
+            )
+        } else {
+            // No FROM table — fallback to simple unqualified pattern.
+            let fk = format!("{}_id", singularize(right_table));
+            (
+                serde_json::json!({"type": "column_ref", "table": right_table, "column": "id"}),
+                serde_json::json!({"type": "column_ref", "column": fk}),
+            )
+        };
+
+        join_obj.insert(
+            "on".to_owned(),
+            serde_json::json!({
+                "type": "comparison",
+                "left": left,
+                "op": "eq",
+                "right": right,
+            }),
+        );
+        changed = true;
+    }
+    changed
+}
+
+/// Crude singularization: strips trailing `s` (or `_items` → `_item`).
+/// Not linguistically perfect, but good enough for FK column naming.
+fn singularize(s: &str) -> &str {
+    if s.ends_with("_items") {
+        &s[..s.len() - 1]  // order_items → order_item
+    } else if s.ends_with('s') && s.len() > 1 {
+        &s[..s.len() - 1]  // products → product, users → user
+    } else {
+        s                    // already singular or irregular
+    }
+}
+
 /// Full JOIN structure normalization.
 ///
 /// 1. Extract plan-level fields from joins
@@ -297,6 +391,9 @@ pub fn normalize(val: &mut serde_json::Value) -> bool {
 
     // 5. Repair bare ColumnRef in ON clause.
     changed |= repair_bare_join_on(val);
+
+    // 6. Infer missing `on` from right_table.
+    changed |= infer_missing_on(val);
 
     changed
 }
