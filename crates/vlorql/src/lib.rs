@@ -218,6 +218,10 @@ impl VlorQl {
                     }
                     Err(e) => return Err(e),
                 };
+                tracing::debug!(
+                    plan_json = %serde_json::to_string(&plan).unwrap_or_default(),
+                    "LLM generated plan"
+                );
                 match self.validate_only(&plan) {
                     Ok(validated_plan) => {
                         // Optimize when an optimizer is configured, then compile.
@@ -275,6 +279,7 @@ impl VlorQl {
                     Err(errors) => {
                         tracing::error!(
                             errors = ?errors,
+                            plan_json = %serde_json::to_string(&plan).unwrap_or_default(),
                             "Validation failed with {} errors",
                             errors.len()
                         );

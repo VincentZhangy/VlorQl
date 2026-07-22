@@ -6,6 +6,8 @@ use crate::schema::{Expression, InTarget, Predicate, Projection, QueryPlan, Sche
 use serde_json::json;
 use std::collections::HashSet;
 
+use tracing::debug;
+
 /// Checks every base table and column reference against a schema snapshot.
 pub fn validate_schema(plan: &QueryPlan, schema: &SchemaSnapshot) -> Result<(), Vec<VlorQLError>> {
     let mut errors = Vec::new();
@@ -25,6 +27,18 @@ fn validate_plan(plan: &QueryPlan, schema: &SchemaSnapshot, errors: &mut Vec<Vlo
     }
 
     let scope = QueryScope::from_plan(plan);
+    let scope_tables: Vec<String> = scope.sources.iter().map(|s| {
+        if let Some(ref a) = s.alias {
+            format!("{} AS {}", s.table, a)
+        } else {
+            s.table.clone()
+        }
+    }).collect();
+    debug!(
+        plan_json = %serde_json::to_string(plan).unwrap_or_default(),
+        scope = ?scope_tables,
+        "validating plan schema"
+    );
     let mut reported_tables = HashSet::new();
     let mut reported_columns = HashSet::new();
 
@@ -158,6 +172,12 @@ fn push_column_not_found(
 /// Returns a `TableNotInScope` error when `table` exists in the schema,
 /// or a `TableNotFound` error when `table` is genuinely missing.
 fn table_not_in_scope_or_not_found(table: &str, schema: &SchemaSnapshot) -> VlorQLError {
+    let available: Vec<&str> = schema.tables.iter().map(|t| t.name.as_str()).collect();
+    debug!(
+        table,
+        available_tables = ?available,
+        "table not in scope"
+    );
     let context = json!({
         "table": table,
         "available_tables": schema
