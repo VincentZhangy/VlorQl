@@ -660,6 +660,8 @@ make_pg_num!(PgInt, i64, |val, ty, out| {
         out.put_i16(val as i16);
     } else if *ty == tokio_postgres::types::Type::INT4 {
         out.put_i32(val as i32);
+    } else if *ty == tokio_postgres::types::Type::INT8 {
+        out.put_i64(val);
     } else {
         out.extend_from_slice(val.to_string().as_bytes());
     }
@@ -668,8 +670,10 @@ make_pg_num!(PgInt, i64, |val, ty, out| {
 make_pg_num!(PgFloat, f64, |val, ty, out| {
     if *ty == tokio_postgres::types::Type::FLOAT4 {
         out.put_f32(val as f32);
-    } else {
+    } else if *ty == tokio_postgres::types::Type::FLOAT8 {
         out.put_f64(val);
+    } else {
+        out.extend_from_slice(val.to_string().as_bytes());
     }
 }, FLOAT4 | FLOAT8 | TEXT, "PgFloat");
 
@@ -718,7 +722,18 @@ fn print_results(qidx: usize, rows: &[tokio_postgres::Row]) {
     for row in rows {
         let values: Vec<String> = (0..row.len())
             .map(|i| {
-                row.try_get::<_, String>(i).unwrap_or_else(|_| "NULL".to_string())
+                // PG 二进制协议不支持隐式类型转换，需逐类型尝试
+                if let Ok(v) = row.try_get::<_, i32>(i) {
+                    v.to_string()
+                } else if let Ok(v) = row.try_get::<_, i64>(i) {
+                    v.to_string()
+                } else if let Ok(v) = row.try_get::<_, f64>(i) {
+                    v.to_string()
+                } else if let Ok(v) = row.try_get::<_, String>(i) {
+                    v
+                } else {
+                    "NULL".to_string()
+                }
             })
             .collect();
         println!("  │ {} │", values.join(" │ "));
