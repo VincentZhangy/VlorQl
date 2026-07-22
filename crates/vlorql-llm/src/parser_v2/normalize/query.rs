@@ -89,6 +89,7 @@ pub fn normalize_limit_offset(val: &mut serde_json::Value) -> bool {
 ///    before `strip_unknown_fields` so these fields are preserved).
 /// 2. Strip unknown top-level fields.
 /// 3. Normalize string limit/offset to numbers.
+/// 4. Auto-join tables referenced in `select` but missing from `from`/`joins`.
 #[must_use]
 pub fn normalize(val: &mut serde_json::Value) -> bool {
     let mut changed = false;
@@ -98,6 +99,119 @@ pub fn normalize(val: &mut serde_json::Value) -> bool {
     changed |= strip_unknown_fields(val);
     // Normalize string limit/offset to numbers.
     changed |= normalize_limit_offset(val);
+    // Auto-join tables referenced in select but missing from from/joins.
+    changed |= auto_join_missing_tables(val);
+    changed
+}
+
+/// Collect table names referenced in `select` items.
+fn select_tables(val: &serde_json::Value) -> Vec<String> {
+    let Some(obj) = val.as_object() else { return vec![] };
+    let Some(select) = obj.get("select").and_then(|v| v.as_array()) else { return vec![] };
+    let mut tables: Vec<String> = Vec::new();
+    for item in select {
+        if let Some(item_obj) = item.as_object() {
+            if let Some(table) = item_obj.get("table").and_then(|v| v.as_str()) {
+                if !tables.iter().any(|t| t == table) {
+                    tables.push(table.to_owned());
+                }
+            }
+        }
+    }
+    tables
+}
+
+/// Collect table names already referenced in `from` and `joins`.
+fn existing_tables(val: &serde_json::Value) -> Vec<String> {
+    let Some(obj) = val.as_object() else { return vec![] };
+    let mut tables: Vec<String> = Vec::new();
+    // FROM table
+    if let Some(from) = obj.get("from").and_then(|v| v.as_object()) {
+        if let Some(table) = from.get("table").and_then(|v| v.as_str()) {
+            tables.push(table.to_owned());
+        }
+    }
+    // JOIN tables
+    if let Some(joins) = obj.get("joins").and_then(|v| v.as_array()) {
+        for join in joins {
+            if let Some(join_obj) = join.as_object() {
+                if let Some(rt) = join_obj.get("right_table").and_then(|v| v.as_object()) {
+                    if let Some(table) = rt.get("table").and_then(|v| v.as_str()) {
+                        if !tables.iter().any(|t| t == table) {
+                            tables.push(table.to_owned());
+                        }
+                    }
+                }
+            }
+        }
+    }
+    tables
+}
+
+/// Crude singularization for FK column naming.
+fn singularize(s: &str) -> &str {
+    if s.ends_with("_items") {
+        &s[..s.len() - 1]
+    } else if s.ends_with('s') && s.len() > 1 {
+        &s[..s.len() - 1]
+    } else {
+        s
+    }
+}
+
+/// When a table is referenced in `select` but missing from `from`/`joins`,
+/// auto-add an inner JOIN with an inferred ON clause.
+///
+/// Heuristic: the FK column is `<singular_missing>_id` in the `from` table
+/// (e.g. `SELECT users.name FROM orders` → `JOIN users ON users.id = orders.user_id`).
+#[must_use]
+fn auto_join_missing_tables(val: &mut serde_json::Value) -> bool {
+    // Collect all info upfront while we have an immutable borrow.
+    let (from_table, missing): (Option<String>, Vec<String>) = {
+        let Some(obj) = val.as_object() else { return false };
+        let select_tables = select_tables(val);
+        let existing = existing_tables(val);
+        let from_table = obj.get("from")
+            .and_then(|f| f.as_object())
+            .and_then(|f| f.get("table"))
+            .and_then(|t| t.as_str())
+            .map(|s| s.to_owned());
+        let missing: Vec<String> = select_tables.into_iter()
+            .filter(|t| !existing.iter().any(|e| e == t))
+            .collect();
+        (from_table, missing)
+    };
+
+    if missing.is_empty() {
+        return false;
+    }
+
+    let Some(obj) = val.as_object_mut() else { return false };
+    let mut changed = false;
+
+    for table in &missing {
+        let fk_col = format!("{}_{}", singularize(table), "id");
+        let join = serde_json::json!({
+            "join_type": "inner",
+            "right_table": {"table": table},
+            "on": {
+                "type": "comparison",
+                "left": {"type": "column_ref", "table": table, "column": "id"},
+                "op": "eq",
+                "right": {
+                    "type": "column_ref",
+                    "table": from_table.as_deref().unwrap_or(""),
+                    "column": fk_col
+                }
+            }
+        });
+        if let Some(joins) = obj.get_mut("joins").and_then(|v| v.as_array_mut()) {
+            joins.push(join);
+        } else {
+            obj.insert("joins".to_owned(), serde_json::json!([join]));
+        }
+        changed = true;
+    }
     changed
 }
 
