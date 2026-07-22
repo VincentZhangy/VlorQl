@@ -12,7 +12,22 @@ use super::def::{Dialect, FunctionDef, FunctionKind};
 static REGISTRY: OnceLock<RwLock<HashMap<String, FunctionDef>>> = OnceLock::new();
 
 fn registry() -> &'static RwLock<HashMap<String, FunctionDef>> {
-    REGISTRY.get_or_init(|| RwLock::new(HashMap::new()))
+    REGISTRY.get_or_init(|| {
+        let map = HashMap::new();
+        let rw = RwLock::new(map);
+        // Auto-load built-in functions on first access so callers do
+        // not have to call `init_registry` explicitly.
+        {
+            let mut guard = rw.write().expect("function registry lock poisoned");
+            let builtin = super::builtin::builtin_functions();
+            for def in builtin {
+                for name in &def.names {
+                    guard.insert(name.to_string(), def.clone());
+                }
+            }
+        }
+        rw
+    })
 }
 
 /// Initialise the registry with a set of built-in functions.
