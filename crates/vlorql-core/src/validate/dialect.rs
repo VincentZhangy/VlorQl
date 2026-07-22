@@ -100,6 +100,8 @@ impl BoundDialectValidator<'_> {
             }
         }
 
+        self.validate_select_group_by(plan, errors);
+
         for projection in &plan.select {
             if let Projection::Expr { expression, .. } = projection {
                 self.validate_expression(expression, errors);
@@ -126,6 +128,64 @@ impl BoundDialectValidator<'_> {
                 self.validate_inner(&cte.query, errors);
             }
         }
+    }
+
+    fn validate_select_group_by(&self, plan: &QueryPlan, errors: &mut Vec<VlorQLError>) {
+        let Some(group_by) = plan.group_by.as_ref().filter(|g| !g.is_empty()) else {
+            return;
+        };
+
+        for projection in &plan.select {
+            match projection {
+                Projection::Star { .. } => {
+                    errors.push(self.group_by_error(
+                        "SELECT * is not allowed with GROUP BY: every column must be explicitly listed in GROUP BY or wrapped in an aggregate function",
+                    ));
+                }
+                Projection::Column { table, column, .. } => {
+                    if !is_column_in_group_by(group_by, table, column) {
+                        errors.push(self.group_by_error(format!(
+                            "column `{}.{}` must appear in GROUP BY or be wrapped in an aggregate function",
+                            table.as_deref().unwrap_or("?"),
+                            column,
+                        )));
+                    }
+                }
+                Projection::Expr { expression, .. } => {
+                    match expression {
+                        Expression::ColumnRef { table, column } => {
+                            if !is_column_in_group_by(group_by, table, column) {
+                                errors.push(self.group_by_error(format!(
+                                    "column `{}.{}` must appear in GROUP BY or be wrapped in an aggregate function",
+                                    table.as_deref().unwrap_or("?"),
+                                    column,
+                                )));
+                            }
+                        }
+                        Expression::Star => {
+                            errors.push(self.group_by_error(
+                                "bare `*` is not allowed in SELECT with GROUP BY",
+                            ));
+                        }
+                        // Aggregate functions (SUM, COUNT, etc.) are OK even if their
+                        // arguments are not in GROUP BY.
+                        Expression::FunctionCall { .. } => {}
+                        // Other expression types (BinaryOp, Literal, SubQuery) are
+                        // assumed valid — they don't introduce bare column references.
+                        _ => {}
+                    }
+                }
+            }
+        }
+    }
+
+    fn group_by_error(&self, message: impl Into<String>) -> VlorQLError {
+        VlorQLError::validation(
+            ValidationErrorKind::AggregationMismatch {
+                message: message.into(),
+            },
+            json!({"type": "select_group_by_mismatch"}),
+        )
     }
 
     fn validate_expression(&self, expression: &Expression, errors: &mut Vec<VlorQLError>) {
@@ -228,4 +288,26 @@ impl BoundDialectValidator<'_> {
             }),
         )
     }
+}
+
+/// Checks whether a `(table, column)` reference is covered by the GROUP BY expressions.
+///
+/// A column is considered covered if any GROUP BY expression is a `ColumnRef`
+/// whose `(table, column)` pair matches (comparing qualified names if both are
+/// qualified, or just column names if either side is unqualified).
+fn is_column_in_group_by(
+    group_by: &[Expression],
+    table: &Option<String>,
+    column: &str,
+) -> bool {
+    group_by.iter().any(|expr| match expr {
+        Expression::ColumnRef {
+            table: gb_table,
+            column: gb_column,
+        } => match (gb_table, table) {
+            (Some(t1), Some(t2)) => t1 == t2 && gb_column == column,
+            _ => gb_column == column,
+        },
+        _ => false,
+    })
 }
