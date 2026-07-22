@@ -4,13 +4,47 @@
 //! layer, and sets the global tracer and meter providers.
 
 use crate::errors::{ConfigErrorKind, VlorQLError};
+use chrono::Local;
 use opentelemetry::KeyValue;
 use opentelemetry::trace::TracerProvider as _;
 use opentelemetry_otlp::WithExportConfig;
 use serde_json::json;
 use std::time::Duration;
+use tracing_subscriber::fmt::format::Writer;
+use tracing_subscriber::fmt::time::FormatTime;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
+use tracing_subscriber::EnvFilter;
+
+/// Spring Boot-style timestamp formatter: `2024-01-15 18:30:45.123`
+struct SpringBootTimer;
+
+impl FormatTime for SpringBootTimer {
+    fn format_time(&self, w: &mut Writer<'_>) -> std::fmt::Result {
+        write!(w, "{}", Local::now().format("%Y-%m-%d %H:%M:%S%.3f"))
+    }
+}
+
+/// Initializes a human-readable tracing subscriber (Spring Boot-style)
+/// if no global subscriber is already registered.
+///
+/// This is called automatically by [`VlorQlBuilder::build`] so that
+/// [`tracing::error!`] / [`tracing::warn!`] / [`tracing::info!`]
+/// output is visible by default.
+pub fn init_console_logging() {
+    let _ = tracing_subscriber::fmt()
+        .with_timer(SpringBootTimer)
+        .with_target(true)
+        .with_thread_ids(true)
+        .with_ansi(true)
+        .pretty()
+        .with_env_filter(
+            EnvFilter::builder()
+                .with_default_directive(tracing_subscriber::filter::LevelFilter::INFO.into())
+                .from_env_lossy(),
+        )
+        .try_init();
+}
 
 /// Holds the SDK providers so the caller can shut them down cleanly.
 pub struct TelemetryGuard {

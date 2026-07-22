@@ -103,6 +103,7 @@ impl PromptBuilder {
         );
         self.push_schema_description(&mut prompt, relevant_tables);
         self.push_dialect_constraints(&mut prompt);
+        self.push_planning_rules(&mut prompt);
         self.push_output_schema(&mut prompt);
         self.push_type_guidance(&mut prompt);
         if self.include_examples {
@@ -366,6 +367,19 @@ impl PromptBuilder {
         );
     }
 
+    /// Planning heuristics that keep plans simple and JSON-safe for small models.
+    fn push_planning_rules(&self, prompt: &mut String) {
+        prompt.push_str(
+            "## Planning Rules\n\
+             1. Prefer the simplest plan. Fewer joins, shallower nesting.\n\
+             2. \"never / not / without / anti-join\" questions: MUST use LEFT JOIN + `is_null` on the right key. NEVER use `NOT EXISTS`.\n\
+             3. Correlate by table name / alias; never re-join the outer table inside a subquery.\n\
+             4. `limit` / `order_by` / `offset` only at top level, never inside `where` or subqueries.\n\
+             5. Output valid JSON: keys unescaped (`\"where\":` not `\"where\\\":`). No backslash-escaped quotes, no fences.\n\
+             \n",
+        );
+    }
+
     fn push_output_schema(&self, prompt: &mut String) {
         prompt.push_str(
             "## Required JSON Output\n\
@@ -380,6 +394,7 @@ impl PromptBuilder {
              \n\
              CRITICAL: `where`, `left`, `right`, `child` must each be a SINGLE Predicate object (NOT an array). `left` and `right` inside `and`/`or` are single {{...}} objects, never arrays.\n\
              CRITICAL: `order_by`, `limit`, `offset` go at the top level of the response, never inside `where`.\n\
+             CRITICAL: Emit parseable JSON only — never escape object keys, never wrap the whole plan in a string, never invent trailing `}`.\n\
              Use the tagged type variants. Return a data instance — not a schema definition.\n\
              Output JSON only: no fences, comments, or raw SQL.\n\
              \n\
@@ -449,6 +464,18 @@ impl PromptBuilder {
                  "Q: List users with their order totals\n\
                   A: {{\"select\":[{{\"type\":\"column_ref\",\"table\":\"users\",\"column\":\"name\",\"alias\":null}},{{\"type\":\"column_ref\",\"table\":\"orders\",\"column\":\"total\",\"alias\":null}}],\"from\":{{\"table\":\"users\",\"alias\":null}},\"joins\":[{{\"join_type\":\"inner\",\"right_table\":{{\"table\":\"orders\",\"alias\":null}},\"on\":{{\"type\":\"comparison\",\"left\":{{\"type\":\"column_ref\",\"column\":\"id\",\"table\":\"users\"}},\"op\":\"eq\",\"right\":{{\"type\":\"column_ref\",\"column\":\"user_id\",\"table\":\"orders\"}}}}}}],\"limit\":10}}\n"
             );
+            // Anti-join: preferred pattern for "never / without" questions.
+            let _ = writeln!(
+                prompt,
+                 "Q: Users who never placed an order\n\
+                  A: {{\"select\":[{{\"type\":\"column_ref\",\"table\":\"users\",\"column\":\"id\",\"alias\":null}},{{\"type\":\"column_ref\",\"table\":\"users\",\"column\":\"name\",\"alias\":null}}],\"from\":{{\"table\":\"users\",\"alias\":null}},\"joins\":[{{\"join_type\":\"left\",\"right_table\":{{\"table\":\"orders\",\"alias\":null}},\"on\":{{\"type\":\"comparison\",\"left\":{{\"type\":\"column_ref\",\"column\":\"id\",\"table\":\"users\"}},\"op\":\"eq\",\"right\":{{\"type\":\"column_ref\",\"column\":\"user_id\",\"table\":\"orders\"}}}}}}],\"where\":{{\"type\":\"is_null\",\"expr\":{{\"type\":\"column_ref\",\"column\":\"id\",\"table\":\"orders\"}}}},\"limit\":10}}\n"
+            );
+            // Minimal NOT EXISTS form (only if LEFT JOIN is unavailable).
+            let _ = writeln!(
+                prompt,
+                 "Q: Users with no orders (NOT EXISTS form)\n\
+                  A: {{\"select\":[{{\"type\":\"column_ref\",\"table\":\"users\",\"column\":\"id\",\"alias\":null}}],\"from\":{{\"table\":\"users\",\"alias\":null}},\"where\":{{\"type\":\"not\",\"child\":{{\"type\":\"exists\",\"query\":{{\"select\":[{{\"type\":\"star\"}}],\"from\":{{\"table\":\"orders\",\"alias\":null}},\"where\":{{\"type\":\"comparison\",\"left\":{{\"type\":\"column_ref\",\"column\":\"user_id\",\"table\":\"orders\"}},\"op\":\"eq\",\"right\":{{\"type\":\"column_ref\",\"column\":\"id\",\"table\":\"users\"}}}}}}}}}},\"limit\":10}}\n"
+            );
         }
         let _ = writeln!(
             prompt,
@@ -470,13 +497,13 @@ impl PromptBuilder {
              Notes:\n\
              - `data_type` only belongs inside `literal` objects.\n\
              - `order_by`, `limit`, `offset` go at the top level, never inside `where`.\n\
+             - Predicate keys (`where`/`left`/`right`/`child`/`on`) are normal JSON keys — write `\"where\":{{...}}`, never `\"where\\\\\":`.\n\
              \n\
-             Example of a nested `WHERE`:\n\
-             ```json\n\
-             {\"where\": {\"type\": \"and\",\n\
-               \"left\": {\"type\": \"comparison\", \"left\": {\"type\": \"column_ref\", \"column\": \"total\", \"table\": \"orders\"}, \"op\": \"gt\", \"right\": {\"type\": \"literal\", \"value\": 150, \"data_type\": \"float\"}},\n\
-               \"right\": {\"type\": \"comparison\", \"left\": {\"type\": \"column_ref\", \"column\": \"status\", \"table\": \"orders\"}, \"op\": \"eq\", \"right\": {\"type\": \"literal\", \"value\": \"completed\", \"data_type\": \"string\"}}}}\n\
-             ```\n\
+             Nested `WHERE` (and/or):\n\
+             {{\"where\":{{\"type\":\"and\",\"left\":{{\"type\":\"comparison\",\"left\":{{\"type\":\"column_ref\",\"column\":\"total\",\"table\":\"orders\"}},\"op\":\"gt\",\"right\":{{\"type\":\"literal\",\"value\":150,\"data_type\":\"float\"}}}},\"right\":{{\"type\":\"comparison\",\"left\":{{\"type\":\"column_ref\",\"column\":\"status\",\"table\":\"orders\"}},\"op\":\"eq\",\"right\":{{\"type\":\"literal\",\"value\":\"completed\",\"data_type\":\"string\"}}}}}}}\n\
+             \n\
+             Anti-join (`LEFT` + `is_null`):\n\
+             {{\"joins\":[{{\"join_type\":\"left\",\"right_table\":{{\"table\":\"orders\"}},\"on\":{{\"type\":\"comparison\",\"left\":{{\"type\":\"column_ref\",\"column\":\"id\",\"table\":\"users\"}},\"op\":\"eq\",\"right\":{{\"type\":\"column_ref\",\"column\":\"user_id\",\"table\":\"orders\"}}}}}}],\"where\":{{\"type\":\"is_null\",\"expr\":{{\"type\":\"column_ref\",\"column\":\"id\",\"table\":\"orders\"}}}}}\n\
              \n",
         );
     }

@@ -182,16 +182,19 @@ mod tests {
         assert!(prompt.contains("# Role"));
         assert!(prompt.contains("## Schema"));
         assert!(prompt.contains("## Dialect"));
+        assert!(prompt.contains("## Planning Rules"));
         assert!(prompt.contains("## Required JSON Output"));
         assert!(prompt.contains("QueryPlan"));
         assert!(prompt.contains("\"properties\""));
         assert!(prompt.contains("JSON only"));
         assert!(prompt.contains("## Example"));
+        assert!(prompt.contains("LEFT JOIN"));
+        assert!(prompt.contains("is_null"));
         assert!(prompt.contains("users("));
         assert!(prompt.contains("organizations("));
         assert!(!prompt.contains("audit_logs"));
         assert!(
-            prompt.chars().count() < 8_000,
+            prompt.chars().count() < 12_000,
             "prompt too long: {} chars",
             prompt.chars().count()
         );

@@ -218,10 +218,6 @@ impl VlorQl {
                     }
                     Err(e) => return Err(e),
                 };
-                tracing::debug!(
-                    plan_json = %serde_json::to_string(&plan).unwrap_or_default(),
-                    "LLM generated plan"
-                );
                 match self.validate_only(&plan) {
                     Ok(validated_plan) => {
                         // Optimize when an optimizer is configured, then compile.
@@ -277,11 +273,11 @@ impl VlorQl {
                         return Ok(compiled);
                     }
                     Err(errors) => {
+                        let plan_json = serde_json::to_string(&plan).unwrap_or_default();
                         tracing::error!(
-                            errors = ?errors,
-                            plan_json = %serde_json::to_string(&plan).unwrap_or_default(),
-                            "Validation failed with {} errors",
-                            errors.len()
+                            plan_json,
+                            error_count = errors.len(),
+                            "Schema validation failed"
                         );
                         if let Some(ref m) = self.metrics {
                             m.error_counter.add(
@@ -703,6 +699,7 @@ impl VlorQlBuilder {
 
     /// Builds the facade and verifies the required schema and dialect/compiler setup.
     pub fn build(self) -> Result<VlorQl, VlorQLError> {
+        vlorql_core::observability::init_console_logging();
         let schema = self.schema.ok_or_else(|| {
             VlorQLError::config(
                 ConfigErrorKind::MissingSchema,
@@ -789,8 +786,14 @@ fn parse_dialect_name(name: &str) -> Result<DialectProfile, VlorQLError> {
 fn format_retry_question_str(question: &str, error: &VlorQLError) -> String {
     let response = error.to_error_response();
     let feedback = serde_json::to_string(&response).unwrap_or_else(|_| error.to_string());
+    let hint = match error {
+        VlorQLError::Llm { kind: vlorql_core::errors::LlmErrorKind::ParseError { .. }, .. } => {
+            " TIP: If the previous query used NOT EXISTS with a subquery, replace it with LEFT JOIN + IS NULL — it is simpler and avoids JSON nesting issues."
+        }
+        _ => "",
+    };
     format!(
-        "{question}\n\nThe previous QueryPlan failed validation. Correct it and return only a new JSON QueryPlan. Structured feedback:\n{feedback}"
+        "{question}\n\nThe previous QueryPlan failed validation. Correct it and return only a new JSON QueryPlan. Structured feedback:\n{feedback}{hint}"
     )
 }
 

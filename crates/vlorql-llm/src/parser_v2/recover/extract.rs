@@ -17,9 +17,11 @@ use super::markdown;
 /// Attempts to extract valid JSON from an LLM response text.
 ///
 /// Small LLMs often wrap JSON in markdown fences or include extra
-/// text before/after the JSON object.  This function tries
-/// increasingly lenient strategies to recover valid JSON:
+/// text before/after the JSON object, or produce incorrectly escaped
+/// quotes (`\"` instead of `"`).  This function tries increasingly
+/// lenient strategies to recover valid JSON:
 ///
+/// 0. Fix escaped quotes (`\"` → `"`) in the raw text.
 /// 1. Return the text as-is if it is already valid JSON.
 /// 2. If it's a JSON array containing an object, extract the object.
 /// 3. Strip markdown code fences.
@@ -30,6 +32,24 @@ use super::markdown;
 #[must_use]
 pub fn extract_json_content(raw: &str) -> &str {
     let trimmed = raw.trim();
+
+    // 0. Fix `\"` → `"` — some models output backslash-escaped quotes.
+    let fixed = match json::fix_escaped_quotes(trimmed) {
+        std::borrow::Cow::Owned(s) => {
+            if json::is_valid_json_object(&s) {
+                return Box::leak(s.into_boxed_str());
+            }
+            if json::is_valid_json_array(&s) {
+                if let Some(obj) = json::extract_first_json_obj_from_array(&s) {
+                    // obj borrows from s; leak obj to extend its lifetime.
+                    return Box::leak(obj.to_owned().into_boxed_str());
+                }
+            }
+            trimmed
+        }
+        std::borrow::Cow::Borrowed(_) => trimmed,
+    };
+    let _ = fixed;
 
     // 1. Already valid JSON **object** — fast path.
     if json::is_valid_json_object(trimmed) {
