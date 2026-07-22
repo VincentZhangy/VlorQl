@@ -436,6 +436,19 @@ fn repair_query_plan_object(obj: &mut serde_json::Map<String, serde_json::Value>
             for item in arr.iter_mut() {
                 if let Some(term) = item.as_object_mut()
                     && term.contains_key("expr")
+                    && !term.contains_key("type")
+                {
+                    // group_by items are bare Expression objects, BUT the LLM
+                    // often emits them in order_by format: {"expr": {...}}.
+                    // Unwrap the expr value to become the item itself.
+                    if let Some(expr) = term.remove("expr") {
+                        *item = expr;
+                        changed = true;
+                        // Now repair the unwrapped expression.
+                        changed |= repair_expression_value(item);
+                    }
+                } else if let Some(term) = item.as_object_mut()
+                    && term.contains_key("expr")
                 {
                     // order_by items are OrderByTerm with an `expr` Expression
                     if let Some(expr) = term.get_mut("expr") {
