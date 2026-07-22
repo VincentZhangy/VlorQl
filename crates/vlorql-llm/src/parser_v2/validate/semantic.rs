@@ -290,7 +290,12 @@ fn validate_expression(expression: &Expression, errors: &mut Vec<ValidationError
             validate_expression(left, errors);
             validate_expression(right, errors);
         }
-        Expression::Star => {} // Always valid.
+        Expression::Star => {
+            errors.push(ValidationError::new(
+                ValidationErrorKind::InvalidExpression,
+                "`*` is only valid in SELECT, not in WHERE/ON/HAVING or other expression positions",
+            ));
+        }
         Expression::SubQuery { query } => {
             validate_plan(query, errors);
         }

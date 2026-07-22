@@ -13,7 +13,7 @@
 //! does nothing and lets the validator report the issue.
 
 use vlorql_core::schema::{
-    JoinClause, Projection, QueryPlan,
+    Expression, JoinClause, Projection, QueryPlan,
 };
 
 /// Run all auto-fix rules on a [`QueryPlan`] recursively
@@ -25,6 +25,7 @@ pub fn fix_plan(plan: &mut QueryPlan) -> bool {
     let mut changed = false;
     changed |= fix_limit_zero(plan);
     changed |= fix_empty_select(plan);
+    changed |= fix_missing_aggregate(plan);
     // fix_missing_aliases must run last because it adds new aliases.
     changed |= fix_missing_aliases(plan);
     // Recursively fix CTE subqueries.
@@ -63,6 +64,117 @@ fn fix_empty_select(plan: &mut QueryPlan) -> bool {
         true
     } else {
         false
+    }
+}
+
+/// When `GROUP BY` is present but SELECT has no aggregate function
+/// (SUM/COUNT/AVG/MIN/MAX), prepend a suitable aggregate as fallback.
+///
+/// Small LLMs (7B) often generate `SELECT col GROUP BY col` without
+/// any aggregate — valid SQL but meaningless for the user's question.
+///
+/// Heuristic for choosing the aggregate:
+/// - If a non-grouped SELECT column has a numeric-suggesting name
+///   (`price`, `total`, `amount`, `quantity`, `cost`, `revenue`, etc.),
+///   wrap it with `SUM()`.
+/// - Otherwise fall back to `COUNT(*)`.
+#[must_use]
+fn fix_missing_aggregate(plan: &mut QueryPlan) -> bool {
+    // Only applies when GROUP BY is present and non-empty.
+    if plan.group_by.as_ref().is_none_or(|g| g.is_empty()) {
+        return false;
+    }
+    // Check if SELECT already has an aggregate function.
+    let has_agg = plan.select.iter().any(|p| match p {
+        Projection::Expr { expression, .. } => is_aggregate_expr(expression),
+        _ => false,
+    });
+    if has_agg {
+        return false;
+    }
+
+    // Collect GROUP BY column names (table.column or bare column).
+    let group_cols: Vec<(&str, &str)> = plan.group_by.as_ref().map_or_else(Vec::new, |g| {
+        g.iter().filter_map(|e| match e {
+            Expression::ColumnRef { table, column } => {
+                Some((table.as_deref().unwrap_or(""), column.as_str()))
+            }
+            _ => None,
+        }).collect()
+    });
+
+    // Find the first non-grouped column with a numeric-suggesting name.
+    let agg = plan.select.iter().find_map(|p| match p {
+        Projection::Column { table, column, .. } => {
+            if group_cols.iter().any(|(t, c)| {
+                let t_match = table.as_deref().unwrap_or("") == *t;
+                t_match && *c == column.as_str()
+            }) {
+                return None; // grouped column, skip
+            }
+            infer_numeric_aggregate(column)
+        }
+        _ => None,
+    });
+
+    match agg {
+        Some((name, col)) => {
+            // Prepend SUM(col) as the first projection.
+            plan.select.insert(0, Projection::Expr {
+                expression: Expression::FunctionCall {
+                    name: name.to_owned(),
+                    args: vec![Expression::ColumnRef {
+                        table: None,
+                        column: col.to_owned(),
+                    }],
+                    distinct: false,
+                },
+                alias: Some(format!("{}_{}", name, col)),
+            });
+        }
+        None => {
+            // Fallback: COUNT(*) as the first projection.
+            plan.select.insert(0, Projection::Expr {
+                expression: Expression::FunctionCall {
+                    name: "count".to_owned(),
+                    args: vec![Expression::Star],
+                    distinct: false,
+                },
+                alias: Some("count".to_owned()),
+            });
+        }
+    }
+    true
+}
+
+/// Column names that suggest a SUM aggregate is appropriate.
+const SUM_COLUMNS: &[&str] = &[
+    "price", "total", "amount", "quantity", "cost", "revenue", "salary",
+    "budget", "fee", "rate", "score", "value", "count",
+];
+
+/// If `column` has a numeric-suggesting name, return `("sum", column)`.
+/// Otherwise return `None` (caller falls back to `COUNT(*)`).
+fn infer_numeric_aggregate(column: &str) -> Option<(&'static str, &str)> {
+    let lower = column.to_lowercase();
+    if SUM_COLUMNS.iter().any(|&s| lower.contains(s)) {
+        Some(("sum", column))
+    } else {
+        None
+    }
+}
+
+/// Returns `true` when `expr` is (or contains) an aggregate function call.
+fn is_aggregate_expr(expr: &Expression) -> bool {
+    const AGGREGATES: &[&str] = &["sum", "count", "avg", "min", "max", "string_agg", "array_agg"];
+    match expr {
+        Expression::FunctionCall { name, .. } => {
+            AGGREGATES.iter().any(|a| name.eq_ignore_ascii_case(a))
+        }
+        Expression::BinaryOp { left, right, .. } => {
+            is_aggregate_expr(left) || is_aggregate_expr(right)
+        }
+        _ => false,
     }
 }
 

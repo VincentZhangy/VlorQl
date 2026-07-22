@@ -375,7 +375,7 @@ impl PromptBuilder {
              2. \"never / not / without / anti-join\" questions: MUST use LEFT JOIN + `is_null` on the right key. NEVER use `NOT EXISTS`.\n\
              3. Every table in `select` / `where` must be in `from` or `joins`. Never reference an unjoined table. Example: selecting `users.name` requires joining `users`.\n\
              4. `limit` / `order_by` / `offset` only at top level, never inside `where` or subqueries.\n\
-             5. With GROUP BY, SELECT must include at least one aggregate function (SUM/COUNT/AVG/MIN/MAX). Never SELECT * or bare columns only.\n\
+             5. \"each / every / per\" questions = GROUP BY + aggregate. Example: \"how many per product?\" → SELECT name, SUM(qty) ... GROUP BY name. Never GROUP BY without SUM/COUNT/AVG.\n\
              6. Output valid JSON: keys unescaped (`\"where\":` not `\"where\\\":`). No backslash-escaped quotes, no fences.\n\
              \n",
         );
@@ -476,6 +476,12 @@ impl PromptBuilder {
                 prompt,
                  "Q: Users with no orders (NOT EXISTS form)\n\
                   A: {{\"select\":[{{\"type\":\"column_ref\",\"table\":\"users\",\"column\":\"id\",\"alias\":null}}],\"from\":{{\"table\":\"users\",\"alias\":null}},\"where\":{{\"type\":\"not\",\"child\":{{\"type\":\"exists\",\"query\":{{\"select\":[{{\"type\":\"star\"}}],\"from\":{{\"table\":\"orders\",\"alias\":null}},\"where\":{{\"type\":\"comparison\",\"left\":{{\"type\":\"column_ref\",\"column\":\"user_id\",\"table\":\"orders\"}},\"op\":\"eq\",\"right\":{{\"type\":\"column_ref\",\"column\":\"id\",\"table\":\"users\"}}}}}}}}}},\"limit\":10}}\n"
+            );
+            // GROUP BY + aggregate: "each / every / per" questions.
+            let _ = writeln!(
+                prompt,
+                 "Q: How many items were sold per product?\n\
+                  A: {{\"select\":[{{\"type\":\"column_ref\",\"table\":\"products\",\"column\":\"name\",\"alias\":\"product\"}},{{\"type\":\"expr\",\"expression\":{{\"type\":\"function_call\",\"name\":\"sum\",\"args\":[{{\"type\":\"column_ref\",\"column\":\"quantity\",\"table\":\"order_items\"}}],\"distinct\":false}},\"alias\":\"total_sold\"}}],\"from\":{{\"table\":\"products\",\"alias\":null}},\"joins\":[{{\"join_type\":\"inner\",\"right_table\":{{\"table\":\"order_items\",\"alias\":null}},\"on\":{{\"type\":\"comparison\",\"left\":{{\"type\":\"column_ref\",\"column\":\"id\",\"table\":\"products\"}},\"op\":\"eq\",\"right\":{{\"type\":\"column_ref\",\"column\":\"product_id\",\"table\":\"order_items\"}}}}}}],\"group_by\":[{{\"type\":\"column_ref\",\"table\":\"products\",\"column\":\"name\"}}]}}\n"
             );
         }
         let _ = writeln!(
