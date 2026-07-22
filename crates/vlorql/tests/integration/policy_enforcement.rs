@@ -239,7 +239,7 @@ fn row_filter_combined_with_empty_where_compiles_to_filtered_sql() {
         compiled.sql
     );
     assert!(
-        compiled.sql.contains(r#""users"."id" > $1"#),
+        compiled.sql.contains(r#""t1"."id" > $1"#),
         "compiled SQL should reference the row-filter column, got `{}`",
         compiled.sql
     );
@@ -278,12 +278,12 @@ fn row_filter_combines_with_user_supplied_where() {
         .compile(&ValidatedPlan(Arc::new(plan)))
         .expect("filtered query should compile");
     assert!(
-        compiled.sql.contains(r#""users"."id" > ?"#),
+        compiled.sql.contains(r#""t1"."id" > ?"#),
         "expected parameterized row-filter predicate in `{}`",
         compiled.sql
     );
     assert!(
-        compiled.sql.contains(r#""users"."name" = ?"#),
+        compiled.sql.contains(r#""t1"."name" = ?"#),
         "expected parameterized user predicate in `{}`",
         compiled.sql
     );

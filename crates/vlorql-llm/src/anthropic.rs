@@ -290,7 +290,7 @@ fn parse_completion_payload(body: &str) -> Result<QueryPlan, VlorQLError> {
                 json!({"source": "anthropic_response"}),
             )
         })?;
-    serde_json::from_str::<QueryPlan>(text).map_err(|error| {
+    crate::parse_llm_response(text).map_err(|error| {
         VlorQLError::llm(
             LlmErrorKind::ParseError {
                 details: format!("assistant content is not a valid QueryPlan: {error}"),
@@ -324,7 +324,7 @@ mod tests {
             }],
             from: FromClause {
                 table: "users".to_owned(),
-                alias: None,
+                alias: Some("t1".to_owned()),
             },
             r#where: None,
             group_by: None,

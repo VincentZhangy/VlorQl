@@ -45,6 +45,11 @@ pub mod local;
 /// Public helpers are re-exported at the crate root for compatibility:
 /// [`extract_json_content`], [`repair_query_plan_json`],
 /// [`detect_template_leak`].
+/// V2 parse pipeline: recover → canonicalize → build → validate → optimize.
+///
+/// A staged pipeline designed for multi-model compatibility.  Built
+/// alongside the existing `parse` module; will eventually replace it.
+pub mod parser_v2;
 pub mod parse;
 pub mod zhipu;
 
@@ -52,6 +57,34 @@ pub use parse::{
     canonicalize_to_value, detect_template_leak, extract_json_content, from_canonical_str,
     from_canonical_value, parse_query_plan, repair_query_plan_json,
 };
+
+// V2 pipeline re-exports (recommended for new code).
+pub use parser_v2::pipeline::{
+    parse_query_plan as parse_query_plan_v2,
+    parse_query_plan_debug,
+    parse_query_plan_lenient,
+    ParseError,
+    ParseResult,
+};
+
+/// Parse LLM response text into a [`QueryPlan`] using the V2 pipeline.
+///
+/// This is the recommended internal helper for all `LlmClient` implementations.
+/// It runs the full V2 pipeline (recover → normalize → build → fix → validate → optimize)
+/// and converts errors to the crate's `VlorQLError` type.
+pub(crate) fn parse_llm_response(content: &str) -> Result<QueryPlan, VlorQLError> {
+    parser_v2::pipeline::parse_query_plan(content).map_err(|e| {
+        VlorQLError::llm(
+            LlmErrorKind::ParseError {
+                details: e.to_string(),
+            },
+            json!({
+                "source": "v2_pipeline",
+                "content": truncate(content, 4096),
+            }),
+        )
+    })
+}
 
 /// Supported LLM providers.
 ///
@@ -472,7 +505,16 @@ impl OpenAIClient {
                 )
             })?;
 
-        serde_json::from_str::<QueryPlan>(content).map_err(|error| {
+        serde_json::from_str(content).ok()
+            .and_then(|v: Value| {
+                v.get("content")
+                    .or_else(|| v.get("response"))
+                    .and_then(Value::as_str)
+                    .map(|s| s.to_owned())
+            })
+            .unwrap_or_else(|| content.to_owned());
+
+        parse_llm_response(&content).map_err(|error| {
             VlorQLError::llm(
                 LlmErrorKind::ParseError {
                     details: format!("assistant content is not a valid QueryPlan: {error}"),
@@ -1392,7 +1434,7 @@ mod tests {
             select: vec![Projection::Star { table: None }],
             from: FromClause {
                 table: "users".to_owned(),
-                alias: None,
+                alias: Some("t1".to_owned()),
             },
             r#where: None,
             group_by: None,

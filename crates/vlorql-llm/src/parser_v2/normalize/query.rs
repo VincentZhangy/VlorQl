@@ -1,0 +1,206 @@
+//! Query-level structure normalization.
+//!
+//! Handles top-level structural fixes:
+//! - Strips unknown top-level fields that serde would reject
+//! - Wraps top-level `descending` + `expr` into `order_by`
+
+/// Fields that are valid on a QueryPlan.
+const PLAN_FIELDS: &[&str] = &[
+    "select", "from", "where", "group_by", "having",
+    "order_by", "limit", "offset", "joins", "ctes",
+];
+
+/// Strip unknown top-level fields that `QueryPlan` rejects.
+///
+/// `QueryPlan` uses `#[serde(deny_unknown_fields)]`, so fields like
+/// `right`, `left`, `op`, `child`, `expr` at the plan level cause an
+/// immediate deserialization error.  Remove them so the pipeline can
+/// at least attempt to make `where` valid.
+///
+/// Returns `true` if any field was removed.
+#[must_use]
+pub fn strip_unknown_fields(val: &mut serde_json::Value) -> bool {
+    let Some(obj) = val.as_object_mut() else {
+        return false;
+    };
+    let before = obj.len();
+    obj.retain(|key, _| PLAN_FIELDS.contains(&key.as_str()));
+    obj.len() != before
+}
+
+/// Wrap top-level `descending` + `expr` into an `order_by` array.
+///
+/// The LLM sometimes emits `descending` and `expr` at the top level
+/// of the QueryPlan instead of inside an `OrderByTerm` within the
+/// `order_by` array.
+///
+/// Returns `true` if any change was made.
+#[must_use]
+pub fn wrap_descending_expr(val: &mut serde_json::Value) -> bool {
+    let Some(obj) = val.as_object_mut() else {
+        return false;
+    };
+
+    if obj.contains_key("order_by") {
+        return false;
+    }
+
+    if let (Some(expr), Some(descending)) = (obj.remove("expr"), obj.remove("descending")) {
+        if descending.is_boolean() {
+            let term = serde_json::json!({
+                "expr": expr,
+                "descending": descending,
+            });
+            obj.insert("order_by".to_owned(), serde_json::json!([term]));
+            return true;
+        }
+    }
+
+    false
+}
+
+/// Convert string-formatted `limit` / `offset` values to numbers.
+///
+/// Some LLMs emit `"limit": "10"` (string) instead of `"limit": 10` (number).
+/// The builder's `as_u64()` call would return `None` for a string, silently
+/// dropping the limit.  This function converts string values to numbers.
+///
+/// Returns `true` if any field was converted.
+#[must_use]
+pub fn normalize_limit_offset(val: &mut serde_json::Value) -> bool {
+    let Some(obj) = val.as_object_mut() else {
+        return false;
+    };
+    let mut changed = false;
+    for field in &["limit", "offset"] {
+        if let Some(str_val) = obj.get(*field).and_then(|v| v.as_str()) {
+            if let Ok(num) = str_val.parse::<u64>() {
+                obj.insert(field.to_string(), serde_json::Value::Number(num.into()));
+                changed = true;
+            }
+        }
+    }
+    changed
+}
+
+/// Full query-level structure normalization.
+///
+/// 1. Wrap top-level `descending` + `expr` into `order_by` (must run
+///    before `strip_unknown_fields` so these fields are preserved).
+/// 2. Strip unknown top-level fields.
+/// 3. Normalize string limit/offset to numbers.
+#[must_use]
+pub fn normalize(val: &mut serde_json::Value) -> bool {
+    let mut changed = false;
+    // Wrap first: expr + descending → order_by, before they get stripped.
+    changed |= wrap_descending_expr(val);
+    // Then strip remaining unknown fields.
+    changed |= strip_unknown_fields(val);
+    // Normalize string limit/offset to numbers.
+    changed |= normalize_limit_offset(val);
+    changed
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn strip_unknown_fields_removes_extra() {
+        let mut val = json!({
+            "select": [{"type": "star"}],
+            "from": {"table": "users"},
+            "right": {"column": "id"},
+            "left": {"column": "name"},
+            "op": "eq"
+        });
+        assert!(strip_unknown_fields(&mut val));
+        assert!(val.get("select").is_some());
+        assert!(val.get("from").is_some());
+        assert!(val.get("right").is_none());
+        assert!(val.get("left").is_none());
+        assert!(val.get("op").is_none());
+    }
+
+    #[test]
+    fn strip_unknown_fields_noop_when_clean() {
+        let mut val = json!({
+            "select": [{"type": "star"}],
+            "from": {"table": "users"}
+        });
+        assert!(!strip_unknown_fields(&mut val));
+    }
+
+    #[test]
+    fn wrap_descending_expr_into_order_by() {
+        let mut val = json!({
+            "select": [{"type": "star"}],
+            "from": {"table": "users"},
+            "expr": {"column": "name"},
+            "descending": true
+        });
+        assert!(wrap_descending_expr(&mut val));
+        assert!(val.get("order_by").is_some());
+        assert!(val.get("expr").is_none());
+        assert!(val.get("descending").is_none());
+        let order_by = val.get("order_by").unwrap().as_array().unwrap();
+        assert_eq!(order_by.len(), 1);
+        assert_eq!(
+            order_by[0].get("expr").and_then(|v| v.get("column")).and_then(|v| v.as_str()),
+            Some("name")
+        );
+        assert_eq!(
+            order_by[0].get("descending").and_then(|v| v.as_bool()),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn wrap_descending_expr_noop_when_order_by_exists() {
+        let mut val = json!({
+            "select": [{"type": "star"}],
+            "from": {"table": "users"},
+            "order_by": [{"expr": {"column": "name"}, "descending": true}],
+            "expr": {"column": "name"},
+            "descending": true
+        });
+        assert!(!wrap_descending_expr(&mut val));
+    }
+
+    #[test]
+    fn wrap_descending_expr_noop_when_missing_fields() {
+        let mut val = json!({
+            "select": [{"type": "star"}],
+            "from": {"table": "users"}
+        });
+        assert!(!wrap_descending_expr(&mut val));
+    }
+
+    #[test]
+    fn full_normalize() {
+        let mut val = json!({
+            "select": [{"type": "star"}],
+            "from": {"table": "users"},
+            "right": {"column": "id"},
+            "expr": {"column": "name"},
+            "descending": true
+        });
+        assert!(normalize(&mut val));
+        // Unknown fields stripped.
+        assert!(val.get("right").is_none());
+        // expr + descending wrapped into order_by.
+        assert!(val.get("order_by").is_some());
+        assert!(val.get("expr").is_none());
+        assert!(val.get("descending").is_none());
+    }
+
+    #[test]
+    fn no_change_for_canonical() {
+        let mut val = json!({
+            "select": [{"type": "star"}],
+            "from": {"table": "users"}
+        });
+        assert!(!normalize(&mut val));
+    }
+}

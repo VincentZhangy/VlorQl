@@ -38,8 +38,8 @@ pub use vlorql_core::optimizer::QueryOptimizer as QueryOptimizerCore;
 pub use vlorql_core::schema::{DialectProfile, SchemaSnapshot, SqlDialect};
 pub use vlorql_core::validate::{OptimizedPlan, ValidatedPlan};
 pub use vlorql_llm::{
-    LlmClient, LlmConfig, LlmProvider, create_llm_client, detect_template_leak, extract_json_content,
-    repair_query_plan_json,
+    LlmClient, LlmConfig, LlmProvider, create_llm_client, detect_template_leak,
+    parse_query_plan_v2, parse_query_plan_lenient,
 };
 
 const DEFAULT_MAX_RETRIES: usize = 2;
@@ -907,9 +907,7 @@ fn process_assembled_text(
             }),
         ));
     }
-    let cleaned = extract_json_content(&buffer);
-    let repaired = vlorql_llm::repair_query_plan_json(cleaned);
-    let plan: QueryPlan = match serde_json::from_str(&repaired) {
+    let plan: QueryPlan = match vlorql_llm::parse_query_plan_v2(&buffer) {
         Ok(plan) => plan,
         Err(error) => {
             return StreamEvent::Error(VlorQLError::llm(
@@ -919,8 +917,6 @@ fn process_assembled_text(
                 json!({
                     "source": "stream_assistant_content",
                     "buffer_length": buffer.len(),
-                    "cleaned": cleaned != buffer,
-                    "repaired": &*repaired != cleaned,
                 }),
             ));
         }
@@ -986,7 +982,7 @@ mod tests {
             }],
             from: FromClause {
                 table: "users".to_owned(),
-                alias: None,
+                alias: Some("t1".to_owned()),
             },
             r#where: None,
             group_by: None,
@@ -1022,7 +1018,7 @@ mod tests {
             .await
             .expect("valid mock plan should compile");
         assert_eq!(compiled.dialect, SqlDialect::Sqlite);
-        assert_eq!(compiled.sql, "SELECT \"users\".\"id\" FROM \"users\"");
+        assert_eq!(compiled.sql, "SELECT \"t1\".\"id\" FROM \"users\" AS \"t1\"");
     }
 
     #[tokio::test]
@@ -1230,7 +1226,7 @@ mod tests {
             .expect("valid mock plan should compile");
 
         assert_eq!(compiled.dialect, SqlDialect::Sqlite);
-        assert_eq!(compiled.sql, "SELECT \"users\".\"id\" FROM \"users\"");
+        assert_eq!(compiled.sql, "SELECT \"t1\".\"id\" FROM \"users\" AS \"t1\"");
         // The test verifies that the query completes without error under
         // a tracing subscriber; span hierarchy is validated by inspecting
         // the subscriber output (stderr) when `RUST_LOG` is set.

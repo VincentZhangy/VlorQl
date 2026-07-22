@@ -252,7 +252,13 @@ impl PromptBuilder {
                 .columns
                 .iter()
                 .filter(|c| self.column_visible(table, c, policy))
-                .map(|c| format!("{} {}", c.name, data_type_name(c.data_type)))
+                .map(|c| {
+                    let mut desc = format!("{} {}", c.name, data_type_name(c.data_type));
+                    if let Some(ref fk) = c.foreign_key {
+                        let _ = write!(desc, " → {}.{}", fk.foreign_table, fk.foreign_column);
+                    }
+                    desc
+                })
                 .collect();
 
             if cols.is_empty() {
@@ -267,6 +273,37 @@ impl PromptBuilder {
             prompt.push_str("(none available)\n");
         }
         prompt.push('\n');
+
+        // ── Relationships section ────────────────────────────────
+        // List foreign-key relationships explicitly so the LLM knows
+        // which tables can be joined and on which columns.
+        let mut rels: Vec<String> = Vec::new();
+        for table_name in relevant_tables {
+            let Some(table) = self.schema.get_table(table_name) else {
+                continue;
+            };
+            let policy = self.policy.table_policies.get(&table.name);
+            if policy.is_some_and(|p| !p.allowed) {
+                continue;
+            }
+            for column in &table.columns {
+                if let Some(ref fk) = column.foreign_key {
+                    if relevant_tables.contains(&fk.foreign_table) {
+                        rels.push(format!(
+                            "{}.{} → {}.{}",
+                            table.name, column.name, fk.foreign_table, fk.foreign_column
+                        ));
+                    }
+                }
+            }
+        }
+        if !rels.is_empty() {
+            prompt.push_str("## Relationships\n");
+            for rel in &rels {
+                let _ = writeln!(prompt, "{rel}");
+            }
+            prompt.push('\n');
+        }
     }
 
     fn push_dialect_constraints(&self, prompt: &mut String) {
@@ -392,9 +429,31 @@ impl PromptBuilder {
         let _ = writeln!(
             prompt,
              "Q: Orders with total > 150, sorted by total desc\n\
-              A: {{\"select\":[{{\"type\":\"column_ref\",\"table\":\"orders\",\"column\":\"id\",\"alias\":null}},{{\"type\":\"column_ref\",\"table\":\"orders\",\"column\":\"total\",\"alias\":null}}],\"from\":{{\"table\":\"orders\",\"alias\":null}},\"where\":{{\"type\":\"comparison\",\"left\":{{\"type\":\"column_ref\",\"column\":\"total\",\"table\":\"orders\"}},\"op\":\"gt\",\"right\":{{\"type\":\"literal\",\"value\":150,\"data_type\":\"float\"}}}},\"order_by\":[{{\"expr\":{{\"type\":\"column_ref\",\"column\":\"total\",\"table\":\"orders\"}},\"descending\":true}}],\"limit\":10}}\n\
-             \n\
-             The real response must obey the current schema and dialect.\n",
+              A: {{\"select\":[{{\"type\":\"column_ref\",\"table\":\"orders\",\"column\":\"id\",\"alias\":null}},{{\"type\":\"column_ref\",\"table\":\"orders\",\"column\":\"total\",\"alias\":null}}],\"from\":{{\"table\":\"orders\",\"alias\":null}},\"where\":{{\"type\":\"comparison\",\"left\":{{\"type\":\"column_ref\",\"column\":\"total\",\"table\":\"orders\"}},\"op\":\"gt\",\"right\":{{\"type\":\"literal\",\"value\":150,\"data_type\":\"float\"}}}},\"order_by\":[{{\"expr\":{{\"type\":\"column_ref\",\"column\":\"total\",\"table\":\"orders\"}},\"descending\":true}}],\"limit\":10}}\n"
+        );
+        // Add a JOIN example if there are at least 2 relevant tables
+        // with a foreign-key relationship.
+        let has_join_example = relevant_tables.len() >= 2
+            && relevant_tables.iter().any(|t1| {
+                self.schema.get_table(t1).is_some_and(|table| {
+                    table.columns.iter().any(|c| {
+                        c.foreign_key
+                            .as_ref()
+                            .is_some_and(|fk| relevant_tables.contains(&fk.foreign_table))
+                    })
+                })
+            });
+        if has_join_example {
+            let _ = writeln!(
+                prompt,
+                 "Q: List users with their order totals\n\
+                  A: {{\"select\":[{{\"type\":\"column_ref\",\"table\":\"users\",\"column\":\"name\",\"alias\":null}},{{\"type\":\"column_ref\",\"table\":\"orders\",\"column\":\"total\",\"alias\":null}}],\"from\":{{\"table\":\"users\",\"alias\":null}},\"joins\":[{{\"join_type\":\"inner\",\"right_table\":{{\"table\":\"orders\",\"alias\":null}},\"on\":{{\"type\":\"comparison\",\"left\":{{\"type\":\"column_ref\",\"column\":\"id\",\"table\":\"users\"}},\"op\":\"eq\",\"right\":{{\"type\":\"column_ref\",\"column\":\"user_id\",\"table\":\"orders\"}}}}}}],\"limit\":10}}\n"
+            );
+        }
+        let _ = writeln!(
+            prompt,
+             "\n\
+              The real response must obey the current schema and dialect.\n",
         );
     }
 
