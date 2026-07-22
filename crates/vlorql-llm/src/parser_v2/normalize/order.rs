@@ -56,13 +56,33 @@ pub fn normalize(val: &mut serde_json::Value) -> bool {
     let Some(obj) = val.as_object_mut() else {
         return false;
     };
-    let Some(arr) = obj.get_mut("order_by").and_then(|v| v.as_array_mut()) else {
-        return false;
-    };
     let mut changed = false;
-    for item in arr.iter_mut() {
-        changed |= normalize_item(item);
+
+    // Normalize order_by items (OrderByTerm with expr + descending).
+    if let Some(arr) = obj.get_mut("order_by").and_then(|v| v.as_array_mut()) {
+        for item in arr.iter_mut() {
+            changed |= normalize_item(item);
+        }
     }
+
+    // Normalize group_by items: LLMs often emit them as
+    // {"expr": {"type": "column_ref", ...}} (order_by format) instead of
+    // bare Expression objects.  Unwrap expr → item.
+    if let Some(arr) = obj.get_mut("group_by").and_then(|v| v.as_array_mut()) {
+        for item in arr.iter_mut() {
+            if let Some(obj) = item.as_object_mut()
+                && obj.contains_key("expr")
+                && !obj.contains_key("type")
+                && !obj.contains_key("column")
+            {
+                if let Some(expr) = obj.remove("expr") {
+                    *item = expr;
+                    changed = true;
+                }
+            }
+        }
+    }
+
     changed
 }
 

@@ -39,7 +39,7 @@ pub use vlorql_core::schema::{DialectProfile, SchemaSnapshot, SqlDialect};
 pub use vlorql_core::validate::{OptimizedPlan, ValidatedPlan};
 pub use vlorql_llm::{
     LlmClient, LlmConfig, LlmProvider, create_llm_client, detect_template_leak,
-    parse_query_plan_v2, parse_query_plan_lenient,
+    parse_query_plan, parse_query_plan_lenient,
 };
 
 const DEFAULT_MAX_RETRIES: usize = 2;
@@ -915,7 +915,7 @@ fn process_assembled_text(
             }),
         ));
     }
-    let plan: QueryPlan = match vlorql_llm::parse_query_plan_v2(&buffer) {
+    let plan: QueryPlan = match vlorql_llm::parse_query_plan(&buffer) {
         Ok(plan) => plan,
         Err(error) => {
             return StreamEvent::Error(VlorQLError::llm(

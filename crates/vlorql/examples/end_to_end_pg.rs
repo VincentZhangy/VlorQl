@@ -846,7 +846,11 @@ async fn execute_on_postgres(queries: &[vlorql::CompiledQuery]) -> Result<(), Bo
                             }
                             DataType::Int => {
                                 if let Some(i) = n.as_i64() {
-                                    Box::new(i) as Box<dyn tokio_postgres::types::ToSql + Sync>
+                                    if let Ok(i32_val) = i32::try_from(i) {
+                                        Box::new(i32_val) as Box<dyn tokio_postgres::types::ToSql + Sync>
+                                    } else {
+                                        Box::new(i) as Box<dyn tokio_postgres::types::ToSql + Sync>
+                                    }
                                 } else {
                                     // 如果整数超出 i64 范围，回退
                                     Box::new(0i64) as Box<dyn tokio_postgres::types::ToSql + Sync>

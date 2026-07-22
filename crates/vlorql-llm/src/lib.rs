@@ -49,22 +49,16 @@ pub mod local;
 ///
 /// A staged pipeline designed for multi-model compatibility.  Built
 /// alongside the existing `parse` module; will eventually replace it.
+// V2 pipeline (recommended for all new code).
 pub mod parser_v2;
 pub mod parse;
 pub mod zhipu;
 
-pub use parse::{
-    canonicalize_to_value, detect_template_leak, extract_json_content, from_canonical_str,
-    from_canonical_value, parse_query_plan, repair_query_plan_json,
-};
-
-// V2 pipeline re-exports (recommended for new code).
+pub use parser_v2::recover::{detect_template_leak, extract_json_content};
+pub use parser_v2::builder::query_builder::{from_canonical_str, from_canonical_value};
 pub use parser_v2::pipeline::{
-    parse_query_plan as parse_query_plan_v2,
-    parse_query_plan_debug,
-    parse_query_plan_lenient,
-    ParseError,
-    ParseResult,
+    parse_query_plan, parse_query_plan_debug, parse_query_plan_lenient,
+    ParseError, ParseResult,
 };
 
 /// Parse LLM response text into a [`QueryPlan`] using the V2 pipeline.
