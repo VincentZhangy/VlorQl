@@ -108,13 +108,13 @@ fn profile_pipeline(label: &str, input: &str, iterations: usize) {
     // Warmup: 10 iterations.
     for _ in 0..10 {
         let mut val = initial_value.clone();
-        normalize_pipeline::normalize(&mut val);
+        let _ = normalize_pipeline::normalize(&mut val);
         let plan = query_builder::build_plan(&val).unwrap();
         let mut plan2 = plan.clone();
-        fixer::fix_plan(&mut plan2);
+        let _ = fixer::fix_plan(&mut plan2);
         let _ = validator::validate_plan(&plan2);
         let mut plan3 = plan2.clone();
-        optimize_plan(&mut plan3);
+        let _ = optimize_plan(&mut plan3);
     }
 
     // Benchmark.
@@ -127,7 +127,7 @@ fn profile_pipeline(label: &str, input: &str, iterations: usize) {
         // Stage 2: Normalize
         let start = Instant::now();
         let mut val = initial_value.clone();
-        normalize_pipeline::normalize(&mut val);
+        let _ = normalize_pipeline::normalize(&mut val);
         stages[1].record(start.elapsed().as_nanos());
 
         // Stage 3: Build
@@ -138,7 +138,7 @@ fn profile_pipeline(label: &str, input: &str, iterations: usize) {
         // Stage 4: Fix
         let start = Instant::now();
         let mut plan2 = plan.clone();
-        fixer::fix_plan(&mut plan2);
+        let _ = fixer::fix_plan(&mut plan2);
         stages[3].record(start.elapsed().as_nanos());
 
         // Stage 5: Validate
@@ -149,7 +149,7 @@ fn profile_pipeline(label: &str, input: &str, iterations: usize) {
         // Stage 6: Optimize
         let start = Instant::now();
         let mut plan3 = plan2.clone();
-        optimize_plan(&mut plan3);
+        let _ = optimize_plan(&mut plan3);
         stages[5].record(start.elapsed().as_nanos());
     }
 

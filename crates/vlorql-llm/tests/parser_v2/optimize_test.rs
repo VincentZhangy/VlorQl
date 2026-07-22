@@ -11,7 +11,7 @@ use vlorql_llm::parser_v2::recover::extract_json_content;
 fn build_plan(raw: &str) -> Result<vlorql_core::schema::QueryPlan, Box<dyn std::error::Error>> {
     let json_str = extract_json_content(raw);
     let mut value: serde_json::Value = serde_json::from_str(json_str)?;
-    pipeline::normalize(&mut value);
+    let _ = pipeline::normalize(&mut value);
     let plan = query_builder::build_plan(&value)?;
     Ok(plan)
 }

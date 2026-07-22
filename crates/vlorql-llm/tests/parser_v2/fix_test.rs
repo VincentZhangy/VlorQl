@@ -12,9 +12,9 @@ use vlorql_llm::parser_v2::validate::validator;
 fn build_and_fix(raw: &str) -> Result<vlorql_core::schema::QueryPlan, Box<dyn std::error::Error>> {
     let json_str = extract_json_content(raw);
     let mut value: serde_json::Value = serde_json::from_str(json_str)?;
-    pipeline::normalize(&mut value);
+    let _ = pipeline::normalize(&mut value);
     let mut plan = query_builder::build_plan(&value)?;
-    fixer::fix_plan(&mut plan);
+    let _ = fixer::fix_plan(&mut plan);
     Ok(plan)
 }
 
