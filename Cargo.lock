@@ -3431,6 +3431,7 @@ version = "0.2.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "bytes",
  "futures",
  "opentelemetry",
  "opentelemetry_sdk",

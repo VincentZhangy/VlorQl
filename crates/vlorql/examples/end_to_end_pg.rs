@@ -48,13 +48,13 @@
 use std::error::Error;
 use std::sync::Arc;
 
+use bytes::BufMut;
 use vlorql::{SchemaSnapshot, SqlDialect, VlorQl};
 use vlorql_core::policy::PolicyConfig;
 use vlorql_core::prompt::PromptBuilder;
-use vlorql_core::schema::{ColumnSchema, DataType, SchemaMetadata, TableSchema};
 use vlorql_core::schema::{
-    ComparisonOperator, Expression, FromClause, InTarget, JoinClause, JoinType, OrderByTerm,
-    Predicate, Projection, QueryPlan,
+    ColumnSchema, ComparisonOperator, DataType, Expression, ForeignKey, FromClause, InTarget,
+    JoinClause, JoinType, OrderByTerm, Predicate, Projection, QueryPlan, SchemaMetadata, TableSchema,
 };
 use vlorql_core::validate::ValidatedPlan;
 use vlorql_llm::{LlmClient, LlmConfig, LlmProvider, create_llm_client};
@@ -116,185 +116,86 @@ impl ServerCertVerifier for SkipVerify {
 // 1. 定义数据库 Schema
 // ============================================================================
 
+use vlorql_core::schema::{ColumnSchema, DataType, ForeignKey, SchemaMetadata, TableSchema};
+
+/// 辅助函数：创建一个普通列。
+fn col(name: &str, data_type: DataType, description: &str) -> ColumnSchema {
+    ColumnSchema {
+        name: name.to_owned(),
+        data_type,
+        nullable: false,
+        description: Some(description.to_owned()),
+        is_primary_key: false,
+        foreign_key: None,
+    }
+}
+
+/// 辅助函数：创建一个主键列（`INT` 类型）。
+fn pk(name: &str, description: &str) -> ColumnSchema {
+    ColumnSchema {
+        name: name.to_owned(),
+        data_type: DataType::Int,
+        nullable: false,
+        description: Some(description.to_owned()),
+        is_primary_key: true,
+        foreign_key: None,
+    }
+}
+
+/// 辅助函数：创建一个外键列（`INT` 类型）。
+fn fk(name: &str, foreign_table: &str, foreign_column: &str, description: &str) -> ColumnSchema {
+    ColumnSchema {
+        name: name.to_owned(),
+        data_type: DataType::Int,
+        nullable: false,
+        description: Some(description.to_owned()),
+        is_primary_key: false,
+        foreign_key: Some(ForeignKey {
+            foreign_table: foreign_table.to_owned(),
+            foreign_column: foreign_column.to_owned(),
+        }),
+    }
+}
+
+/// 辅助函数：创建一个表。
+fn table(name: &str, description: &str, columns: Vec<ColumnSchema>) -> TableSchema {
+    TableSchema {
+        name: name.to_owned(),
+        columns,
+        description: Some(description.to_owned()),
+        primary_key: Some(vec!["id".to_owned()]),
+    }
+}
+
 /// 电商数据库 Schema：users、orders、products、order_items 四张表。
 fn build_schema() -> Arc<SchemaSnapshot> {
     Arc::new(SchemaSnapshot::new(
         vec![
-            TableSchema {
-                name: "users".to_owned(),
-                columns: vec![
-                    ColumnSchema {
-                        name: "id".to_owned(),
-                        data_type: DataType::Int,
-                        nullable: false,
-                        description: Some("用户唯一标识符".to_owned()),
-                        is_primary_key: true,
-                        foreign_key: None,
-                    },
-                    ColumnSchema {
-                        name: "name".to_owned(),
-                        data_type: DataType::String,
-                        nullable: false,
-                        description: Some("用户显示名称".to_owned()),
-                        is_primary_key: false,
-                        foreign_key: None,
-                    },
-                    ColumnSchema {
-                        name: "email".to_owned(),
-                        data_type: DataType::String,
-                        nullable: false,
-                        description: Some("用户邮箱地址".to_owned()),
-                        is_primary_key: false,
-                        foreign_key: None,
-                    },
-                    ColumnSchema {
-                        name: "created_at".to_owned(),
-                        data_type: DataType::String,
-                        nullable: false,
-                        description: Some("用户注册时间 (ISO-8601)".to_owned()),
-                        is_primary_key: false,
-                        foreign_key: None,
-                    },
-                ],
-                description: Some("应用注册用户".to_owned()),
-                primary_key: Some(vec!["id".to_owned()]),
-            },
-            TableSchema {
-                name: "orders".to_owned(),
-                columns: vec![
-                    ColumnSchema {
-                        name: "id".to_owned(),
-                        data_type: DataType::Int,
-                        nullable: false,
-                        description: Some("订单唯一标识符".to_owned()),
-                        is_primary_key: true,
-                        foreign_key: None,
-                    },
-                    ColumnSchema {
-                        name: "user_id".to_owned(),
-                        data_type: DataType::Int,
-                        nullable: false,
-                        description: Some("关联到 users.id".to_owned()),
-                        is_primary_key: false,
-                        foreign_key: Some(vlorql_core::schema::ForeignKey {
-                            foreign_table: "users".to_owned(),
-                            foreign_column: "id".to_owned(),
-                        }),
-                    },
-                    ColumnSchema {
-                        name: "total".to_owned(),
-                        data_type: DataType::Float,
-                        nullable: false,
-                        description: Some("订单总金额".to_owned()),
-                        is_primary_key: false,
-                        foreign_key: None,
-                    },
-                    ColumnSchema {
-                        name: "status".to_owned(),
-                        data_type: DataType::String,
-                        nullable: false,
-                        description: Some(
-                            "订单状态: pending/shipped/completed/cancelled".to_owned(),
-                        ),
-                        is_primary_key: false,
-                        foreign_key: None,
-                    },
-                    ColumnSchema {
-                        name: "created_at".to_owned(),
-                        data_type: DataType::String,
-                        nullable: false,
-                        description: Some("下单时间 (ISO-8601)".to_owned()),
-                        is_primary_key: false,
-                        foreign_key: None,
-                    },
-                ],
-                description: Some("客户订单记录".to_owned()),
-                primary_key: Some(vec!["id".to_owned()]),
-            },
-            TableSchema {
-                name: "products".to_owned(),
-                columns: vec![
-                    ColumnSchema {
-                        name: "id".to_owned(),
-                        data_type: DataType::Int,
-                        nullable: false,
-                        description: Some("产品唯一标识符".to_owned()),
-                        is_primary_key: true,
-                        foreign_key: None,
-                    },
-                    ColumnSchema {
-                        name: "name".to_owned(),
-                        data_type: DataType::String,
-                        nullable: false,
-                        description: Some("产品名称".to_owned()),
-                        is_primary_key: false,
-                        foreign_key: None,
-                    },
-                    ColumnSchema {
-                        name: "price".to_owned(),
-                        data_type: DataType::Float,
-                        nullable: false,
-                        description: Some("产品单价".to_owned()),
-                        is_primary_key: false,
-                        foreign_key: None,
-                    },
-                ],
-                description: Some("产品目录".to_owned()),
-                primary_key: Some(vec!["id".to_owned()]),
-            },
-            TableSchema {
-                name: "order_items".to_owned(),
-                columns: vec![
-                    ColumnSchema {
-                        name: "id".to_owned(),
-                        data_type: DataType::Int,
-                        nullable: false,
-                        description: Some("明细唯一标识符".to_owned()),
-                        is_primary_key: true,
-                        foreign_key: None,
-                    },
-                    ColumnSchema {
-                        name: "order_id".to_owned(),
-                        data_type: DataType::Int,
-                        nullable: false,
-                        description: Some("关联到 orders.id".to_owned()),
-                        is_primary_key: false,
-                        foreign_key: Some(vlorql_core::schema::ForeignKey {
-                            foreign_table: "orders".to_owned(),
-                            foreign_column: "id".to_owned(),
-                        }),
-                    },
-                    ColumnSchema {
-                        name: "product_id".to_owned(),
-                        data_type: DataType::Int,
-                        nullable: false,
-                        description: Some("关联到 products.id".to_owned()),
-                        is_primary_key: false,
-                        foreign_key: Some(vlorql_core::schema::ForeignKey {
-                            foreign_table: "products".to_owned(),
-                            foreign_column: "id".to_owned(),
-                        }),
-                    },
-                    ColumnSchema {
-                        name: "quantity".to_owned(),
-                        data_type: DataType::Int,
-                        nullable: false,
-                        description: Some("购买数量".to_owned()),
-                        is_primary_key: false,
-                        foreign_key: None,
-                    },
-                    ColumnSchema {
-                        name: "unit_price".to_owned(),
-                        data_type: DataType::Float,
-                        nullable: false,
-                        description: Some("购买时单价".to_owned()),
-                        is_primary_key: false,
-                        foreign_key: None,
-                    },
-                ],
-                description: Some("订单中的商品明细".to_owned()),
-                primary_key: Some(vec!["id".to_owned()]),
-            },
+            table("users", "应用注册用户", vec![
+                pk("id", "用户唯一标识符"),
+                col("name", DataType::String, "用户显示名称"),
+                col("email", DataType::String, "用户邮箱地址"),
+                col("created_at", DataType::String, "用户注册时间 (ISO-8601)"),
+            ]),
+            table("orders", "客户订单记录", vec![
+                pk("id", "订单唯一标识符"),
+                fk("user_id", "users", "id", "关联到 users.id"),
+                col("total", DataType::Float, "订单总金额"),
+                col("status", DataType::String, "订单状态: pending/shipped/completed/cancelled"),
+                col("created_at", DataType::String, "下单时间 (ISO-8601)"),
+            ]),
+            table("products", "产品目录", vec![
+                pk("id", "产品唯一标识符"),
+                col("name", DataType::String, "产品名称"),
+                col("price", DataType::Float, "产品单价"),
+            ]),
+            table("order_items", "订单中的商品明细", vec![
+                pk("id", "明细唯一标识符"),
+                fk("order_id", "orders", "id", "关联到 orders.id"),
+                fk("product_id", "products", "id", "关联到 products.id"),
+                col("quantity", DataType::Int, "购买数量"),
+                col("unit_price", DataType::Float, "购买时单价"),
+            ]),
         ],
         SchemaMetadata {
             version: Some("1.0".to_owned()),
@@ -711,6 +612,138 @@ fn build_aggregate_plan() -> QueryPlan {
 // 5. 在 PostgreSQL 上执行（可选）
 // ============================================================================
 
+/// A wrapper that lets an `i64` value be serialized across PostgreSQL
+/// integer types (`INT2`, `INT4`, `INT8`) and gracefully falls back to
+/// `TEXT`.
+///
+/// PostgreSQL's extended-query protocol infers parameter types during
+/// Parse.  In ambiguous positions (e.g. `ORDER BY $1` when `$1` holds a
+/// bare literal, not a column reference) the server defaults to `TEXT`.
+/// Without the TEXT fallback tokio-postgres raises
+/// "error serializing parameter".  This wrapper handles all four.
+///
+/// Macro to generate a thin wrapper type implementing `ToSql` for multiple PG types.
+macro_rules! make_pg_num {
+    ($name:ident, $inner:ty, |$val:ident, $ty:ident| $to_sql_body:expr,
+     $( $accept:ident )|+, $label:expr) => {
+        #[derive(Debug)]
+        struct $name($inner);
+
+        impl tokio_postgres::types::ToSql for $name {
+            fn to_sql(
+                &self,
+                $ty: &tokio_postgres::types::Type,
+                out: &mut bytes::BytesMut,
+            ) -> Result<tokio_postgres::types::IsNull, Box<dyn std::error::Error + Sync + Send>> {
+                use tokio_postgres::types::IsNull;
+                let $val = self.0;
+                $to_sql_body
+                Ok(IsNull::No)
+            }
+
+            fn accepts(ty: &tokio_postgres::types::Type) -> bool {
+                matches!(ty, $( tokio_postgres::types::Type::$accept )|+)
+            }
+
+            fn to_sql_checked(
+                &self,
+                ty: &tokio_postgres::types::Type,
+                out: &mut bytes::BytesMut,
+            ) -> Result<tokio_postgres::types::IsNull, Box<dyn std::error::Error + Sync + Send>> {
+                if !Self::accepts(ty) {
+                    return Err(Box::new(std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        format!("{} does not accept type {}", $label, ty),
+                    )));
+                }
+                self.to_sql(ty, out)
+            }
+        }
+    };
+}
+
+make_pg_num!(PgInt, i64, |val, ty| {
+    if *ty == tokio_postgres::types::Type::INT2 {
+        out.put_i16(val as i16);
+    } else if *ty == tokio_postgres::types::Type::INT4 {
+        out.put_i32(val as i32);
+    } else {
+        out.extend_from_slice(val.to_string().as_bytes());
+    }
+}, INT2 | INT4 | INT8, "PgInt");
+
+make_pg_num!(PgFloat, f64, |val, ty| {
+    if *ty == tokio_postgres::types::Type::FLOAT4 {
+        out.put_f32(val as f32);
+    } else {
+        out.put_f64(val);
+    }
+}, FLOAT4 | FLOAT8, "PgFloat");
+
+/// Convert a `Parameter` to a boxed `ToSql` value for tokio-postgres.
+fn to_pg_param(p: &vlorql::Parameter) -> Box<dyn tokio_postgres::types::ToSql + Sync> {
+    match &p.value {
+        serde_json::Value::Number(n) => match p.data_type {
+            DataType::Float => Box::new(PgFloat(n.as_f64().unwrap_or(0.0))),
+            DataType::Int => Box::new(PgInt(n.as_i64().unwrap_or(0))),
+            _ => {
+                if let Some(f) = n.as_f64() {
+                    Box::new(PgFloat(f))
+                } else {
+                    Box::new(PgInt(n.as_i64().unwrap_or(0)))
+                }
+            }
+        },
+        serde_json::Value::String(s) => Box::new(s.clone()),
+        serde_json::Value::Bool(b) => Box::new(*b),
+        _ => Box::new(String::new()),
+    }
+}
+
+/// Print query results in a simple table format.
+fn print_results(qidx: usize, rows: &[tokio_postgres::Row]) {
+    println!("\n========== 查询 {} 结果 ==========", qidx + 1);
+    println!("返回 {} 行数据:", rows.len());
+    println!();
+
+    if rows.is_empty() {
+        return;
+    }
+
+    let columns = rows[0].columns();
+    let col_names: Vec<&str> = columns.iter().map(|c| c.name()).collect();
+    println!("  │ {} │", col_names.join(" │ "));
+    println!(
+        "  ├{}┤",
+        col_names
+            .iter()
+            .map(|_| "───────")
+            .collect::<Vec<_>>()
+            .join("─┼─")
+    );
+
+    for row in rows {
+        let values: Vec<String> = (0..row.len())
+            .map(|i| {
+                // Try types in order of specificity: i32 → i64 → f64 → String → "NULL"
+                if let Ok(v) = row.try_get::<_, i32>(i) {
+                    v.to_string()
+                } else if let Ok(v) = row.try_get::<_, i64>(i) {
+                    v.to_string()
+                } else if let Ok(v) = row.try_get::<_, f64>(i) {
+                    v.to_string()
+                } else if let Ok(v) = row.try_get::<_, String>(i) {
+                    v
+                } else {
+                    "NULL".to_string()
+                }
+            })
+            .collect();
+        println!("  │ {} │", values.join(" │ "));
+    }
+    println!("===============================");
+}
+
 async fn execute_on_postgres(queries: &[vlorql::CompiledQuery]) -> Result<(), Box<dyn Error>> {
     let database_url = match std::env::var("DATABASE_URL") {
         Ok(url) => url,
@@ -832,98 +865,14 @@ async fn execute_on_postgres(queries: &[vlorql::CompiledQuery]) -> Result<(), Bo
         let param_values: Vec<Box<dyn tokio_postgres::types::ToSql + Sync>> = compiled
             .parameters
             .iter()
-            .map(|p| {
-                let val: Box<dyn tokio_postgres::types::ToSql + Sync> = match &p.value {
-                    serde_json::Value::Number(n) => {
-                        // 根据参数声明的类型决定转换
-                        match p.data_type {
-                            DataType::Float => {
-                                if let Some(f) = n.as_f64() {
-                                    Box::new(f) as Box<dyn tokio_postgres::types::ToSql + Sync>
-                                } else {
-                                    Box::new(0.0) as Box<dyn tokio_postgres::types::ToSql + Sync>
-                                }
-                            }
-                            DataType::Int => {
-                                if let Some(i) = n.as_i64() {
-                                    if let Ok(i32_val) = i32::try_from(i) {
-                                        Box::new(i32_val) as Box<dyn tokio_postgres::types::ToSql + Sync>
-                                    } else {
-                                        Box::new(i) as Box<dyn tokio_postgres::types::ToSql + Sync>
-                                    }
-                                } else {
-                                    // 如果整数超出 i64 范围，回退
-                                    Box::new(0i64) as Box<dyn tokio_postgres::types::ToSql + Sync>
-                                }
-                            }
-                            _ => {
-                                // 未知类型，尝试 f64
-                                if let Some(f) = n.as_f64() {
-                                    Box::new(f) as Box<dyn tokio_postgres::types::ToSql + Sync>
-                                } else if let Some(i) = n.as_i64() {
-                                    Box::new(i) as Box<dyn tokio_postgres::types::ToSql + Sync>
-                                } else {
-                                    Box::new(0i64) as Box<dyn tokio_postgres::types::ToSql + Sync>
-                                }
-                            }
-                        }
-                    }
-                    serde_json::Value::String(s) => {
-                        Box::new(s.clone()) as Box<dyn tokio_postgres::types::ToSql + Sync>
-                    }
-                    serde_json::Value::Bool(b) => {
-                        Box::new(*b) as Box<dyn tokio_postgres::types::ToSql + Sync>
-                    }
-                    _ => Box::new(String::new()) as Box<dyn tokio_postgres::types::ToSql + Sync>,
-                };
-                val
-            })
+            .map(|p| to_pg_param(p))
             .collect::<Vec<_>>();
 
         let params: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> =
             param_values.iter().map(|v| v.as_ref()).collect();
 
         match client.query(&compiled.sql, &params).await {
-            Ok(rows) => {
-                println!("\n========== 查询 {} 结果 ==========", qidx + 1);
-                println!("返回 {} 行数据:", rows.len());
-                println!();
-
-                if !rows.is_empty() {
-                    let columns = rows[0].columns();
-                    let col_names: Vec<&str> = columns.iter().map(|c| c.name()).collect();
-                    println!("  │ {} │", col_names.join(" │ "));
-                    println!(
-                        "  ├{}┤",
-                        col_names
-                            .iter()
-                            .map(|_| "───────")
-                            .collect::<Vec<_>>()
-                            .join("─┼─")
-                    );
-                }
-
-                for row in &rows {
-                    let values: Vec<String> = (0..row.len())
-                        .map(|i| {
-                            // 按顺序尝试：i32 -> i64 -> f64 -> String -> 最后回退到 "NULL"
-                            if let Ok(v) = row.try_get::<_, i32>(i) {
-                                v.to_string()
-                            } else if let Ok(v) = row.try_get::<_, i64>(i) {
-                                v.to_string()
-                            } else if let Ok(v) = row.try_get::<_, f64>(i) {
-                                v.to_string()
-                            } else if let Ok(v) = row.try_get::<_, String>(i) {
-                                v
-                            } else {
-                                "NULL".to_string()
-                            }
-                        })
-                        .collect();
-                    println!("  │ {} │", values.join(" │ "));
-                }
-                println!("===============================");
-            }
+            Ok(rows) => print_results(qidx, &rows),
             Err(e) => {
                 eprintln!("[ERROR] 查询 {} 执行失败: {}", qidx + 1, e);
             }
