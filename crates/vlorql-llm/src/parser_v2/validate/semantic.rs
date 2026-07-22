@@ -4,18 +4,11 @@
 //! it is passed to the SQL compiler.  This layer does **no** repair —
 //! it only reports errors.
 
-use std::sync::LazyLock;
-
 use vlorql_core::schema::{
     Expression, InTarget, JoinClause, JoinType, Predicate, Projection, QueryPlan,
 };
 
 use super::validator::{ValidationError, ValidationErrorKind};
-
-/// Names of aggregate functions that produce meaningful GROUP BY results.
-static AGGREGATE_NAMES: LazyLock<Vec<&'static str>> = LazyLock::new(|| {
-    vec!["sum", "count", "avg", "min", "max", "string_agg", "array_agg"]
-});
 
 /// Returns `true` when `select` contains at least one aggregate function
 /// call, making a `GROUP BY` meaningful.
@@ -30,7 +23,7 @@ fn has_aggregate_in_select(select: &[Projection]) -> bool {
 fn is_aggregate_expr(expr: &Expression) -> bool {
     match expr {
         Expression::FunctionCall { name, .. } => {
-            AGGREGATE_NAMES.iter().any(|a| name.eq_ignore_ascii_case(a))
+            vlorql_core::function::is_aggregate(name)
         }
         Expression::BinaryOp { left, right, .. } => {
             is_aggregate_expr(left) || is_aggregate_expr(right)

@@ -167,10 +167,9 @@ fn infer_numeric_aggregate(column: &str) -> Option<(&'static str, &str)> {
 
 /// Returns `true` when `expr` is (or contains) an aggregate function call.
 fn is_aggregate_expr(expr: &Expression) -> bool {
-    const AGGREGATES: &[&str] = &["sum", "count", "avg", "min", "max", "string_agg", "array_agg"];
     match expr {
         Expression::FunctionCall { name, .. } => {
-            AGGREGATES.iter().any(|a| name.eq_ignore_ascii_case(a))
+            vlorql_core::function::is_aggregate(name)
         }
         Expression::BinaryOp { left, right, .. } => {
             is_aggregate_expr(left) || is_aggregate_expr(right)
