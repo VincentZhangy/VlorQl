@@ -375,8 +375,7 @@ impl PromptBuilder {
              2. \"never / not / without / anti-join\" questions: MUST use LEFT JOIN + `is_null` on the right key. NEVER use `NOT EXISTS`.\n\
              3. Every table in `select` / `where` must be in `from` or `joins`. Never reference an unjoined table.\n\
              4. `limit` / `order_by` / `offset` only at top level, never inside `where` or subqueries.\n\
-             5. With GROUP BY, every column in SELECT must either appear in GROUP BY or be wrapped in an aggregate function (SUM, COUNT, AVG, MIN, MAX). Never use SELECT * with GROUP BY.\n\
-             6. Output valid JSON: keys unescaped (`\"where\":` not `\"where\\\":`). No backslash-escaped quotes, no fences.\n\
+             5. Output valid JSON: keys unescaped (`\"where\":` not `\"where\\\":`). No backslash-escaped quotes, no fences.\n\
              \n",
         );
     }
@@ -476,12 +475,6 @@ impl PromptBuilder {
                 prompt,
                  "Q: Users with no orders (NOT EXISTS form)\n\
                   A: {{\"select\":[{{\"type\":\"column_ref\",\"table\":\"users\",\"column\":\"id\",\"alias\":null}}],\"from\":{{\"table\":\"users\",\"alias\":null}},\"where\":{{\"type\":\"not\",\"child\":{{\"type\":\"exists\",\"query\":{{\"select\":[{{\"type\":\"star\"}}],\"from\":{{\"table\":\"orders\",\"alias\":null}},\"where\":{{\"type\":\"comparison\",\"left\":{{\"type\":\"column_ref\",\"column\":\"user_id\",\"table\":\"orders\"}},\"op\":\"eq\",\"right\":{{\"type\":\"column_ref\",\"column\":\"id\",\"table\":\"users\"}}}}}}}}}},\"limit\":10}}\n"
-            );
-            // GROUP BY example.
-            let _ = writeln!(
-                prompt,
-                 "Q: Count of orders per status\n\
-                  A: {{\"select\":[{{\"type\":\"column_ref\",\"table\":\"orders\",\"column\":\"status\",\"alias\":null}},{{\"type\":\"expr\",\"expression\":{{\"type\":\"function_call\",\"name\":\"COUNT\",\"args\":[{{\"type\":\"star\"}}],\"distinct\":false}},\"alias\":\"order_count\"}}],\"from\":{{\"table\":\"orders\",\"alias\":null}},\"group_by\":[{{\"type\":\"column_ref\",\"column\":\"status\",\"table\":\"orders\"}}]}}\n"
             );
         }
         let _ = writeln!(
