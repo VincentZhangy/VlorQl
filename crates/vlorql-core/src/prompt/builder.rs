@@ -373,7 +373,7 @@ impl PromptBuilder {
             "## Planning Rules\n\
              1. Prefer the simplest plan. Fewer joins, shallower nesting.\n\
              2. \"never / not / without / anti-join\" questions: MUST use LEFT JOIN + `is_null` on the right key. NEVER use `NOT EXISTS`.\n\
-             3. Correlate by table name / alias; never re-join the outer table inside a subquery.\n\
+             3. Every table in `select` / `where` must be in `from` or `joins`. Never reference an unjoined table.\n\
              4. `limit` / `order_by` / `offset` only at top level, never inside `where` or subqueries.\n\
              5. Output valid JSON: keys unescaped (`\"where\":` not `\"where\\\":`). No backslash-escaped quotes, no fences.\n\
              \n",
