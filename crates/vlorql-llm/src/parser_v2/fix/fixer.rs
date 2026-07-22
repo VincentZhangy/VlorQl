@@ -13,7 +13,7 @@
 //! does nothing and lets the validator report the issue.
 
 use vlorql_core::schema::{
-    JoinClause, Projection, QueryPlan,
+    Expression, JoinClause, Projection, QueryPlan,
 };
 
 /// Run all auto-fix rules on a [`QueryPlan`] recursively
@@ -25,6 +25,7 @@ pub fn fix_plan(plan: &mut QueryPlan) -> bool {
     let mut changed = false;
     changed |= fix_limit_zero(plan);
     changed |= fix_empty_select(plan);
+    changed |= fix_star_with_group_by(plan);
     // fix_missing_aliases must run last because it adds new aliases.
     changed |= fix_missing_aliases(plan);
     // Recursively fix CTE subqueries.
@@ -64,6 +65,41 @@ fn fix_empty_select(plan: &mut QueryPlan) -> bool {
     } else {
         false
     }
+}
+
+/// When `SELECT *` is used with `GROUP BY`, replace `*` with the group-by
+/// columns as explicit projections.  `SELECT *` with `GROUP BY` is invalid
+/// SQL; converting to explicit columns makes the plan valid (the LLM can
+/// add aggregates on retry if needed).
+fn fix_star_with_group_by(plan: &mut QueryPlan) -> bool {
+    let group_by = match &plan.group_by {
+        Some(g) if !g.is_empty() => g,
+        _ => return false,
+    };
+    if !plan.select.iter().any(|p| matches!(p, Projection::Star { .. })) {
+        return false;
+    }
+
+    let mut new_select: Vec<Projection> = Vec::with_capacity(group_by.len());
+    for expr in group_by {
+        match expr {
+            Expression::ColumnRef { table, column } => {
+                new_select.push(Projection::Column {
+                    table: table.clone(),
+                    column: column.clone(),
+                    alias: Some(column.clone()),
+                });
+            }
+            other => {
+                new_select.push(Projection::Expr {
+                    expression: other.clone(),
+                    alias: None,
+                });
+            }
+        }
+    }
+    plan.select = new_select;
+    true
 }
 
 /// Auto-generate missing aliases for tables in FROM and JOIN clauses.

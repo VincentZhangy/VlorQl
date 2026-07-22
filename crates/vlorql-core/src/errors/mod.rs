@@ -236,6 +236,7 @@ impl VlorQLError {
                     | ValidationErrorKind::InvalidColumn { .. }
                     | ValidationErrorKind::InvalidFunction { .. }
                     | ValidationErrorKind::TypeMismatch { .. }
+                    | ValidationErrorKind::AggregationMismatch { .. }
             ),
             Self::Schema { kind, .. } => matches!(
                 kind,

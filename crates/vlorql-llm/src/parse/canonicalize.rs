@@ -462,6 +462,43 @@ fn repair_query_plan_object(obj: &mut serde_json::Map<String, serde_json::Value>
         }
     }
 
+    // --- 9.5. Expand `SELECT *` to GROUP BY columns when GROUP BY is present ---
+    //     Small LLMs often emit `{"select":[{"type":"star"}], "group_by":[...]}`
+    //     which is invalid SQL (SELECT * with GROUP BY).  Replace each `*` with
+    //     the GROUP BY column references so the plan compiles to valid SQL.
+    let gb_columns: Vec<serde_json::Value> = obj
+        .get("group_by")
+        .and_then(|v| v.as_array())
+        .filter(|v| !v.is_empty())
+        .map(|arr| arr.iter().filter_map(expand_group_by_expr).collect())
+        .unwrap_or_default();
+    if !gb_columns.is_empty() {
+        if let Some(select) = obj.get_mut("select").and_then(|v| v.as_array_mut()) {
+            let has_star = select.iter().any(|v| {
+                v.as_object()
+                    .and_then(|o| o.get("type"))
+                    .and_then(|t| t.as_str())
+                    .is_some_and(|t| t == "star")
+            });
+            if has_star {
+                let mut new_select: Vec<serde_json::Value> = Vec::new();
+                for item in select.drain(..) {
+                    let is_star = item.as_object()
+                        .and_then(|o| o.get("type"))
+                        .and_then(|t| t.as_str())
+                        .is_some_and(|t| t == "star");
+                    if is_star {
+                        new_select.extend(gb_columns.clone());
+                    } else {
+                        new_select.push(item);
+                    }
+                }
+                *select = new_select;
+                changed = true;
+            }
+        }
+    }
+
     // --- 10. (removed) Auto-join inference was too speculative; pushing to
     //          validator / retry layer in future iterations.
 
@@ -473,6 +510,30 @@ fn repair_query_plan_object(obj: &mut serde_json::Map<String, serde_json::Value>
     }
 
     changed
+}
+
+/// Converts a GROUP BY `Expression` into a SELECT `Projection` (column_ref).
+///
+/// Only `column_ref` expressions can be safely expanded — other expression types
+/// (literals, function calls) are skipped so the plan keeps the star and fails
+/// validation (which produces a clearer error).
+fn expand_group_by_expr(expr: &serde_json::Value) -> Option<serde_json::Value> {
+    let obj = expr.as_object()?;
+    if obj.get("type")?.as_str()? != "column_ref" {
+        return None;
+    }
+    let mut proj = serde_json::Map::new();
+    proj.insert("type".to_owned(), serde_json::Value::String("column_ref".to_owned()));
+    proj.insert(
+        "table".to_owned(),
+        obj.get("table").cloned().unwrap_or(serde_json::Value::Null),
+    );
+    proj.insert(
+        "column".to_owned(),
+        obj.get("column").cloned().unwrap_or(serde_json::Value::Null),
+    );
+    proj.insert("alias".to_owned(), serde_json::Value::Null);
+    Some(serde_json::Value::Object(proj))
 }
 
 /// Normalizes common LLM data_type aliases to the canonical serde form.
