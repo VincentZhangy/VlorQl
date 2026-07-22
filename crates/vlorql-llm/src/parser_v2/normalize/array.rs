@@ -9,10 +9,7 @@
 /// If the field is a single object, it is wrapped in an array.
 /// Returns `true` if any change was made.
 #[must_use]
-pub fn ensure_array_field(
-    val: &mut serde_json::Value,
-    field: &str,
-) -> bool {
+pub fn ensure_array_field(val: &mut serde_json::Value, field: &str) -> bool {
     let Some(obj) = val.as_object_mut() else {
         return false;
     };
@@ -41,10 +38,7 @@ pub fn ensure_array_field(
 
 /// Ensures multiple fields are always arrays.
 #[must_use]
-pub fn ensure_array_fields(
-    val: &mut serde_json::Value,
-    fields: &[&str],
-) -> bool {
+pub fn ensure_array_fields(val: &mut serde_json::Value, fields: &[&str]) -> bool {
     let mut changed = false;
     for field in fields {
         changed |= ensure_array_field(val, field);
@@ -55,10 +49,7 @@ pub fn ensure_array_fields(
 /// Removes null entries from an array field.
 /// Returns `true` if any entry was removed.
 #[must_use]
-pub fn remove_nulls(
-    val: &mut serde_json::Value,
-    field: &str,
-) -> bool {
+pub fn remove_nulls(val: &mut serde_json::Value, field: &str) -> bool {
     let Some(obj) = val.as_object_mut() else {
         return false;
     };
@@ -79,10 +70,7 @@ pub fn remove_nulls(
 /// Removes empty array fields (sets them to None).
 /// Returns `true` if any field was removed.
 #[must_use]
-pub fn remove_empty_arrays(
-    val: &mut serde_json::Value,
-    fields: &[&str],
-) -> bool {
+pub fn remove_empty_arrays(val: &mut serde_json::Value, fields: &[&str]) -> bool {
     let Some(obj) = val.as_object_mut() else {
         return false;
     };
@@ -103,10 +91,7 @@ pub fn remove_empty_arrays(
 ///
 /// Returns `true` if any field was flattened.
 #[must_use]
-pub fn flatten_array_wrapper(
-    val: &mut serde_json::Value,
-    field: &str,
-) -> bool {
+pub fn flatten_array_wrapper(val: &mut serde_json::Value, field: &str) -> bool {
     let Some(obj) = val.as_object_mut() else {
         return false;
     };
@@ -205,14 +190,19 @@ mod tests {
 
     #[test]
     fn remove_nulls_removes_empty_field() {
-        let mut val = json!({"select": [{"type": "star"}], "from": {"table": "users"}, "group_by": [null]});
+        let mut val =
+            json!({"select": [{"type": "star"}], "from": {"table": "users"}, "group_by": [null]});
         assert!(remove_nulls(&mut val, "group_by"));
-        assert!(val.get("group_by").is_none(), "empty group_by should be removed");
+        assert!(
+            val.get("group_by").is_none(),
+            "empty group_by should be removed"
+        );
     }
 
     #[test]
     fn remove_empty_arrays_removes_empty() {
-        let mut val = json!({"select": [{"type": "star"}], "from": {"table": "users"}, "group_by": []});
+        let mut val =
+            json!({"select": [{"type": "star"}], "from": {"table": "users"}, "group_by": []});
         assert!(remove_empty_arrays(&mut val, &["group_by"]));
         assert!(val.get("group_by").is_none());
     }
@@ -223,7 +213,10 @@ mod tests {
         assert!(flatten_array_wrapper(&mut val, "group_by"));
         let arr = val.get("group_by").unwrap().as_array().unwrap();
         assert_eq!(arr.len(), 1);
-        assert_eq!(arr[0].get("column").and_then(|v| v.as_str()), Some("status"));
+        assert_eq!(
+            arr[0].get("column").and_then(|v| v.as_str()),
+            Some("status")
+        );
     }
 
     #[test]

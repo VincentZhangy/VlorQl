@@ -95,7 +95,10 @@ fn normalize_impl(val: &mut Value) -> bool {
 /// Returns `true` when `dt` is already a canonical data type name.
 #[must_use]
 pub fn is_canonical(dt: &str) -> bool {
-    matches!(dt, "int" | "string" | "float" | "boolean" | "timestamp" | "null" | "json" | "uuid" | "blob")
+    matches!(
+        dt,
+        "int" | "string" | "float" | "boolean" | "timestamp" | "null" | "json" | "uuid" | "blob"
+    )
 }
 
 #[cfg(test)]
@@ -114,7 +117,10 @@ mod tests {
     fn normalizes_varchar_to_string() {
         let mut val = json!({"type": "literal", "value": "hello", "data_type": "varchar"});
         assert!(normalize(&mut val));
-        assert_eq!(val.get("data_type").and_then(|v| v.as_str()), Some("string"));
+        assert_eq!(
+            val.get("data_type").and_then(|v| v.as_str()),
+            Some("string")
+        );
     }
 
     #[test]
@@ -135,14 +141,20 @@ mod tests {
     fn normalizes_bool_to_boolean() {
         let mut val = json!({"type": "literal", "value": true, "data_type": "bool"});
         assert!(normalize(&mut val));
-        assert_eq!(val.get("data_type").and_then(|v| v.as_str()), Some("boolean"));
+        assert_eq!(
+            val.get("data_type").and_then(|v| v.as_str()),
+            Some("boolean")
+        );
     }
 
     #[test]
     fn normalizes_datetime_to_timestamp() {
         let mut val = json!({"type": "literal", "value": "2024-01-01", "data_type": "datetime"});
         assert!(normalize(&mut val));
-        assert_eq!(val.get("data_type").and_then(|v| v.as_str()), Some("timestamp"));
+        assert_eq!(
+            val.get("data_type").and_then(|v| v.as_str()),
+            Some("timestamp")
+        );
     }
 
     #[test]
@@ -198,7 +210,13 @@ mod tests {
             {"type": "literal", "value": "hello", "data_type": "varchar"}
         ]);
         assert!(normalize(&mut val));
-        assert_eq!(val[0].get("data_type").and_then(|v| v.as_str()), Some("int"));
-        assert_eq!(val[1].get("data_type").and_then(|v| v.as_str()), Some("string"));
+        assert_eq!(
+            val[0].get("data_type").and_then(|v| v.as_str()),
+            Some("int")
+        );
+        assert_eq!(
+            val[1].get("data_type").and_then(|v| v.as_str()),
+            Some("string")
+        );
     }
 }

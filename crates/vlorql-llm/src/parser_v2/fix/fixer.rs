@@ -12,9 +12,7 @@
 //! that the validator can focus on real errors.  When in doubt, it
 //! does nothing and lets the validator report the issue.
 
-use vlorql_core::schema::{
-    Expression, JoinClause, Projection, QueryPlan,
-};
+use vlorql_core::schema::{Expression, JoinClause, Projection, QueryPlan};
 
 /// Run all auto-fix rules on a [`QueryPlan`] recursively
 /// (including CTE subqueries).
@@ -96,12 +94,14 @@ fn fix_missing_aggregate(plan: &mut QueryPlan) -> bool {
 
     // Collect GROUP BY column names (table.column or bare column).
     let group_cols: Vec<(&str, &str)> = plan.group_by.as_ref().map_or_else(Vec::new, |g| {
-        g.iter().filter_map(|e| match e {
-            Expression::ColumnRef { table, column } => {
-                Some((table.as_deref().unwrap_or(""), column.as_str()))
-            }
-            _ => None,
-        }).collect()
+        g.iter()
+            .filter_map(|e| match e {
+                Expression::ColumnRef { table, column } => {
+                    Some((table.as_deref().unwrap_or(""), column.as_str()))
+                }
+                _ => None,
+            })
+            .collect()
     });
 
     // Find the first non-grouped column with a numeric-suggesting name.
@@ -121,28 +121,34 @@ fn fix_missing_aggregate(plan: &mut QueryPlan) -> bool {
     match agg {
         Some((name, col)) => {
             // Prepend SUM(col) as the first projection.
-            plan.select.insert(0, Projection::Expr {
-                expression: Expression::FunctionCall {
-                    name: name.to_owned(),
-                    args: vec![Expression::ColumnRef {
-                        table: None,
-                        column: col.to_owned(),
-                    }],
-                    distinct: false,
+            plan.select.insert(
+                0,
+                Projection::Expr {
+                    expression: Expression::FunctionCall {
+                        name: name.to_owned(),
+                        args: vec![Expression::ColumnRef {
+                            table: None,
+                            column: col.to_owned(),
+                        }],
+                        distinct: false,
+                    },
+                    alias: Some(format!("{}_{}", name, col)),
                 },
-                alias: Some(format!("{}_{}", name, col)),
-            });
+            );
         }
         None => {
             // Fallback: COUNT(*) as the first projection.
-            plan.select.insert(0, Projection::Expr {
-                expression: Expression::FunctionCall {
-                    name: "count".to_owned(),
-                    args: vec![Expression::Star],
-                    distinct: false,
+            plan.select.insert(
+                0,
+                Projection::Expr {
+                    expression: Expression::FunctionCall {
+                        name: "count".to_owned(),
+                        args: vec![Expression::Star],
+                        distinct: false,
+                    },
+                    alias: Some("count".to_owned()),
                 },
-                alias: Some("count".to_owned()),
-            });
+            );
         }
     }
     true
@@ -150,8 +156,8 @@ fn fix_missing_aggregate(plan: &mut QueryPlan) -> bool {
 
 /// Column names that suggest a SUM aggregate is appropriate.
 const SUM_COLUMNS: &[&str] = &[
-    "price", "total", "amount", "quantity", "cost", "revenue", "salary",
-    "budget", "fee", "rate", "score", "value", "count",
+    "price", "total", "amount", "quantity", "cost", "revenue", "salary", "budget", "fee", "rate",
+    "score", "value", "count",
 ];
 
 /// If `column` has a numeric-suggesting name, return `("sum", column)`.
@@ -168,9 +174,7 @@ fn infer_numeric_aggregate(column: &str) -> Option<(&'static str, &str)> {
 /// Returns `true` when `expr` is (or contains) an aggregate function call.
 fn is_aggregate_expr(expr: &Expression) -> bool {
     match expr {
-        Expression::FunctionCall { name, .. } => {
-            vlorql_core::function::is_aggregate(name)
-        }
+        Expression::FunctionCall { name, .. } => vlorql_core::function::is_aggregate(name),
         Expression::BinaryOp { left, right, .. } => {
             is_aggregate_expr(left) || is_aggregate_expr(right)
         }
@@ -198,13 +202,17 @@ fn fix_missing_group_by(plan: &mut QueryPlan) -> bool {
     if !has_agg {
         return false;
     }
-    let bare_cols: Vec<Expression> = plan.select.iter().filter_map(|p| match p {
-        Projection::Column { table, column, .. } => Some(Expression::ColumnRef {
-            table: table.clone(),
-            column: column.clone(),
-        }),
-        _ => None,
-    }).collect();
+    let bare_cols: Vec<Expression> = plan
+        .select
+        .iter()
+        .filter_map(|p| match p {
+            Projection::Column { table, column, .. } => Some(Expression::ColumnRef {
+                table: table.clone(),
+                column: column.clone(),
+            }),
+            _ => None,
+        })
+        .collect();
     if bare_cols.is_empty() {
         return false;
     }
@@ -278,11 +286,7 @@ fn generate_alias(counter: &mut u32, used: &mut Vec<String>) -> String {
 }
 
 /// Fix missing alias on FROM clause.
-fn fix_from_alias(
-    plan: &mut QueryPlan,
-    counter: &mut u32,
-    used: &mut Vec<String>,
-) -> bool {
+fn fix_from_alias(plan: &mut QueryPlan, counter: &mut u32, used: &mut Vec<String>) -> bool {
     if plan.from.alias.is_none() {
         let alias = generate_alias(counter, used);
         plan.from.alias = Some(alias);
@@ -293,11 +297,7 @@ fn fix_from_alias(
 }
 
 /// Fix missing alias on a JOIN clause's right_table.
-fn fix_join_alias(
-    join: &mut JoinClause,
-    counter: &mut u32,
-    used: &mut Vec<String>,
-) -> bool {
+fn fix_join_alias(join: &mut JoinClause, counter: &mut u32, used: &mut Vec<String>) -> bool {
     if join.right_table.alias.is_none() {
         let alias = generate_alias(counter, used);
         join.right_table.alias = Some(alias);
@@ -323,7 +323,10 @@ mod tests {
     fn base_plan() -> QueryPlan {
         QueryPlan {
             select: vec![Projection::Star { table: None }],
-            from: FromClause { table: "users".to_owned(), alias: None },
+            from: FromClause {
+                table: "users".to_owned(),
+                alias: None,
+            },
             r#where: None,
             group_by: None,
             having: None,
@@ -390,23 +393,24 @@ mod tests {
     #[test]
     fn adds_alias_to_join() {
         let mut plan = base_plan();
-        plan.joins = Some(vec![
-            JoinClause {
-                join_type: JoinType::Inner,
-                right_table: FromClause { table: "orders".to_owned(), alias: None },
-                on: Predicate::Comparison {
-                    left: Expression::ColumnRef {
-                        table: None,
-                        column: "user_id".to_owned(),
-                    },
-                    op: ComparisonOperator::Eq,
-                    right: Expression::ColumnRef {
-                        table: None,
-                        column: "id".to_owned(),
-                    },
+        plan.joins = Some(vec![JoinClause {
+            join_type: JoinType::Inner,
+            right_table: FromClause {
+                table: "orders".to_owned(),
+                alias: None,
+            },
+            on: Predicate::Comparison {
+                left: Expression::ColumnRef {
+                    table: None,
+                    column: "user_id".to_owned(),
+                },
+                op: ComparisonOperator::Eq,
+                right: Expression::ColumnRef {
+                    table: None,
+                    column: "id".to_owned(),
                 },
             },
-        ]);
+        }]);
         assert!(fix_missing_aliases(&mut plan));
         assert_eq!(plan.from.alias, Some("t1".to_owned()));
         let join = &plan.joins.unwrap()[0];
@@ -425,23 +429,24 @@ mod tests {
     fn generates_unique_aliases() {
         let mut plan = base_plan();
         plan.from.alias = Some("t1".to_owned());
-        plan.joins = Some(vec![
-            JoinClause {
-                join_type: JoinType::Inner,
-                right_table: FromClause { table: "orders".to_owned(), alias: None },
-                on: Predicate::Comparison {
-                    left: Expression::ColumnRef {
-                        table: None,
-                        column: "user_id".to_owned(),
-                    },
-                    op: ComparisonOperator::Eq,
-                    right: Expression::ColumnRef {
-                        table: None,
-                        column: "id".to_owned(),
-                    },
+        plan.joins = Some(vec![JoinClause {
+            join_type: JoinType::Inner,
+            right_table: FromClause {
+                table: "orders".to_owned(),
+                alias: None,
+            },
+            on: Predicate::Comparison {
+                left: Expression::ColumnRef {
+                    table: None,
+                    column: "user_id".to_owned(),
+                },
+                op: ComparisonOperator::Eq,
+                right: Expression::ColumnRef {
+                    table: None,
+                    column: "id".to_owned(),
                 },
             },
-        ]);
+        }]);
         assert!(fix_missing_aliases(&mut plan));
         // "t1" is already used, so the join should get "t2"
         let join = &plan.joins.unwrap()[0];
@@ -484,23 +489,24 @@ mod tests {
     #[test]
     fn fixes_cte_subquery() {
         let mut plan = base_plan();
-        plan.ctes = Some(vec![
-            CommonTableExpression {
-                name: "active".to_owned(),
-                query: Box::new(QueryPlan {
-                    select: vec![Projection::Star { table: None }],
-                    from: FromClause { table: "users".to_owned(), alias: None },
-                    r#where: None,
-                    group_by: None,
-                    having: None,
-                    order_by: None,
-                    limit: Some(0),
-                    offset: None,
-                    joins: None,
-                    ctes: None,
-                }),
-            },
-        ]);
+        plan.ctes = Some(vec![CommonTableExpression {
+            name: "active".to_owned(),
+            query: Box::new(QueryPlan {
+                select: vec![Projection::Star { table: None }],
+                from: FromClause {
+                    table: "users".to_owned(),
+                    alias: None,
+                },
+                r#where: None,
+                group_by: None,
+                having: None,
+                order_by: None,
+                limit: Some(0),
+                offset: None,
+                joins: None,
+                ctes: None,
+            }),
+        }]);
         assert!(fix_plan(&mut plan));
         // CTE subquery should also be fixed.
         let cte = &plan.ctes.unwrap()[0];

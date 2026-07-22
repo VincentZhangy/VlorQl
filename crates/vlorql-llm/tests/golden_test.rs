@@ -18,9 +18,7 @@ fn run_golden_test(case: &golden::GoldenTestCase) {
         Err(e) => {
             panic!(
                 "Golden test '{}' failed to parse:\n  Input: {}\n  Error: {}",
-                case.name,
-                case.input,
-                e,
+                case.name, case.input, e,
             );
         }
     };
@@ -35,8 +33,7 @@ fn run_golden_test(case: &golden::GoldenTestCase) {
 
     // Check FROM table.
     assert_eq!(
-        plan.from.table,
-        case.expected_from_table,
+        plan.from.table, case.expected_from_table,
         "{}: FROM table mismatch",
         case.name,
     );
@@ -76,8 +73,7 @@ fn run_golden_test(case: &golden::GoldenTestCase) {
 
     // Check LIMIT.
     assert_eq!(
-        plan.limit,
-        case.expected_limit,
+        plan.limit, case.expected_limit,
         "{}: LIMIT mismatch",
         case.name,
     );
@@ -201,13 +197,16 @@ fn golden_all_cases() {
             } else {
                 format!("{:?}", e)
             };
-            errors.push(format!("  [{}/{}] {}: {}", i, golden::ALL_CASES.len(), case.name, msg));
+            errors.push(format!(
+                "  [{}/{}] {}: {}",
+                i,
+                golden::ALL_CASES.len(),
+                case.name,
+                msg
+            ));
         }
     }
     if !errors.is_empty() {
-        panic!(
-            "Golden test failures:\n{}\n",
-            errors.join("\n"),
-        );
+        panic!("Golden test failures:\n{}\n", errors.join("\n"),);
     }
 }

@@ -19,7 +19,10 @@ fn openai_style_output() {
         "from": {"table": "users"},
         "where": {"type": "comparison", "left": {"type": "column_ref", "column": "age"}, "op": "gt", "right": {"type": "literal", "value": 18, "data_type": "int"}}
     });
-    assert!(!normalize_val(&mut val), "OpenAI output should already be canonical");
+    assert!(
+        !normalize_val(&mut val),
+        "OpenAI output should already be canonical"
+    );
 }
 
 #[test]
@@ -52,8 +55,14 @@ fn qwen_style_output() {
     // String projections → objects
     let select = val.get("select").unwrap().as_array().unwrap();
     for item in select {
-        assert!(item.get("type").is_some(), "each select item should have type");
-        assert!(item.get("column").is_some(), "each select item should have column");
+        assert!(
+            item.get("type").is_some(),
+            "each select item should have type"
+        );
+        assert!(
+            item.get("column").is_some(),
+            "each select item should have column"
+        );
     }
     // String source → object
     assert!(val.get("from").unwrap().is_object());
@@ -167,7 +176,10 @@ fn missing_select_gets_default() {
         "from": {"table": "users"}
     });
     assert!(normalize_val(&mut val));
-    assert!(val.get("select").is_some(), "default select should be injected");
+    assert!(
+        val.get("select").is_some(),
+        "default select should be injected"
+    );
     let select = val.get("select").unwrap().as_array().unwrap();
     assert_eq!(select[0].get("type").and_then(|v| v.as_str()), Some("star"));
 }
@@ -221,7 +233,10 @@ fn empty_group_by_removed() {
         "group_by": []
     });
     assert!(normalize_val(&mut val));
-    assert!(val.get("group_by").is_none(), "empty group_by should be removed");
+    assert!(
+        val.get("group_by").is_none(),
+        "empty group_by should be removed"
+    );
 }
 
 #[test]
@@ -271,17 +286,25 @@ fn full_multi_stage_normalize() {
     // Alias: projection → select (array of objects)
     let select = val.get("select").unwrap().as_array().unwrap();
     assert_eq!(select.len(), 3);
-    assert_eq!(select[0].get("type").and_then(|v| v.as_str()), Some("column_ref"));
+    assert_eq!(
+        select[0].get("type").and_then(|v| v.as_str()),
+        Some("column_ref")
+    );
     assert_eq!(select[0].get("column").and_then(|v| v.as_str()), Some("id"));
     assert_eq!(select[2].get("type").and_then(|v| v.as_str()), Some("star"));
     // Alias: source → from (object)
     assert_eq!(
-        val.get("from").and_then(|v| v.get("table")).and_then(|v| v.as_str()),
+        val.get("from")
+            .and_then(|v| v.get("table"))
+            .and_then(|v| v.as_str()),
         Some("users")
     );
     // Alias: filter → where (object)
     let where_obj = val.get("where").unwrap().as_object().unwrap();
-    assert_eq!(where_obj.get("type").and_then(|v| v.as_str()), Some("comparison"));
+    assert_eq!(
+        where_obj.get("type").and_then(|v| v.as_str()),
+        Some("comparison")
+    );
     // Alias: operator → op
     assert_eq!(where_obj.get("op").and_then(|v| v.as_str()), Some("gt"));
     // Structure: order_by extracted from where to top level
@@ -336,21 +359,35 @@ fn messy_llama_deepseek_mix() {
     assert!(val.get("order_by").is_some(), "sort → order_by");
     // Structure: select items have type injected.
     let select = val.get("select").unwrap().as_array().unwrap();
-    assert_eq!(select[0].get("type").and_then(|v| v.as_str()), Some("column_ref"));
-    assert_eq!(select[0].get("column").and_then(|v| v.as_str()), Some("name"));
+    assert_eq!(
+        select[0].get("type").and_then(|v| v.as_str()),
+        Some("column_ref")
+    );
+    assert_eq!(
+        select[0].get("column").and_then(|v| v.as_str()),
+        Some("name")
+    );
     // Structure: from string → object.
     assert!(val.get("from").unwrap().is_object());
     assert_eq!(
-        val.get("from").and_then(|v| v.get("table")).and_then(|v| v.as_str()),
+        val.get("from")
+            .and_then(|v| v.get("table"))
+            .and_then(|v| v.as_str()),
         Some("employees")
     );
     // Structure: where array → single object.
     assert!(val.get("where").unwrap().is_object());
     let where_obj = val.get("where").unwrap().as_object().unwrap();
-    assert_eq!(where_obj.get("type").and_then(|v| v.as_str()), Some("comparison"));
+    assert_eq!(
+        where_obj.get("type").and_then(|v| v.as_str()),
+        Some("comparison")
+    );
     // Nested aliases: field → column, operator → op
     // Note: `kind` → `type` is skipped because `type` already exists.
-    assert_eq!(where_obj.get("column").and_then(|v| v.as_str()), Some("salary"));
+    assert_eq!(
+        where_obj.get("column").and_then(|v| v.as_str()),
+        Some("salary")
+    );
     assert_eq!(where_obj.get("op").and_then(|v| v.as_str()), Some("gt"));
     assert!(where_obj.get("field").is_none());
     assert!(where_obj.get("operator").is_none());

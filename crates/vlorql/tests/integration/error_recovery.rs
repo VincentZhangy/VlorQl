@@ -183,7 +183,10 @@ async fn validation_errors_are_retryable_and_do_trigger_retry() {
         .query("list users")
         .await
         .expect("retryable error should trigger another LLM attempt");
-    assert_eq!(compiled.sql, "SELECT \"t1\".\"id\" FROM \"users\" AS \"t1\"");
+    assert_eq!(
+        compiled.sql,
+        "SELECT \"t1\".\"id\" FROM \"users\" AS \"t1\""
+    );
 }
 
 /// When the LLM returns JSON that fails to deserialize as a

@@ -105,7 +105,6 @@ fn find_outermost_json_obj(text: &str) -> Option<&str> {
     None
 }
 
-
 /// Returns a descriptive error message when `content` contains raw
 /// chat-template tokens (`<|im_start|>`, `<|im_end|>`), which indicate
 /// the model did not understand the output format constraint.
@@ -131,7 +130,6 @@ pub fn detect_template_leak(content: &str) -> Option<String> {
         }
     ))
 }
-
 
 #[cfg(test)]
 mod tests {

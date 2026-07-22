@@ -3,8 +3,8 @@
 //! Tests the auto-fix engine in the context of the full V2 pipeline
 //! (recover → normalize → build → fix → validate).
 
-use vlorql_llm::parser_v2::fix::fixer;
 use vlorql_llm::parser_v2::builder::query_builder;
+use vlorql_llm::parser_v2::fix::fixer;
 use vlorql_llm::parser_v2::normalize::pipeline;
 use vlorql_llm::parser_v2::recover::extract_json_content;
 use vlorql_llm::parser_v2::validate::validator;
@@ -12,9 +12,9 @@ use vlorql_llm::parser_v2::validate::validator;
 fn build_and_fix(raw: &str) -> Result<vlorql_core::schema::QueryPlan, Box<dyn std::error::Error>> {
     let json_str = extract_json_content(raw);
     let mut value: serde_json::Value = serde_json::from_str(json_str)?;
-    pipeline::normalize(&mut value);
+    let _ = pipeline::normalize(&mut value);
     let mut plan = query_builder::build_plan(&value)?;
-    fixer::fix_plan(&mut plan);
+    let _ = fixer::fix_plan(&mut plan);
     Ok(plan)
 }
 
@@ -35,7 +35,11 @@ fn fix_limit_zero_in_pipeline() {
 fn fix_missing_alias_in_pipeline() {
     let raw = r#"{"select": [{"type": "star"}], "from": {"table": "users"}}"#;
     let plan = build_and_fix(raw).unwrap();
-    assert_eq!(plan.from.alias, Some("t1".to_owned()), "missing alias should be generated");
+    assert_eq!(
+        plan.from.alias,
+        Some("t1".to_owned()),
+        "missing alias should be generated"
+    );
 }
 
 #[test]
@@ -47,7 +51,10 @@ fn fix_missing_alias_in_join() {
     }"#;
     let plan = build_and_fix(raw).unwrap();
     assert_eq!(plan.from.alias, Some("t1".to_owned()));
-    assert_eq!(plan.joins.unwrap()[0].right_table.alias, Some("t2".to_owned()));
+    assert_eq!(
+        plan.joins.unwrap()[0].right_table.alias,
+        Some("t2".to_owned())
+    );
 }
 
 // ── Fix: empty select (should not happen in normal pipeline,
@@ -59,7 +66,10 @@ fn fix_empty_select_in_pipeline() {
     // We test the fix layer directly on a plan with empty select.
     let mut plan = vlorql_core::schema::QueryPlan {
         select: vec![],
-        from: vlorql_core::schema::FromClause { table: "users".to_owned(), alias: None },
+        from: vlorql_core::schema::FromClause {
+            table: "users".to_owned(),
+            alias: None,
+        },
         r#where: None,
         group_by: None,
         having: None,
@@ -89,7 +99,10 @@ fn full_pipeline_with_fix() {
     // Fix: missing alias added
     assert_eq!(plan.from.alias, Some("t1".to_owned()));
     // Validate: should pass
-    assert!(validator::validate_plan(&plan).is_ok(), "fixed plan should be valid");
+    assert!(
+        validator::validate_plan(&plan).is_ok(),
+        "fixed plan should be valid"
+    );
 }
 
 #[test]

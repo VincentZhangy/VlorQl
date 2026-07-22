@@ -38,22 +38,22 @@ pub fn normalize(val: &mut serde_json::Value) -> bool {
 
     // Stage 2: Structure normalization.
     // Order matters: array → select → table → where → join → query.
-    changed |= array::normalize(val);    // ensure arrays, remove nulls
-    changed |= select::normalize(val);    // string→object, inject type, remove invalid
-    changed |= table::normalize(val);    // string→object
-    changed |= where_::normalize(val);   // array→object, extract top-level fields, flat condition
-    changed |= join::normalize(val);     // string→object, infer missing, strip unknown
-    changed |= query::normalize(val);    // strip unknown top-level fields, wrap expr
+    changed |= array::normalize(val); // ensure arrays, remove nulls
+    changed |= select::normalize(val); // string→object, inject type, remove invalid
+    changed |= table::normalize(val); // string→object
+    changed |= where_::normalize(val); // array→object, extract top-level fields, flat condition
+    changed |= join::normalize(val); // string→object, infer missing, strip unknown
+    changed |= query::normalize(val); // strip unknown top-level fields, wrap expr
 
     // Stage 3: Expression/Operator normalization.
     // Must run after structure so arrays are unwrapped and fields are
     // canonical before we normalize their contents.
     changed |= operators::normalize(val); // = → eq, != → ne, etc.
-    changed |= value::normalize(val);     // integer → int, varchar → string, etc.
-    changed |= expr::normalize(val);      // inject missing type tags, fix predicate shapes
+    changed |= value::normalize(val); // integer → int, varchar → string, etc.
+    changed |= expr::normalize(val); // inject missing type tags, fix predicate shapes
 
     // Stage 4: Order-by normalization (after aliases, structure, and expr).
-    changed |= order::normalize(val);     // normalize order_by items
+    changed |= order::normalize(val); // normalize order_by items
 
     changed
 }
@@ -124,7 +124,10 @@ mod tests {
         // select items should be objects with type
         let select = val.get("select").unwrap().as_array().unwrap();
         for item in select {
-            assert!(item.get("type").is_some(), "each select item should have type");
+            assert!(
+                item.get("type").is_some(),
+                "each select item should have type"
+            );
         }
     }
 
@@ -176,7 +179,8 @@ mod tests {
 
     #[test]
     fn pipeline_normalize_str_owned() {
-        let input = r#"{"filter": {"type": "comparison"}, "projection": ["id"], "source": "users"}"#;
+        let input =
+            r#"{"filter": {"type": "comparison"}, "projection": ["id"], "source": "users"}"#;
         let result = normalize_str(input);
         assert!(result.contains(r#""where""#));
         assert!(result.contains(r#""select""#));

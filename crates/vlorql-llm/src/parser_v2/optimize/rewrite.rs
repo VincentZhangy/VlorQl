@@ -33,7 +33,10 @@ mod tests {
     fn rewrite_is_currently_noop() {
         let mut plan = QueryPlan {
             select: vec![Projection::Star { table: None }],
-            from: FromClause { table: "users".to_owned(), alias: None },
+            from: FromClause {
+                table: "users".to_owned(),
+                alias: None,
+            },
             r#where: None,
             group_by: None,
             having: None,

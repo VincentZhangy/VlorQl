@@ -4,15 +4,15 @@
 //! from canonical JSON.  This layer does **no** repair — it assumes
 //! the input has already been normalized.
 
-use vlorql_core::schema::{
-    CommonTableExpression, OrderByTerm, QueryPlan,
-};
 use serde_json::Value;
+use vlorql_core::schema::{CommonTableExpression, OrderByTerm, QueryPlan};
 
-use super::expr_builder::{BuildError, build_expression, build_predicate, req_arr, req_obj, req_str};
+use super::expr_builder::{
+    BuildError, build_expression, build_predicate, req_arr, req_obj, req_str,
+};
+use super::join_builder::build_join_clause;
 use super::select_builder::build_projections;
 use super::table_builder::build_from_clause;
-use super::join_builder::build_join_clause;
 
 /// Build a [`QueryPlan`] from a canonical JSON value.
 ///
@@ -25,22 +25,21 @@ pub fn build_plan(value: &Value) -> Result<QueryPlan, BuildError> {
 }
 
 /// Build a [`QueryPlan`] from a canonical JSON object map.
-pub fn build_plan_from_obj(
-    obj: &serde_json::Map<String, Value>,
-) -> Result<QueryPlan, BuildError> {
+pub fn build_plan_from_obj(obj: &serde_json::Map<String, Value>) -> Result<QueryPlan, BuildError> {
     let _path = "";
 
     let select = {
-        let arr = req_arr(obj.get("select").ok_or_else(|| {
-            BuildError::new("select", "missing `select` field")
-        })?, "select")?;
+        let arr = req_arr(
+            obj.get("select")
+                .ok_or_else(|| BuildError::new("select", "missing `select` field"))?,
+            "select",
+        )?;
         build_projections(arr)?
     };
 
     let from = build_from_clause(
-        obj.get("from").ok_or_else(|| {
-            BuildError::new("from", "missing `from` field")
-        })?,
+        obj.get("from")
+            .ok_or_else(|| BuildError::new("from", "missing `from` field"))?,
         "from",
     )?;
 
@@ -123,12 +122,14 @@ pub fn build_plan_from_obj(
 fn build_order_by_term(val: &Value) -> Result<OrderByTerm, BuildError> {
     let obj = req_obj(val, "order_by_term")?;
     let expr = build_expression(
-        obj.get("expr").ok_or_else(|| {
-            BuildError::new("expr", "missing `expr` field on order_by term")
-        })?,
+        obj.get("expr")
+            .ok_or_else(|| BuildError::new("expr", "missing `expr` field on order_by term"))?,
     )
     .map_err(|e| e.at("expr"))?;
-    let descending = obj.get("descending").and_then(|v| v.as_bool()).unwrap_or(false);
+    let descending = obj
+        .get("descending")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
     Ok(OrderByTerm { expr, descending })
 }
 
@@ -136,9 +137,11 @@ fn build_order_by_term(val: &Value) -> Result<OrderByTerm, BuildError> {
 fn build_cte(val: &Value) -> Result<CommonTableExpression, BuildError> {
     let obj = req_obj(val, "cte")?;
     let name = req_str(obj, "name", "name")?.to_owned();
-    let query_obj = req_obj(obj.get("query").ok_or_else(|| {
-        BuildError::new("query", "missing `query` field on CTE")
-    })?, "query")?;
+    let query_obj = req_obj(
+        obj.get("query")
+            .ok_or_else(|| BuildError::new("query", "missing `query` field on CTE"))?,
+        "query",
+    )?;
     let query = Box::new(build_plan_from_obj(query_obj)?);
     Ok(CommonTableExpression { name, query })
 }

@@ -75,8 +75,8 @@ fn normalize_impl(val: &mut Value, field: &str) -> bool {
             // Normalize the `op` field if present.
             if let Some(op_val) = map.get_mut(field) {
                 if let Some(s) = op_val.as_str() {
-                    if let Some(canonical) = resolve_comparison_op(s)
-                        .or_else(|| resolve_binary_op(s))
+                    if let Some(canonical) =
+                        resolve_comparison_op(s).or_else(|| resolve_binary_op(s))
                     {
                         if canonical != s {
                             *op_val = Value::String(canonical.to_owned());
@@ -123,8 +123,7 @@ pub fn resolve_binary_op(op: &str) -> Option<&'static str> {
 pub fn is_canonical(op: &str) -> bool {
     matches!(
         op,
-        "eq" | "ne" | "gt" | "gte" | "lt" | "lte"
-            | "add" | "sub" | "mul" | "div" | "mod"
+        "eq" | "ne" | "gt" | "gte" | "lt" | "lte" | "add" | "sub" | "mul" | "div" | "mod"
     )
 }
 
@@ -183,10 +182,7 @@ mod tests {
             "right": {"type": "comparison", "op": ">", "left": {"column": "b"}, "right": {"value": 2}}
         });
         assert!(normalize(&mut val));
-        assert_eq!(
-            val.pointer("/left/op").and_then(|v| v.as_str()),
-            Some("eq")
-        );
+        assert_eq!(val.pointer("/left/op").and_then(|v| v.as_str()), Some("eq"));
         assert_eq!(
             val.pointer("/right/op").and_then(|v| v.as_str()),
             Some("gt")

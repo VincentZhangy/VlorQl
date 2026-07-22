@@ -66,7 +66,6 @@ pub const ALL_CASES: &[GoldenTestCase] = &[
         expected_limit: Some(10),
         expected_alias: Some("u"),
     },
-
     // ── DeepSeek style (uses "filter" instead of "where") ────────────
     GoldenTestCase {
         name: "deepseek_filter_alias",
@@ -92,7 +91,6 @@ pub const ALL_CASES: &[GoldenTestCase] = &[
         expected_limit: None,
         expected_alias: Some("t1"),
     },
-
     // ── Qwen style (string projections, non-standard names) ──────────
     GoldenTestCase {
         name: "qwen_string_projections",
@@ -118,7 +116,6 @@ pub const ALL_CASES: &[GoldenTestCase] = &[
         expected_limit: Some(5),
         expected_alias: Some("t1"),
     },
-
     // ── Claude / Anthropic style ─────────────────────────────────────
     GoldenTestCase {
         name: "claude_standard",
@@ -144,7 +141,6 @@ pub const ALL_CASES: &[GoldenTestCase] = &[
         expected_limit: Some(10),
         expected_alias: Some("t1"),
     },
-
     // ── GLM / Zhipu style (uses "conditions", "fields") ──────────────
     GoldenTestCase {
         name: "glm_conditions_and_fields",
@@ -170,7 +166,6 @@ pub const ALL_CASES: &[GoldenTestCase] = &[
         expected_limit: None,
         expected_alias: Some("t1"),
     },
-
     // ── Llama style (markdown fence, where as array) ─────────────────
     GoldenTestCase {
         name: "llama_markdown_fence",
@@ -196,7 +191,6 @@ pub const ALL_CASES: &[GoldenTestCase] = &[
         expected_limit: None,
         expected_alias: Some("t1"),
     },
-
     // ── Mistral style ────────────────────────────────────────────────
     GoldenTestCase {
         name: "mistral_standard",
@@ -222,7 +216,6 @@ pub const ALL_CASES: &[GoldenTestCase] = &[
         expected_limit: None,
         expected_alias: Some("u"),
     },
-
     // ── Edge cases ───────────────────────────────────────────────────
     GoldenTestCase {
         name: "edge_empty_group_by",

@@ -128,7 +128,9 @@ fn repair_query_plan_object(obj: &mut serde_json::Map<String, serde_json::Value>
     }
 
     // --- 1. Move misplaced top-level fields from inside `where` ---
-    const TOP_LEVEL_FIELDS: &[&str] = &["order_by", "limit", "offset", "group_by", "having", "joins", "ctes"];
+    const TOP_LEVEL_FIELDS: &[&str] = &[
+        "order_by", "limit", "offset", "group_by", "having", "joins", "ctes",
+    ];
 
     // Collect misplaced fields from `where` first (before any mutable borrow of `obj`).
     let mut extracted: Vec<(String, serde_json::Value)> = Vec::new();
@@ -162,8 +164,8 @@ fn repair_query_plan_object(obj: &mut serde_json::Map<String, serde_json::Value>
     //     immediate deserialization error.  Remove them so the repair below
     //     can at least attempt to make `where` valid.
     const PLAN_FIELDS: &[&str] = &[
-        "select", "from", "where", "group_by", "having",
-        "order_by", "limit", "offset", "joins", "ctes",
+        "select", "from", "where", "group_by", "having", "order_by", "limit", "offset", "joins",
+        "ctes",
     ];
     let before = obj.len();
     obj.retain(|key, _| PLAN_FIELDS.contains(&key.as_str()));
@@ -177,7 +179,8 @@ fn repair_query_plan_object(obj: &mut serde_json::Map<String, serde_json::Value>
     if let Some(having) = obj.get_mut("having") {
         if having.is_array() {
             let arr = having.as_array().unwrap();
-            let pred = arr.iter()
+            let pred = arr
+                .iter()
                 .filter_map(|v| v.as_object())
                 .find(|o| o.contains_key("type"))
                 .cloned()
@@ -199,8 +202,7 @@ fn repair_query_plan_object(obj: &mut serde_json::Map<String, serde_json::Value>
     //     join object instead of at the top level.  Extract them back to the
     //     plan level before step 4 strips them as unknown join fields.
     const PLAN_LEVEL_FIELDS: &[&str] = &[
-        "select", "from", "where", "group_by", "having",
-        "order_by", "limit", "offset", "ctes",
+        "select", "from", "where", "group_by", "having", "order_by", "limit", "offset", "ctes",
     ];
     // Collect first (read-only borrow of joins), then apply (mutable borrow of obj).
     let mut extracted_from_joins: Vec<(String, serde_json::Value)> = Vec::new();
@@ -254,65 +256,69 @@ fn repair_query_plan_object(obj: &mut serde_json::Map<String, serde_json::Value>
             changed = true;
         } else {
             for join in joins_arr.iter_mut() {
-            if let Some(join_obj) = join.as_object_mut() {
-                join_obj.retain(|key, _| VALID_JOIN_FIELDS.contains(&key.as_str()));
+                if let Some(join_obj) = join.as_object_mut() {
+                    join_obj.retain(|key, _| VALID_JOIN_FIELDS.contains(&key.as_str()));
 
-                // Convert bare-string `right_table` to FromClause object.
-                if let Some(rt) = join_obj.get("right_table").and_then(|v| v.as_str()) {
-                    join_obj.insert("right_table".to_owned(), serde_json::json!({"table": rt}));
-                    changed = true;
-                }
+                    // Convert bare-string `right_table` to FromClause object.
+                    if let Some(rt) = join_obj.get("right_table").and_then(|v| v.as_str()) {
+                        join_obj.insert("right_table".to_owned(), serde_json::json!({"table": rt}));
+                        changed = true;
+                    }
 
-                // Infer missing `right_table` from the ON clause when possible.
-                if !join_obj.contains_key("right_table") && join_obj.contains_key("on") {
-                    if let Some(on_obj) = join_obj.get("on").and_then(|v| v.as_object()) {
-                        let on_table = on_obj.get("right")
-                            .and_then(|r| r.as_object())
-                            .and_then(|r| r.get("table"))
-                            .and_then(|t| t.as_str());
-                        if let Some(table) = on_table {
-                            join_obj.insert("right_table".to_owned(), serde_json::json!({"table": table}));
-                            changed = true;
+                    // Infer missing `right_table` from the ON clause when possible.
+                    if !join_obj.contains_key("right_table") && join_obj.contains_key("on") {
+                        if let Some(on_obj) = join_obj.get("on").and_then(|v| v.as_object()) {
+                            let on_table = on_obj
+                                .get("right")
+                                .and_then(|r| r.as_object())
+                                .and_then(|r| r.get("table"))
+                                .and_then(|t| t.as_str());
+                            if let Some(table) = on_table {
+                                join_obj.insert(
+                                    "right_table".to_owned(),
+                                    serde_json::json!({"table": table}),
+                                );
+                                changed = true;
+                            }
                         }
                     }
-                }
 
-                let right_table_name = join_obj
-                    .get("right_table")
-                    .and_then(|rt| rt.as_object())
-                    .and_then(|rt| rt.get("table"))
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_owned();
-                if let Some(on) = join_obj.get_mut("on") {
-                    // Handle bare ColumnRef in join ON clause.
-                    // The LLM sometimes emits duplicate-keyed objects like
-                    // {"table":"users","column":"id","table":"orders","column":"user_id"}
-                    // which JSON parsing resolves to just {"table":"orders","column":"user_id"}.
-                    // Reconstruct a proper comparison using right_table info.
-                    if let Some(on_obj) = on.as_object() {
-                        if !on_obj.contains_key("type") && on_obj.contains_key("column") {
-                            let mut left_expr = on.clone();
-                            repair_expression_value(&mut left_expr);
-                            *on = serde_json::json!({
-                                "type": "comparison",
-                                "left": left_expr,
-                                "op": "eq",
-                                "right": {
-                                    "type": "column_ref",
-                                    "table": right_table_name,
-                                    "column": "id"
-                                }
-                            });
-                            changed = true;
-                            continue;
+                    let right_table_name = join_obj
+                        .get("right_table")
+                        .and_then(|rt| rt.as_object())
+                        .and_then(|rt| rt.get("table"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_owned();
+                    if let Some(on) = join_obj.get_mut("on") {
+                        // Handle bare ColumnRef in join ON clause.
+                        // The LLM sometimes emits duplicate-keyed objects like
+                        // {"table":"users","column":"id","table":"orders","column":"user_id"}
+                        // which JSON parsing resolves to just {"table":"orders","column":"user_id"}.
+                        // Reconstruct a proper comparison using right_table info.
+                        if let Some(on_obj) = on.as_object() {
+                            if !on_obj.contains_key("type") && on_obj.contains_key("column") {
+                                let mut left_expr = on.clone();
+                                repair_expression_value(&mut left_expr);
+                                *on = serde_json::json!({
+                                    "type": "comparison",
+                                    "left": left_expr,
+                                    "op": "eq",
+                                    "right": {
+                                        "type": "column_ref",
+                                        "table": right_table_name,
+                                        "column": "id"
+                                    }
+                                });
+                                changed = true;
+                                continue;
+                            }
                         }
+                        changed |= repair_predicate_object(on);
                     }
-                    changed |= repair_predicate_object(on);
                 }
             }
         }
-    }
     }
 
     // --- 5. Wrap top-level `descending` + `expr` into `order_by` ---
@@ -377,10 +383,7 @@ fn repair_query_plan_object(obj: &mut serde_json::Map<String, serde_json::Value>
     // --- 7c. Inject default `select` when missing ---
     //     qwen2.5 等小模型有时会省略子查询的 select 字段。
     if !obj.contains_key("select") && obj.contains_key("from") {
-        obj.insert(
-            "select".to_owned(),
-            serde_json::json!([{"type": "star"}]),
-        );
+        obj.insert("select".to_owned(), serde_json::json!([{"type": "star"}]));
         changed = true;
     }
 
@@ -483,7 +486,8 @@ fn repair_query_plan_object(obj: &mut serde_json::Map<String, serde_json::Value>
             if has_star {
                 let mut new_select: Vec<serde_json::Value> = Vec::new();
                 for item in select.drain(..) {
-                    let is_star = item.as_object()
+                    let is_star = item
+                        .as_object()
                         .and_then(|o| o.get("type"))
                         .and_then(|t| t.as_str())
                         .is_some_and(|t| t == "star");
@@ -523,14 +527,19 @@ fn expand_group_by_expr(expr: &serde_json::Value) -> Option<serde_json::Value> {
         return None;
     }
     let mut proj = serde_json::Map::new();
-    proj.insert("type".to_owned(), serde_json::Value::String("column_ref".to_owned()));
+    proj.insert(
+        "type".to_owned(),
+        serde_json::Value::String("column_ref".to_owned()),
+    );
     proj.insert(
         "table".to_owned(),
         obj.get("table").cloned().unwrap_or(serde_json::Value::Null),
     );
     proj.insert(
         "column".to_owned(),
-        obj.get("column").cloned().unwrap_or(serde_json::Value::Null),
+        obj.get("column")
+            .cloned()
+            .unwrap_or(serde_json::Value::Null),
     );
     proj.insert("alias".to_owned(), serde_json::Value::Null);
     Some(serde_json::Value::Object(proj))
@@ -552,12 +561,20 @@ fn normalize_data_types_inner(val: &mut serde_json::Value, changed: &mut bool) {
                     "varchar" | "text" | "char" | "character" | "character varying" => "string",
                     "decimal" | "numeric" | "real" | "double" | "double precision" => "float",
                     "bool" | "boolean" => "boolean",
-                    "timestampz" | "timestamptz" | "datetime" | "timestamp with time zone" | "timestamp without time zone" | "date" => "timestamp",
+                    "timestampz"
+                    | "timestamptz"
+                    | "datetime"
+                    | "timestamp with time zone"
+                    | "timestamp without time zone"
+                    | "date" => "timestamp",
                     "NULL" | "Null" => "null",
                     _ => dt,
                 };
                 if normalized != dt {
-                    map.insert("data_type".to_owned(), serde_json::Value::String(normalized.to_owned()));
+                    map.insert(
+                        "data_type".to_owned(),
+                        serde_json::Value::String(normalized.to_owned()),
+                    );
                     *changed = true;
                 }
             }
@@ -577,8 +594,6 @@ fn normalize_data_types_inner(val: &mut serde_json::Value, changed: &mut bool) {
         _ => {}
     }
 }
-
-
 
 /// Adds missing `"type"` tags to Expression-like JSON objects.
 ///
@@ -716,7 +731,12 @@ fn repair_predicate_object(pred: &mut serde_json::Value) -> bool {
     }
 
     // Fix array-valued expression fields
-    if pred_type_str == "comparison" || pred_type_str == "between" || pred_type_str == "in" || pred_type_str == "like" || pred_type_str == "is_null" {
+    if pred_type_str == "comparison"
+        || pred_type_str == "between"
+        || pred_type_str == "in"
+        || pred_type_str == "like"
+        || pred_type_str == "is_null"
+    {
         for field in &["left", "right", "expr", "low", "high"] {
             if let Some(arr) = obj.get(*field).and_then(|v| v.as_array())
                 && !arr.is_empty()
@@ -730,7 +750,12 @@ fn repair_predicate_object(pred: &mut serde_json::Value) -> bool {
     // Fix missing `type` tags on expression fields nested within predicates.
     // The LLM often emits bare `{"column":"x","table":"t"}` objects without
     // the `"type":"column_ref"` discriminator that serde needs.
-    if pred_type_str == "comparison" || pred_type_str == "between" || pred_type_str == "in" || pred_type_str == "like" || pred_type_str == "is_null" {
+    if pred_type_str == "comparison"
+        || pred_type_str == "between"
+        || pred_type_str == "in"
+        || pred_type_str == "like"
+        || pred_type_str == "is_null"
+    {
         for field in &["left", "right", "expr", "low", "high"] {
             if let Some(val) = obj.get_mut(*field) {
                 changed |= repair_expression_value(val);
@@ -770,8 +795,6 @@ fn is_empty_array(v: &serde_json::Value) -> bool {
     v.as_array().is_some_and(|a| a.is_empty())
 }
 
-
-
 /// Parse `content` as JSON, run structural canonicalize in place, and return
 /// the resulting [`serde_json::Value`].
 ///
@@ -787,7 +810,6 @@ pub fn canonicalize_to_value(content: &str) -> Option<serde_json::Value> {
     let _changed = repair_query_plan_object(obj);
     Some(value)
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -857,7 +879,10 @@ mod tests {
             "limit should be at top level, got: {parsed}"
         );
         let wh = parsed.get("where").and_then(|w| w.as_object()).unwrap();
-        assert!(wh.get("order_by").is_none(), "where should not have order_by");
+        assert!(
+            wh.get("order_by").is_none(),
+            "where should not have order_by"
+        );
         assert!(wh.get("limit").is_none(), "where should not have limit");
     }
 
@@ -867,7 +892,10 @@ mod tests {
         let parsed = check_canonical(input);
         let wh = parsed.get("where").and_then(|w| w.as_object()).unwrap();
         let left = wh.get("left").unwrap();
-        assert!(left.is_object(), "left should be an object, not array: {left:?}");
+        assert!(
+            left.is_object(),
+            "left should be an object, not array: {left:?}"
+        );
         assert_eq!(
             left.get("type").and_then(|t| t.as_str()),
             Some("comparison")
@@ -891,13 +919,25 @@ mod tests {
         let input = r#"{"select":[{"type":"column_ref","table":"orders","column":"id","alias":null},{"type":"column_ref","table":"users","column":"name","alias":null},{"type":"column_ref","table":"orders","column":"total","alias":null}], "from":{"table":"orders","alias":null}, "where":{"type":"and", "left":[{"type":"comparison","left":{"type":"column_ref","column":"total","table":"orders"},"op":"gt","right":{"type":"literal","value":150,"data_type":"float"}}],"group_by":[null], "having":{"type":"comparison","left":{"type":"column_ref","column":"total","table":"orders"},"op":"gt","right":{"type":"literal","value":150,"data_type":"float"}},"order_by":[{"expr":{"type":"column_ref","column":"total","table":"orders"},"descending":false},{"expr":{"type":"column_ref","column":"id","table":"orders"},"descending":true}], "limit":10} }"#;
         let parsed = check_canonical(input);
 
-        assert!(parsed.get("order_by").is_some(), "order_by should be at top level");
-        assert!(parsed.get("limit").is_some(), "limit should be at top level");
+        assert!(
+            parsed.get("order_by").is_some(),
+            "order_by should be at top level"
+        );
+        assert!(
+            parsed.get("limit").is_some(),
+            "limit should be at top level"
+        );
 
         let wh = parsed.get("where").and_then(|w| w.as_object()).unwrap();
-        assert!(wh.get("group_by").is_none(), "where should not have group_by");
+        assert!(
+            wh.get("group_by").is_none(),
+            "where should not have group_by"
+        );
         assert!(wh.get("having").is_none(), "where should not have having");
-        assert!(wh.get("order_by").is_none(), "where should not have order_by");
+        assert!(
+            wh.get("order_by").is_none(),
+            "where should not have order_by"
+        );
         assert!(wh.get("limit").is_none(), "where should not have limit");
 
         let left = wh.get("left").unwrap();
@@ -911,15 +951,27 @@ mod tests {
         let input = r#"{"from":{"alias":null,"table":"orders"},"select":[{"type":"column_ref","table":"orders","column":"id","alias":null},{"type":"column_ref","table":"users","column":"name","alias":null},{"type":"column_ref","table":"orders","column":"total","alias":null}], "joins":[{"join_type":"left","on":{"left":{"column":"users_id","table":"orders","type":"column_ref"},"op":"eq","right":{"column":"id","table":"users","type":"column_ref"},"type":"comparison"},"limit":10,"order_by":[{"descending":false,"expr":{"column":"total","table":"orders","type":"column_ref"}},{"descending":true,"expr":{"column":"id","table":"orders","type":"column_ref"}}],"where":{"left":{"column":"total","table":"orders","type":"column_ref"},"op":"gt","right":{"data_type":"float","type":"literal","value":150},"type":"comparison"}}]}"#;
         let parsed = check_canonical(input);
 
-        assert!(parsed.get("where").is_some(), "where should be at top level");
-        assert!(parsed.get("order_by").is_some(), "order_by should be at top level");
-        assert!(parsed.get("limit").is_some(), "limit should be at top level");
+        assert!(
+            parsed.get("where").is_some(),
+            "where should be at top level"
+        );
+        assert!(
+            parsed.get("order_by").is_some(),
+            "order_by should be at top level"
+        );
+        assert!(
+            parsed.get("limit").is_some(),
+            "limit should be at top level"
+        );
 
         let joins = parsed.get("joins").and_then(|j| j.as_array()).unwrap();
         assert_eq!(joins.len(), 1, "should have 1 join, not a duplicate");
         let rt = joins[0].get("right_table").unwrap();
         let rt_table = rt.get("table").and_then(|t| t.as_str()).unwrap();
-        assert_eq!(rt_table, "users", "right_table should be 'users', got: {rt}");
+        assert_eq!(
+            rt_table, "users",
+            "right_table should be 'users', got: {rt}"
+        );
 
         let on = joins[0].get("on").and_then(|o| o.as_object()).unwrap();
         let left_col = on
@@ -939,7 +991,10 @@ mod tests {
         let parsed = check_canonical(input);
 
         let wh = parsed.get("where").unwrap();
-        assert!(wh.is_object(), "where should be an object after repair, got: {wh:?}");
+        assert!(
+            wh.is_object(),
+            "where should be an object after repair, got: {wh:?}"
+        );
 
         let select = parsed.get("select").and_then(|s| s.as_array()).unwrap();
         for item in select {
@@ -949,7 +1004,11 @@ mod tests {
                 "select item has invalid type: {t}"
             );
         }
-        assert_eq!(select.len(), 3, "select should have 3 items after removing invalid one");
+        assert_eq!(
+            select.len(),
+            3,
+            "select should have 3 items after removing invalid one"
+        );
     }
 
     #[test]
@@ -1023,7 +1082,10 @@ mod tests {
             "on.right.table should be the right_table name"
         );
 
-        assert!(parsed.get("group_by").is_none(), "null group_by should be removed");
+        assert!(
+            parsed.get("group_by").is_none(),
+            "null group_by should be removed"
+        );
     }
 
     #[test]
@@ -1060,7 +1122,9 @@ mod tests {
         let input = r#"{"select":[{"type":"star","table":"products"}],"from":{"table":"products","alias":null},"where":{"type":"not","child":{"type":"comparison","left":{"type":"column_ref","column":"id","table":"order_items"},"op":"eq","right":{"type":"literal","value":0,"data_type":"integer"}}}}"#;
         let parsed = check_canonical(input);
 
-        let dt = parsed["where"]["child"]["right"]["data_type"].as_str().unwrap();
+        let dt = parsed["where"]["child"]["right"]["data_type"]
+            .as_str()
+            .unwrap();
         assert_eq!(
             dt, "int",
             "data_type should be normalized from 'integer' to 'int', got: {dt}"
@@ -1099,7 +1163,10 @@ mod tests {
 
         let gb = parsed.get("group_by").and_then(|g| g.as_array()).unwrap();
         assert_eq!(gb.len(), 1, "should have 1 group_by item after flattening");
-        assert_eq!(gb[0].get("type").and_then(|t| t.as_str()), Some("column_ref"));
+        assert_eq!(
+            gb[0].get("type").and_then(|t| t.as_str()),
+            Some("column_ref")
+        );
 
         check_build(&parsed);
     }
@@ -1141,10 +1208,7 @@ mod tests {
         let (parsed, _plan) = check_roundtrip(input);
         let select = parsed.get("select").and_then(|s| s.as_array()).unwrap();
         assert_eq!(select.len(), 1);
-        assert_eq!(
-            select[0].get("type").and_then(|t| t.as_str()),
-            Some("star")
-        );
+        assert_eq!(select[0].get("type").and_then(|t| t.as_str()), Some("star"));
     }
 
     #[test]
@@ -1152,14 +1216,20 @@ mod tests {
         let input = r#"{"select":[{"type":"star"}],"from":{"table":"users"},"where":[{"type":"comparison","left":{"type":"column_ref","column":"name"},"op":"eq","right":{"type":"literal","value":"alice","data_type":"string"}}]}"#;
         let (parsed, _plan) = check_roundtrip(input);
         let wh = parsed.get("where").unwrap();
-        assert!(wh.is_object(), "where should be an object after canonicalize");
+        assert!(
+            wh.is_object(),
+            "where should be an object after canonicalize"
+        );
     }
 
     #[test]
     fn canonical_removes_null_group_by() {
         let input = r#"{"select":[{"type":"star"}],"from":{"table":"orders"},"group_by":[null],"having":{"type":"comparison","left":{"type":"column_ref","column":"total"},"op":"gt","right":{"type":"literal","value":150,"data_type":"float"}}}"#;
         let (parsed, _plan) = check_roundtrip(input);
-        assert!(parsed.get("group_by").is_none(), "null group_by should be removed");
+        assert!(
+            parsed.get("group_by").is_none(),
+            "null group_by should be removed"
+        );
     }
 
     #[test]
@@ -1170,7 +1240,10 @@ mod tests {
         // silently dropped.
         let input = r#"{"select":[{"type":"star"}],"from":{"table":"orders"},"descending":true,"expr":{"column":"total","table":"orders"}}"#;
         let (parsed, _plan) = check_roundtrip(input);
-        assert!(parsed.get("order_by").is_none(), "order_by should be absent (step order bug: 1b strips descending before step 5)");
+        assert!(
+            parsed.get("order_by").is_none(),
+            "order_by should be absent (step order bug: 1b strips descending before step 5)"
+        );
         assert!(parsed.get("descending").is_none(), "descending stripped");
         assert!(parsed.get("expr").is_none(), "expr stripped");
         // Still builds as valid plan, order_by just missing.
@@ -1184,13 +1257,23 @@ mod tests {
             r#"{"projection":[{"type":"star"}],"from":{"table_name":"users","alias_name":"u"},"filter":{"kind":"comparison","left":{"col":"name","type":"column_ref"},"operator":"eq","right":{"type":"literal","value":"alice","data_type":"string"}},"sort":[{"desc":true,"expr":{"col":"name","table_name":"users"}}],"limit_count":5}"#,
         );
         assert!(parsed.get("projection").is_none(), "projection → select");
-        assert!(parsed.get("select").is_some(), "select present after rename");
+        assert!(
+            parsed.get("select").is_some(),
+            "select present after rename"
+        );
         assert!(parsed.get("filter").is_none(), "filter → where");
         let wh = parsed["where"].as_object().unwrap();
-        assert_eq!(wh.get("type").and_then(|t| t.as_str()), Some("comparison"), "kind → type");
+        assert_eq!(
+            wh.get("type").and_then(|t| t.as_str()),
+            Some("comparison"),
+            "kind → type"
+        );
         assert!(wh.get("operator").is_none(), "operator → op");
         assert!(parsed.get("sort").is_none(), "sort → order_by");
-        assert!(parsed.get("order_by").is_some(), "order_by present after rename");
+        assert!(
+            parsed.get("order_by").is_some(),
+            "order_by present after rename"
+        );
         assert!(parsed.get("limit_count").is_none(), "limit_count → limit");
         assert_eq!(parsed.get("limit").and_then(|l| l.as_i64()), Some(5));
         // Recursive rename: col → column inside expr inside order_by.

@@ -163,9 +163,11 @@ impl BoundDialectValidator<'_> {
                             }
                         }
                         Expression::Star => {
-                            errors.push(self.group_by_error(
-                                "bare `*` is not allowed in SELECT with GROUP BY",
-                            ));
+                            errors.push(
+                                self.group_by_error(
+                                    "bare `*` is not allowed in SELECT with GROUP BY",
+                                ),
+                            );
                         }
                         // Aggregate functions (SUM, COUNT, etc.) are OK even if their
                         // arguments are not in GROUP BY.
@@ -295,11 +297,7 @@ impl BoundDialectValidator<'_> {
 /// A column is considered covered if any GROUP BY expression is a `ColumnRef`
 /// whose `(table, column)` pair matches (comparing qualified names if both are
 /// qualified, or just column names if either side is unqualified).
-fn is_column_in_group_by(
-    group_by: &[Expression],
-    table: &Option<String>,
-    column: &str,
-) -> bool {
+fn is_column_in_group_by(group_by: &[Expression], table: &Option<String>, column: &str) -> bool {
     group_by.iter().any(|expr| match expr {
         Expression::ColumnRef {
             table: gb_table,

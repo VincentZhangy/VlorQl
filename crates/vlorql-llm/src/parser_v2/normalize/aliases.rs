@@ -30,12 +30,20 @@ pub struct AliasEntry {
 impl AliasEntry {
     /// Create a global alias entry (applies to all models).
     pub const fn global(from: &'static str, to: &'static str) -> Self {
-        Self { from, to, model: None }
+        Self {
+            from,
+            to,
+            model: None,
+        }
     }
 
     /// Create a model-specific alias entry.
     pub const fn for_model(from: &'static str, to: &'static str, model: &'static str) -> Self {
-        Self { from, to, model: Some(model) }
+        Self {
+            from,
+            to,
+            model: Some(model),
+        }
     }
 }
 
@@ -51,7 +59,6 @@ pub const FIELD_ALIASES: &[AliasEntry] = &[
     AliasEntry::global("condition", "where"),
     AliasEntry::global("predicate", "where"),
     AliasEntry::global("predicates", "where"),
-
     // ── SELECT 相关 ────────────────────────────────────────────────
     AliasEntry::global("projection", "select"),
     AliasEntry::global("projections", "select"),
@@ -59,26 +66,21 @@ pub const FIELD_ALIASES: &[AliasEntry] = &[
     AliasEntry::global("project", "select"),
     AliasEntry::global("project_list", "select"),
     AliasEntry::global("fields", "select"),
-
     // ── FROM 相关 ──────────────────────────────────────────────────
     AliasEntry::global("source", "from"),
     AliasEntry::global("sources", "from"),
     AliasEntry::global("tables", "from"),
-
     // ── ORDER BY 相关 ──────────────────────────────────────────────
     AliasEntry::global("sort", "order_by"),
     AliasEntry::global("sorts", "order_by"),
     AliasEntry::global("sort_by", "order_by"),
     AliasEntry::global("ordering", "order_by"),
     AliasEntry::global("order", "order_by"),
-
     // ── GROUP BY 相关 ──────────────────────────────────────────────
     AliasEntry::global("group", "group_by"),
     AliasEntry::global("groupby", "group_by"),
-
     // ── HAVING 相关 ────────────────────────────────────────────────
     AliasEntry::global("having_condition", "having"),
-
     // ── LIMIT / OFFSET 相关 ────────────────────────────────────────
     AliasEntry::global("limit_count", "limit"),
     AliasEntry::global("max_rows", "limit"),
@@ -87,15 +89,12 @@ pub const FIELD_ALIASES: &[AliasEntry] = &[
     AliasEntry::global("offset_count", "offset"),
     AliasEntry::global("skip", "offset"),
     AliasEntry::global("start", "offset"),
-
     // ── JOIN 相关 ──────────────────────────────────────────────────
     AliasEntry::global("join", "joins"),
     AliasEntry::global("relations", "joins"),
-
     // ── CTE 相关 ───────────────────────────────────────────────────
     AliasEntry::global("cte", "ctes"),
     AliasEntry::global("with", "ctes"),
-
     // ── 通用字段重命名 ─────────────────────────────────────────────
     AliasEntry::global("col", "column"),
     AliasEntry::global("kind", "type"),
@@ -133,17 +132,11 @@ pub fn normalize_field_names(val: &mut serde_json::Value) -> bool {
 ///
 /// Returns `true` if any field was renamed.
 #[must_use]
-pub fn normalize_field_names_for_model(
-    val: &mut serde_json::Value,
-    model: &str,
-) -> bool {
+pub fn normalize_field_names_for_model(val: &mut serde_json::Value, model: &str) -> bool {
     normalize_field_names_impl(val, Some(model))
 }
 
-fn normalize_field_names_impl(
-    val: &mut serde_json::Value,
-    model: Option<&str>,
-) -> bool {
+fn normalize_field_names_impl(val: &mut serde_json::Value, model: Option<&str>) -> bool {
     let mut changed = false;
     match val {
         serde_json::Value::Object(map) => {
@@ -274,10 +267,15 @@ mod tests {
         // normalization, not by alias normalization).
         assert!(!normalize_field_names(&mut val));
         // "filter" should still be present (alias was skipped, not removed).
-        assert!(val.get("filter").is_some(), "filter stays when where already exists");
+        assert!(
+            val.get("filter").is_some(),
+            "filter stays when where already exists"
+        );
         // The original "where" should still be there.
         assert_eq!(
-            val.get("where").and_then(|v| v.get("type")).and_then(|v| v.as_str()),
+            val.get("where")
+                .and_then(|v| v.get("type"))
+                .and_then(|v| v.as_str()),
             Some("comparison")
         );
     }
@@ -305,7 +303,10 @@ mod tests {
         assert_eq!(where_obj.get("type").and_then(|v| v.as_str()), Some("and"));
         // "kind" → "type" (inside where's children)
         let left = where_obj.get("left").unwrap();
-        assert_eq!(left.get("type").and_then(|v| v.as_str()), Some("comparison"));
+        assert_eq!(
+            left.get("type").and_then(|v| v.as_str()),
+            Some("comparison")
+        );
         assert!(left.get("kind").is_none());
         // "field" → "column"
         assert_eq!(left.get("column").and_then(|v| v.as_str()), Some("age"));

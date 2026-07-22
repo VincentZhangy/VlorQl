@@ -33,28 +33,19 @@ pub fn repair_expression_value(val: &mut Value) -> bool {
 
     // ColumnRef: has `column` (and optionally `table`)
     if obj.contains_key("column") {
-        obj.insert(
-            "type".to_owned(),
-            Value::String("column_ref".to_owned()),
-        );
+        obj.insert("type".to_owned(), Value::String("column_ref".to_owned()));
         return true;
     }
 
     // Literal: has `value`
     if obj.contains_key("value") {
-        obj.insert(
-            "type".to_owned(),
-            Value::String("literal".to_owned()),
-        );
+        obj.insert("type".to_owned(), Value::String("literal".to_owned()));
         return true;
     }
 
     // FunctionCall: has `name` and `args`
     if obj.contains_key("name") && obj.contains_key("args") {
-        obj.insert(
-            "type".to_owned(),
-            Value::String("function_call".to_owned()),
-        );
+        obj.insert("type".to_owned(), Value::String("function_call".to_owned()));
         return true;
     }
 
@@ -77,10 +68,7 @@ pub fn repair_predicate_type(val: &mut Value) -> bool {
     }
 
     if obj.contains_key("left") && obj.contains_key("op") {
-        obj.insert(
-            "type".to_owned(),
-            Value::String("comparison".to_owned()),
-        );
+        obj.insert("type".to_owned(), Value::String("comparison".to_owned()));
         return true;
     }
 
@@ -152,10 +140,7 @@ fn unwrap_side(obj: &mut serde_json::Map<String, Value>, side: &str) -> bool {
 }
 
 /// Unwrap an expression field from array to single value.
-fn unwrap_array_field(
-    obj: &mut serde_json::Map<String, Value>,
-    field: &str,
-) -> bool {
+fn unwrap_array_field(obj: &mut serde_json::Map<String, Value>, field: &str) -> bool {
     if let Some(arr) = obj.get(field).and_then(|v| v.as_array()) {
         if !arr.is_empty() {
             obj.insert((*field).to_string(), arr[0].clone());
@@ -179,12 +164,13 @@ pub fn inject_missing_right(val: &mut Value) -> bool {
         None => return false,
     };
 
-    let pred_type = obj
-        .get("type")
-        .and_then(|t| t.as_str())
-        .unwrap_or("");
+    let pred_type = obj.get("type").and_then(|t| t.as_str()).unwrap_or("");
 
-    if pred_type == "comparison" && !obj.contains_key("right") && obj.contains_key("left") && obj.contains_key("op") {
+    if pred_type == "comparison"
+        && !obj.contains_key("right")
+        && obj.contains_key("left")
+        && obj.contains_key("op")
+    {
         obj.insert(
             "right".to_owned(),
             serde_json::json!({"type": "literal", "value": null, "data_type": "null"}),
@@ -206,10 +192,7 @@ pub fn simplify_single_child(val: &mut Value) -> bool {
         None => return false,
     };
 
-    let pred_type = obj
-        .get("type")
-        .and_then(|t| t.as_str())
-        .unwrap_or("");
+    let pred_type = obj.get("type").and_then(|t| t.as_str()).unwrap_or("");
 
     if (pred_type == "and" || pred_type == "or")
         && obj.contains_key("left")
@@ -268,24 +251,32 @@ pub fn normalize_predicate(val: &mut Value) -> bool {
             if let Some(op_val) = obj.get("op").and_then(|v| v.as_str()) {
                 if op_val == "is_null" || op_val == "is null" {
                     // Extract the expression from `left` or `expr`.
-                    let expr = obj.remove("left")
+                    let expr = obj
+                        .remove("left")
                         .or_else(|| obj.remove("expr"))
                         .unwrap_or(Value::Null);
                     obj.clear();
                     obj.insert("type".to_owned(), Value::String("is_null".to_owned()));
                     obj.insert("expr".to_owned(), expr);
                     changed = true;
-                } else if op_val == "is_not_null" || op_val == "is not null" || op_val == "isnotnull" {
+                } else if op_val == "is_not_null"
+                    || op_val == "is not null"
+                    || op_val == "isnotnull"
+                {
                     // Convert to NOT(IsNull).
-                    let expr = obj.remove("left")
+                    let expr = obj
+                        .remove("left")
                         .or_else(|| obj.remove("expr"))
                         .unwrap_or(Value::Null);
                     obj.clear();
                     obj.insert("type".to_owned(), Value::String("not".to_owned()));
-                    obj.insert("child".to_owned(), serde_json::json!({
-                        "type": "is_null",
-                        "expr": expr
-                    }));
+                    obj.insert(
+                        "child".to_owned(),
+                        serde_json::json!({
+                            "type": "is_null",
+                            "expr": expr
+                        }),
+                    );
                     changed = true;
                 }
             }
@@ -295,7 +286,11 @@ pub fn normalize_predicate(val: &mut Value) -> bool {
         // {"type":"in","expr":...,"target":{"value":"active"}} → {"type":"in","expr":...,"target":[{"value":"active"}]}
         if pred_type == "in" {
             if let Some(target) = obj.get("target") {
-                if target.is_object() && !target.as_object().map_or(false, |o| o.contains_key("select")) {
+                if target.is_object()
+                    && !target
+                        .as_object()
+                        .map_or(false, |o| o.contains_key("select"))
+                {
                     // Single value object — wrap in array.
                     let wrapped = serde_json::json!([target.clone()]);
                     obj.insert("target".to_owned(), wrapped);
@@ -351,12 +346,9 @@ fn normalize_impl(val: &mut Value) -> bool {
         Value::Object(map) => {
             // Check if this is a predicate-like object (has `type` or
             // looks like a comparison with `left` + `op`).
-            let pred_type = map
-                .get("type")
-                .and_then(|t| t.as_str())
-                .unwrap_or("");
-            let is_predicate_like = !pred_type.is_empty()
-                || (map.contains_key("left") && map.contains_key("op"));
+            let pred_type = map.get("type").and_then(|t| t.as_str()).unwrap_or("");
+            let is_predicate_like =
+                !pred_type.is_empty() || (map.contains_key("left") && map.contains_key("op"));
 
             if is_predicate_like {
                 // This is a predicate-like object — run full predicate normalization.
@@ -376,7 +368,25 @@ fn normalize_impl(val: &mut Value) -> bool {
                 .and_then(|t| t.as_str())
                 .map(|s| s.to_lowercase())
                 .unwrap_or_default();
-            if !type_str.is_empty() && !matches!(type_str.as_str(), "function_call" | "column_ref" | "literal" | "binary_op" | "star" | "subquery" | "comparison" | "and" | "or" | "not" | "between" | "in" | "like" | "is_null" | "exists")
+            if !type_str.is_empty()
+                && !matches!(
+                    type_str.as_str(),
+                    "function_call"
+                        | "column_ref"
+                        | "literal"
+                        | "binary_op"
+                        | "star"
+                        | "subquery"
+                        | "comparison"
+                        | "and"
+                        | "or"
+                        | "not"
+                        | "between"
+                        | "in"
+                        | "like"
+                        | "is_null"
+                        | "exists"
+                )
                 && vlorql_core::function::is_known_function(&type_str)
             {
                 if let Some(args) = map.remove("args") {
@@ -430,7 +440,10 @@ mod tests {
     fn injects_function_call_type() {
         let mut val = json!({"name": "count", "args": [{"type": "star"}]});
         assert!(repair_expression_value(&mut val));
-        assert_eq!(val.get("type").and_then(|v| v.as_str()), Some("function_call"));
+        assert_eq!(
+            val.get("type").and_then(|v| v.as_str()),
+            Some("function_call")
+        );
     }
 
     #[test]
@@ -513,7 +526,8 @@ mod tests {
 
     #[test]
     fn does_not_simplify_and_with_both_sides() {
-        let mut val = json!({"type": "and", "left": {"type": "comparison"}, "right": {"type": "comparison"}});
+        let mut val =
+            json!({"type": "and", "left": {"type": "comparison"}, "right": {"type": "comparison"}});
         assert!(!simplify_single_child(&mut val));
     }
 

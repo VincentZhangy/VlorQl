@@ -40,6 +40,7 @@ pub(crate) const SSE_DONE: &str = "[DONE]";
 pub mod anthropic;
 pub mod deepseek;
 pub mod local;
+pub mod parse;
 /// Parse pipeline: recover → canonicalize → build (`QueryPlan`).
 ///
 /// Public helpers are re-exported at the crate root for compatibility:
@@ -51,15 +52,13 @@ pub mod local;
 /// alongside the existing `parse` module; will eventually replace it.
 // V2 pipeline (recommended for all new code).
 pub mod parser_v2;
-pub mod parse;
 pub mod zhipu;
 
-pub use parser_v2::recover::{detect_template_leak, extract_json_content};
 pub use parser_v2::builder::query_builder::{from_canonical_str, from_canonical_value};
 pub use parser_v2::pipeline::{
-    parse_query_plan, parse_query_plan_debug, parse_query_plan_lenient,
-    ParseError, ParseResult,
+    ParseError, ParseResult, parse_query_plan, parse_query_plan_debug, parse_query_plan_lenient,
 };
+pub use parser_v2::recover::{detect_template_leak, extract_json_content};
 
 /// Parse LLM response text into a [`QueryPlan`] using the V2 pipeline.
 ///
@@ -499,7 +498,8 @@ impl OpenAIClient {
                 )
             })?;
 
-        serde_json::from_str(content).ok()
+        serde_json::from_str(content)
+            .ok()
             .and_then(|v: Value| {
                 v.get("content")
                     .or_else(|| v.get("response"))
@@ -1830,5 +1830,4 @@ mod tests {
         // The test verifies that the span instrumentation does not panic.
         drop(captured_clone.lock().expect("lock should not be poisoned"));
     }
-
 }

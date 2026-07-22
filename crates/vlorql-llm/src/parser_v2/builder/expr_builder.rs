@@ -3,11 +3,11 @@
 //! Builds typed AST nodes from canonical JSON.  This layer does **no**
 //! repair — it assumes the input has already been normalized.
 
+use serde_json::Value;
 use std::fmt;
 use vlorql_core::schema::{
     BinaryOperator, ComparisonOperator, DataType, Expression, InTarget, Predicate,
 };
-use serde_json::Value;
 
 /// Error returned when building an AST node from JSON fails.
 #[derive(Debug, Clone)]
@@ -19,7 +19,10 @@ pub struct BuildError {
 impl BuildError {
     /// Create a new error at the current path.
     pub fn new(path: impl Into<String>, message: impl Into<String>) -> Self {
-        Self { path: path.into(), message: message.into() }
+        Self {
+            path: path.into(),
+            message: message.into(),
+        }
     }
 
     /// Prepend a field name to the error path.
@@ -29,7 +32,10 @@ impl BuildError {
         } else {
             format!("{}.{}", field, self.path)
         };
-        Self { path: new_path, message: self.message }
+        Self {
+            path: new_path,
+            message: self.message,
+        }
     }
 }
 
@@ -47,20 +53,25 @@ impl std::error::Error for BuildError {}
 
 impl From<BuildError> for serde_json::Error {
     fn from(e: BuildError) -> Self {
-        serde_json::Error::io(std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()))
+        serde_json::Error::io(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            e.to_string(),
+        ))
     }
 }
 
 // ── Field extraction helpers ──────────────────────────────────────
 
 /// Extract a required string field from a JSON object.
-pub fn req_str<'a>(obj: &'a serde_json::Map<String, Value>, key: &str, path: &str) -> Result<&'a str, BuildError> {
-    obj.get(key)
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| {
-            let actual = obj.get(key).map(type_name).unwrap_or("(missing)");
-            BuildError::new(path, format!("expected string `{key}`, got {actual}"))
-        })
+pub fn req_str<'a>(
+    obj: &'a serde_json::Map<String, Value>,
+    key: &str,
+    path: &str,
+) -> Result<&'a str, BuildError> {
+    obj.get(key).and_then(|v| v.as_str()).ok_or_else(|| {
+        let actual = obj.get(key).map(type_name).unwrap_or("(missing)");
+        BuildError::new(path, format!("expected string `{key}`, got {actual}"))
+    })
 }
 
 /// Extract an optional string field from a JSON object.
@@ -69,17 +80,19 @@ pub fn opt_str<'a>(obj: &'a serde_json::Map<String, Value>, key: &str) -> Option
 }
 
 /// Extract a required object from a JSON value.
-pub fn req_obj<'a>(val: &'a Value, parent: &str) -> Result<&'a serde_json::Map<String, Value>, BuildError> {
-    val.as_object().ok_or_else(|| {
-        BuildError::new(parent, format!("expected object, got {}", type_name(val)))
-    })
+pub fn req_obj<'a>(
+    val: &'a Value,
+    parent: &str,
+) -> Result<&'a serde_json::Map<String, Value>, BuildError> {
+    val.as_object()
+        .ok_or_else(|| BuildError::new(parent, format!("expected object, got {}", type_name(val))))
 }
 
 /// Extract a required array from a JSON value.
 pub fn req_arr<'a>(val: &'a Value, parent: &str) -> Result<&'a [Value], BuildError> {
-    val.as_array().map(|v| v.as_slice()).ok_or_else(|| {
-        BuildError::new(parent, format!("expected array, got {}", type_name(val)))
-    })
+    val.as_array()
+        .map(|v| v.as_slice())
+        .ok_or_else(|| BuildError::new(parent, format!("expected array, got {}", type_name(val))))
 }
 
 /// Human-readable type name for a JSON value.
@@ -106,7 +119,10 @@ pub fn parse_comparison_op(s: &str) -> Result<ComparisonOperator, BuildError> {
         "gte" => Ok(Gte),
         "lt" => Ok(Lt),
         "lte" => Ok(Lte),
-        _ => Err(BuildError::new("op", format!("unknown comparison operator `{s}`"))),
+        _ => Err(BuildError::new(
+            "op",
+            format!("unknown comparison operator `{s}`"),
+        )),
     }
 }
 
@@ -119,7 +135,10 @@ pub fn parse_binary_op(s: &str) -> Result<BinaryOperator, BuildError> {
         "mul" => Ok(Mul),
         "div" => Ok(Div),
         "mod" => Ok(Mod),
-        _ => Err(BuildError::new("op", format!("unknown binary operator `{s}`"))),
+        _ => Err(BuildError::new(
+            "op",
+            format!("unknown binary operator `{s}`"),
+        )),
     }
 }
 
@@ -132,7 +151,10 @@ pub fn parse_join_type(s: &str) -> Result<vlorql_core::schema::JoinType, BuildEr
         "right" => Ok(Right),
         "full" => Ok(Full),
         "cross" => Ok(Cross),
-        _ => Err(BuildError::new("join_type", format!("unknown join type `{s}`"))),
+        _ => Err(BuildError::new(
+            "join_type",
+            format!("unknown join type `{s}`"),
+        )),
     }
 }
 
@@ -148,7 +170,10 @@ pub fn parse_data_type(s: &str) -> Result<DataType, BuildError> {
         "null" => Ok(Null),
         "json" => Ok(Json),
         "uuid" => Ok(Uuid),
-        other => Err(BuildError::new("data_type", format!("unknown data type `{other}`"))),
+        other => Err(BuildError::new(
+            "data_type",
+            format!("unknown data type `{other}`"),
+        )),
     }
 }
 
@@ -166,7 +191,11 @@ fn build_literal_expr(val: &Value) -> Result<Expression, BuildError> {
             data_type: DataType::Boolean,
         }),
         Value::Number(n) => {
-            let dt = if n.is_f64() { DataType::Float } else { DataType::Int };
+            let dt = if n.is_f64() {
+                DataType::Float
+            } else {
+                DataType::Int
+            };
             Ok(Expression::Literal {
                 value: val.clone(),
                 data_type: dt,
@@ -176,7 +205,10 @@ fn build_literal_expr(val: &Value) -> Result<Expression, BuildError> {
             value: Value::String(s.clone()),
             data_type: DataType::String,
         }),
-        _ => Err(BuildError::new("", format!("cannot infer Expression from {}", type_name(val)))),
+        _ => Err(BuildError::new(
+            "",
+            format!("cannot infer Expression from {}", type_name(val)),
+        )),
     }
 }
 
@@ -237,27 +269,36 @@ pub fn build_expression(val: &Value) -> Result<Expression, BuildError> {
         "literal" => build_literal_from_obj(obj),
         "function_call" => {
             let name = req_str(obj, "name", "")?.to_owned();
-            let args_arr = req_arr(obj.get("args").ok_or_else(|| {
-                BuildError::new("", "missing `args` field on function_call")
-            })?, "args")?;
+            let args_arr = req_arr(
+                obj.get("args")
+                    .ok_or_else(|| BuildError::new("", "missing `args` field on function_call"))?,
+                "args",
+            )?;
             let args = args_arr
                 .iter()
                 .enumerate()
                 .map(|(i, v)| build_expression(v).map_err(|e| e.at(&format!("args[{i}]"))))
                 .collect::<Result<Vec<_>, _>>()?;
-            let distinct = obj.get("distinct").and_then(|v| v.as_bool()).unwrap_or(false);
-            Ok(Expression::FunctionCall { name, args, distinct })
+            let distinct = obj
+                .get("distinct")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            Ok(Expression::FunctionCall {
+                name,
+                args,
+                distinct,
+            })
         }
         "binary_op" => {
-            let left_val = obj.get("left").ok_or_else(|| {
-                BuildError::new("", "missing `left` field on binary_op")
-            })?;
+            let left_val = obj
+                .get("left")
+                .ok_or_else(|| BuildError::new("", "missing `left` field on binary_op"))?;
             let left = build_expression(left_val).map_err(|e| e.at("left"))?;
             let op_str = req_str(obj, "op", "")?;
             let op = parse_binary_op(op_str)?;
-            let right_val = obj.get("right").ok_or_else(|| {
-                BuildError::new("", "missing `right` field on binary_op")
-            })?;
+            let right_val = obj
+                .get("right")
+                .ok_or_else(|| BuildError::new("", "missing `right` field on binary_op"))?;
             let right = build_expression(right_val).map_err(|e| e.at("right"))?;
             Ok(Expression::BinaryOp {
                 left: Box::new(left),
@@ -267,9 +308,11 @@ pub fn build_expression(val: &Value) -> Result<Expression, BuildError> {
         }
         "star" => Ok(Expression::Star),
         "subquery" => {
-            let sub = req_obj(obj.get("query").ok_or_else(|| {
-                BuildError::new("", "missing `query` field on subquery")
-            })?, "query")?;
+            let sub = req_obj(
+                obj.get("query")
+                    .ok_or_else(|| BuildError::new("", "missing `query` field on subquery"))?,
+                "query",
+            )?;
             let query = super::query_builder::build_plan_from_obj(sub)?;
             Ok(Expression::SubQuery {
                 query: Box::new(query),
@@ -280,24 +323,44 @@ pub fn build_expression(val: &Value) -> Result<Expression, BuildError> {
             // treat it as a FunctionCall.  The LLM sometimes emits
             // {"type": "sum", "args": [...]} instead of the canonical
             // {"type": "function_call", "name": "sum", ...}.
-            const AGGREGATES: &[&str] = &["sum", "count", "avg", "min", "max", "string_agg", "array_agg"];
+            const AGGREGATES: &[&str] = &[
+                "sum",
+                "count",
+                "avg",
+                "min",
+                "max",
+                "string_agg",
+                "array_agg",
+            ];
             if AGGREGATES.contains(&type_str) {
-                let args_arr = req_arr(obj.get("args").ok_or_else(|| {
-                    BuildError::new("args", format!("aggregate '{}' missing `args` field", type_str))
-                })?, "args")?;
+                let args_arr = req_arr(
+                    obj.get("args").ok_or_else(|| {
+                        BuildError::new(
+                            "args",
+                            format!("aggregate '{}' missing `args` field", type_str),
+                        )
+                    })?,
+                    "args",
+                )?;
                 let args = args_arr
                     .iter()
                     .enumerate()
                     .map(|(i, v)| build_expression(v).map_err(|e| e.at(&format!("args[{i}]"))))
                     .collect::<Result<Vec<_>, _>>()?;
-                let distinct = obj.get("distinct").and_then(|v| v.as_bool()).unwrap_or(false);
+                let distinct = obj
+                    .get("distinct")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
                 Ok(Expression::FunctionCall {
                     name: type_str.to_owned(),
                     args,
                     distinct,
                 })
             } else {
-                Err(BuildError::new("type", format!("unknown Expression variant `{type_str}`")))
+                Err(BuildError::new(
+                    "type",
+                    format!("unknown Expression variant `{type_str}`"),
+                ))
             }
         }
     }
@@ -308,7 +371,10 @@ pub fn build_expression(val: &Value) -> Result<Expression, BuildError> {
 /// Build a [`Predicate`] from a canonical JSON value.
 pub fn build_predicate(val: &Value) -> Result<Predicate, BuildError> {
     let obj = val.as_object().ok_or_else(|| {
-        BuildError::new("", format!("expected object for Predicate, got {}", type_name(val)))
+        BuildError::new(
+            "",
+            format!("expected object for Predicate, got {}", type_name(val)),
+        )
     })?;
 
     let type_str = match obj.get("type").and_then(|t| t.as_str()) {
@@ -331,24 +397,28 @@ pub fn build_predicate(val: &Value) -> Result<Predicate, BuildError> {
     match type_str {
         "comparison" => {
             let left = build_expression(
-                obj.get("left").ok_or_else(|| BuildError::new("left", "missing `left` field"))?,
+                obj.get("left")
+                    .ok_or_else(|| BuildError::new("left", "missing `left` field"))?,
             )
             .map_err(|e| e.at("left"))?;
             let op_str = req_str(obj, "op", "")?;
             let op = parse_comparison_op(op_str)?;
             let right = build_expression(
-                obj.get("right").ok_or_else(|| BuildError::new("right", "missing `right` field"))?,
+                obj.get("right")
+                    .ok_or_else(|| BuildError::new("right", "missing `right` field"))?,
             )
             .map_err(|e| e.at("right"))?;
             Ok(Predicate::Comparison { left, op, right })
         }
         "and" => {
             let left = build_predicate(
-                obj.get("left").ok_or_else(|| BuildError::new("left", "missing `left` field"))?,
+                obj.get("left")
+                    .ok_or_else(|| BuildError::new("left", "missing `left` field"))?,
             )
             .map_err(|e| e.at("left"))?;
             let right = build_predicate(
-                obj.get("right").ok_or_else(|| BuildError::new("right", "missing `right` field"))?,
+                obj.get("right")
+                    .ok_or_else(|| BuildError::new("right", "missing `right` field"))?,
             )
             .map_err(|e| e.at("right"))?;
             Ok(Predicate::And {
@@ -358,11 +428,13 @@ pub fn build_predicate(val: &Value) -> Result<Predicate, BuildError> {
         }
         "or" => {
             let left = build_predicate(
-                obj.get("left").ok_or_else(|| BuildError::new("left", "missing `left` field"))?,
+                obj.get("left")
+                    .ok_or_else(|| BuildError::new("left", "missing `left` field"))?,
             )
             .map_err(|e| e.at("left"))?;
             let right = build_predicate(
-                obj.get("right").ok_or_else(|| BuildError::new("right", "missing `right` field"))?,
+                obj.get("right")
+                    .ok_or_else(|| BuildError::new("right", "missing `right` field"))?,
             )
             .map_err(|e| e.at("right"))?;
             Ok(Predicate::Or {
@@ -372,7 +444,8 @@ pub fn build_predicate(val: &Value) -> Result<Predicate, BuildError> {
         }
         "not" => {
             let child = build_predicate(
-                obj.get("child").ok_or_else(|| BuildError::new("child", "missing `child` field"))?,
+                obj.get("child")
+                    .ok_or_else(|| BuildError::new("child", "missing `child` field"))?,
             )
             .map_err(|e| e.at("child"))?;
             Ok(Predicate::Not {
@@ -381,27 +454,31 @@ pub fn build_predicate(val: &Value) -> Result<Predicate, BuildError> {
         }
         "between" => {
             let expr = build_expression(
-                obj.get("expr").ok_or_else(|| BuildError::new("expr", "missing `expr` field"))?,
+                obj.get("expr")
+                    .ok_or_else(|| BuildError::new("expr", "missing `expr` field"))?,
             )
             .map_err(|e| e.at("expr"))?;
             let low = build_expression(
-                obj.get("low").ok_or_else(|| BuildError::new("low", "missing `low` field"))?,
+                obj.get("low")
+                    .ok_or_else(|| BuildError::new("low", "missing `low` field"))?,
             )
             .map_err(|e| e.at("low"))?;
             let high = build_expression(
-                obj.get("high").ok_or_else(|| BuildError::new("high", "missing `high` field"))?,
+                obj.get("high")
+                    .ok_or_else(|| BuildError::new("high", "missing `high` field"))?,
             )
             .map_err(|e| e.at("high"))?;
             Ok(Predicate::Between { expr, low, high })
         }
         "in" => {
             let expr = build_expression(
-                obj.get("expr").ok_or_else(|| BuildError::new("expr", "missing `expr` field"))?,
+                obj.get("expr")
+                    .ok_or_else(|| BuildError::new("expr", "missing `expr` field"))?,
             )
             .map_err(|e| e.at("expr"))?;
-            let target_val = obj.get("target").ok_or_else(|| {
-                BuildError::new("target", "missing `target` field on in")
-            })?;
+            let target_val = obj
+                .get("target")
+                .ok_or_else(|| BuildError::new("target", "missing `target` field on in"))?;
             let target = if let Some(arr) = target_val.as_array() {
                 let values = arr
                     .iter()
@@ -415,14 +492,18 @@ pub fn build_predicate(val: &Value) -> Result<Predicate, BuildError> {
             } else {
                 return Err(BuildError::new(
                     "target",
-                    format!("expected array or object for IN target, got {}", type_name(target_val)),
+                    format!(
+                        "expected array or object for IN target, got {}",
+                        type_name(target_val)
+                    ),
                 ));
             };
             Ok(Predicate::In { expr, target })
         }
         "like" => {
             let expr = build_expression(
-                obj.get("expr").ok_or_else(|| BuildError::new("expr", "missing `expr` field"))?,
+                obj.get("expr")
+                    .ok_or_else(|| BuildError::new("expr", "missing `expr` field"))?,
             )
             .map_err(|e| e.at("expr"))?;
             let pattern = req_str(obj, "pattern", "")?.to_owned();
@@ -430,21 +511,27 @@ pub fn build_predicate(val: &Value) -> Result<Predicate, BuildError> {
         }
         "is_null" => {
             let expr = build_expression(
-                obj.get("expr").ok_or_else(|| BuildError::new("expr", "missing `expr` field"))?,
+                obj.get("expr")
+                    .ok_or_else(|| BuildError::new("expr", "missing `expr` field"))?,
             )
             .map_err(|e| e.at("expr"))?;
             Ok(Predicate::IsNull { expr })
         }
         "exists" => {
-            let sub = req_obj(obj.get("query").ok_or_else(|| {
-                BuildError::new("query", "missing `query` field on exists")
-            })?, "query")?;
+            let sub = req_obj(
+                obj.get("query")
+                    .ok_or_else(|| BuildError::new("query", "missing `query` field on exists"))?,
+                "query",
+            )?;
             let query = super::query_builder::build_plan_from_obj(sub)?;
             Ok(Predicate::Exists {
                 query: Box::new(query),
             })
         }
-        other => Err(BuildError::new("type", format!("unknown Predicate variant `{other}`"))),
+        other => Err(BuildError::new(
+            "type",
+            format!("unknown Predicate variant `{other}`"),
+        )),
     }
 }
 
@@ -461,7 +548,9 @@ mod tests {
     fn build_column_ref() {
         let val = json!({"type": "column_ref", "table": "users", "column": "id"});
         let expr = build_expression(&val).unwrap();
-        assert!(matches!(expr, Expression::ColumnRef { table: Some(t), column: c } if t == "users" && c == "id"));
+        assert!(
+            matches!(expr, Expression::ColumnRef { table: Some(t), column: c } if t == "users" && c == "id")
+        );
     }
 
     #[test]
@@ -489,7 +578,9 @@ mod tests {
     fn build_literal_from_bare_string() {
         let val = json!("hello");
         let expr = build_expression(&val).unwrap();
-        assert!(matches!(expr, Expression::Literal { value: v, data_type: DataType::String } if v == json!("hello")));
+        assert!(
+            matches!(expr, Expression::Literal { value: v, data_type: DataType::String } if v == json!("hello"))
+        );
     }
 
     #[test]
@@ -510,7 +601,13 @@ mod tests {
     fn build_binary_op() {
         let val = json!({"type": "binary_op", "left": {"type": "column_ref", "column": "a"}, "op": "add", "right": {"type": "column_ref", "column": "b"}});
         let expr = build_expression(&val).unwrap();
-        assert!(matches!(expr, Expression::BinaryOp { op: BinaryOperator::Add, .. }));
+        assert!(matches!(
+            expr,
+            Expression::BinaryOp {
+                op: BinaryOperator::Add,
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -524,7 +621,9 @@ mod tests {
     fn build_infer_type_from_fields() {
         let val = json!({"column": "age", "table": "users"});
         let expr = build_expression(&val).unwrap();
-        assert!(matches!(expr, Expression::ColumnRef { table: Some(t), column: c } if t == "users" && c == "age"));
+        assert!(
+            matches!(expr, Expression::ColumnRef { table: Some(t), column: c } if t == "users" && c == "age")
+        );
     }
 
     // ── Predicate building ────────────────────────────────────────
@@ -568,7 +667,13 @@ mod tests {
     fn build_in_values() {
         let val = json!({"type": "in", "expr": {"column": "status"}, "target": [{"value": "active"}, {"value": "pending"}]});
         let pred = build_predicate(&val).unwrap();
-        assert!(matches!(pred, Predicate::In { target: InTarget::Values(_), .. }));
+        assert!(matches!(
+            pred,
+            Predicate::In {
+                target: InTarget::Values(_),
+                ..
+            }
+        ));
     }
 
     #[test]

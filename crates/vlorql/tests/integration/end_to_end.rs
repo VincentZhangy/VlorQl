@@ -34,7 +34,10 @@ async fn query_runs_prompt_validation_and_compilation() {
         .expect("valid mock plan should compile");
 
     assert_eq!(compiled.dialect, SqlDialect::Sqlite);
-    assert_eq!(compiled.sql, "SELECT \"t1\".\"id\" FROM \"users\" AS \"t1\"");
+    assert_eq!(
+        compiled.sql,
+        "SELECT \"t1\".\"id\" FROM \"users\" AS \"t1\""
+    );
     assert!(compiled.parameters.is_empty());
 }
 
@@ -176,7 +179,10 @@ async fn query_retries_after_retryable_validation_error() {
         .query("show user ids")
         .await
         .expect("second valid plan should be used after retry");
-    assert_eq!(compiled.sql, "SELECT \"t1\".\"id\" FROM \"users\" AS \"t1\"");
+    assert_eq!(
+        compiled.sql,
+        "SELECT \"t1\".\"id\" FROM \"users\" AS \"t1\""
+    );
 }
 
 /// `query()` retries the LLM up to the configured `max_retries` value

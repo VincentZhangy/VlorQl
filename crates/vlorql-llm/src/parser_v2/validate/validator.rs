@@ -43,7 +43,10 @@ pub struct ValidationError {
 impl ValidationError {
     /// Create a new validation error.
     pub fn new(kind: ValidationErrorKind, message: impl Into<String>) -> Self {
-        Self { kind, message: message.into() }
+        Self {
+            kind,
+            message: message.into(),
+        }
     }
 }
 
@@ -84,7 +87,10 @@ mod tests {
     fn valid_plan() -> QueryPlan {
         QueryPlan {
             select: vec![Projection::Star { table: None }],
-            from: FromClause { table: "users".to_owned(), alias: None },
+            from: FromClause {
+                table: "users".to_owned(),
+                alias: None,
+            },
             r#where: None,
             group_by: None,
             having: None,
@@ -109,7 +115,11 @@ mod tests {
         let result = validate_plan(&plan);
         assert!(result.is_err());
         let errors = result.unwrap_err();
-        assert!(errors.iter().any(|e| e.kind == ValidationErrorKind::EmptySelect));
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.kind == ValidationErrorKind::EmptySelect)
+        );
     }
 
     #[test]
@@ -120,16 +130,21 @@ mod tests {
         let result = validate_plan(&plan);
         assert!(result.is_err());
         let errors = result.unwrap_err();
-        assert!(errors.iter().any(|e| e.kind == ValidationErrorKind::EmptySelect));
-        assert!(errors.iter().any(|e| e.kind == ValidationErrorKind::MissingFrom));
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.kind == ValidationErrorKind::EmptySelect)
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.kind == ValidationErrorKind::MissingFrom)
+        );
     }
 
     #[test]
     fn validation_error_display() {
-        let err = ValidationError::new(
-            ValidationErrorKind::MissingFrom,
-            "FROM clause is missing",
-        );
+        let err = ValidationError::new(ValidationErrorKind::MissingFrom, "FROM clause is missing");
         let display = format!("{}", err);
         assert!(display.contains("MissingFrom"));
         assert!(display.contains("FROM clause is missing"));
@@ -137,10 +152,7 @@ mod tests {
 
     #[test]
     fn validation_error_clone() {
-        let err = ValidationError::new(
-            ValidationErrorKind::EmptySelect,
-            "SELECT is empty",
-        );
+        let err = ValidationError::new(ValidationErrorKind::EmptySelect, "SELECT is empty");
         let cloned = err.clone();
         assert_eq!(err.kind, cloned.kind);
         assert_eq!(err.message, cloned.message);

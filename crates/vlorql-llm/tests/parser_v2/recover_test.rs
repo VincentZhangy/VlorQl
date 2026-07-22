@@ -11,7 +11,10 @@ fn extracts_from_array_wrapper() {
     let input = r#"[{"select":[{"type":"star"}],"from":{"table":"users"}}]"#;
     let result = extract_json_content(input);
     let parsed: serde_json::Value = serde_json::from_str(result).unwrap();
-    assert!(parsed.is_object(), "should extract object from array: {result}");
+    assert!(
+        parsed.is_object(),
+        "should extract object from array: {result}"
+    );
     assert!(parsed.get("select").is_some(), "should have select field");
     assert!(parsed.get("from").is_some(), "should have from field");
 }
@@ -43,7 +46,10 @@ fn only_array_brackets() {
 fn nested_array_wrapping() {
     let input = r#"[[{"a":1}]]"#;
     let result = extract_json_content(input);
-    assert_eq!(result, r#"{"a":1}"#, "should extract object from nested array");
+    assert_eq!(
+        result, r#"{"a":1}"#,
+        "should extract object from nested array"
+    );
     let parsed: serde_json::Value = serde_json::from_str(result).unwrap();
     assert!(parsed.is_object());
     assert_eq!(parsed.get("a").and_then(|v| v.as_i64()), Some(1));

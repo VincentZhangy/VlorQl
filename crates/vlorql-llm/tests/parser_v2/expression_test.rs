@@ -68,7 +68,8 @@ fn normalizes_data_types_in_literals() {
     });
     assert!(normalize_val(&mut val));
     assert_eq!(
-        val.pointer("/where/right/data_type").and_then(|v| v.as_str()),
+        val.pointer("/where/right/data_type")
+            .and_then(|v| v.as_str()),
         Some("int")
     );
 }
@@ -86,11 +87,13 @@ fn normalizes_data_types_in_multiple_literals() {
     });
     assert!(normalize_val(&mut val));
     assert_eq!(
-        val.pointer("/where/left/right/data_type").and_then(|v| v.as_str()),
+        val.pointer("/where/left/right/data_type")
+            .and_then(|v| v.as_str()),
         Some("int")
     );
     assert_eq!(
-        val.pointer("/where/right/right/data_type").and_then(|v| v.as_str()),
+        val.pointer("/where/right/right/data_type")
+            .and_then(|v| v.as_str()),
         Some("string")
     );
 }
@@ -153,8 +156,14 @@ fn unwraps_array_wrapped_predicate() {
     });
     assert!(normalize_val(&mut val));
     let where_obj = val.get("where").unwrap().as_object().unwrap();
-    assert!(where_obj.get("left").unwrap().is_object(), "left should be unwrapped from array");
-    assert!(where_obj.get("right").unwrap().is_object(), "right should be unwrapped from array");
+    assert!(
+        where_obj.get("left").unwrap().is_object(),
+        "left should be unwrapped from array"
+    );
+    assert!(
+        where_obj.get("right").unwrap().is_object(),
+        "right should be unwrapped from array"
+    );
 }
 
 // ── Missing right field injection ─────────────────────────────────
@@ -171,7 +180,10 @@ fn injects_missing_right_in_comparison() {
         }
     });
     assert!(normalize_val(&mut val));
-    assert!(val.pointer("/where/right").is_some(), "missing right should be injected");
+    assert!(
+        val.pointer("/where/right").is_some(),
+        "missing right should be injected"
+    );
 }
 
 // ── Full multi-stage P4 pipeline ──────────────────────────────────
@@ -202,7 +214,9 @@ fn full_p4_pipeline_expression_normalize() {
     );
     // Right unwrapped from array
     assert!(
-        val.pointer("/where/right").and_then(|v| v.as_object()).is_some(),
+        val.pointer("/where/right")
+            .and_then(|v| v.as_object())
+            .is_some(),
         "right should be unwrapped from array"
     );
     // Expression type injected
@@ -218,7 +232,8 @@ fn full_p4_pipeline_expression_normalize() {
     );
     // Data type normalized
     assert_eq!(
-        val.pointer("/where/right/data_type").and_then(|v| v.as_str()),
+        val.pointer("/where/right/data_type")
+            .and_then(|v| v.as_str()),
         Some("int"),
         "integer should become int"
     );
@@ -244,7 +259,8 @@ fn deepseek_style_with_operator_and_type_issues() {
         Some("eq")
     );
     assert_eq!(
-        val.pointer("/where/right/data_type").and_then(|v| v.as_str()),
+        val.pointer("/where/right/data_type")
+            .and_then(|v| v.as_str()),
         Some("string")
     );
 }
@@ -278,11 +294,13 @@ fn qwen_style_missing_expression_types() {
     );
     // Expression types injected
     assert_eq!(
-        val.pointer("/where/left/left/type").and_then(|v| v.as_str()),
+        val.pointer("/where/left/left/type")
+            .and_then(|v| v.as_str()),
         Some("column_ref")
     );
     assert_eq!(
-        val.pointer("/where/left/right/type").and_then(|v| v.as_str()),
+        val.pointer("/where/left/right/type")
+            .and_then(|v| v.as_str()),
         Some("literal")
     );
     // Operators normalized

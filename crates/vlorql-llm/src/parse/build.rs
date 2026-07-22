@@ -78,7 +78,10 @@ fn req_str<'a>(
         Some(serde_json::Value::String(s)) => Ok(s),
         Some(other) => Err(BuildError::new(
             path,
-            format!("field `{field}` should be a string, got {}", type_name(other)),
+            format!(
+                "field `{field}` should be a string, got {}",
+                type_name(other)
+            ),
         )),
     }
 }
@@ -102,7 +105,10 @@ fn req_obj<'a>(
         Some(serde_json::Value::Object(m)) => Ok(m),
         Some(other) => Err(BuildError::new(
             path,
-            format!("field `{field}` should be an object, got {}", type_name(other)),
+            format!(
+                "field `{field}` should be an object, got {}",
+                type_name(other)
+            ),
         )),
     }
 }
@@ -118,7 +124,10 @@ fn req_arr<'a>(
         Some(serde_json::Value::Array(a)) => Ok(a),
         Some(other) => Err(BuildError::new(
             path,
-            format!("field `{field}` should be an array, got {}", type_name(other)),
+            format!(
+                "field `{field}` should be an array, got {}",
+                type_name(other)
+            ),
         )),
     }
 }
@@ -145,9 +154,9 @@ fn type_name(v: &serde_json::Value) -> &'static str {
 /// Returns [`BuildError`] on missing fields, type mismatches, or unknown
 /// variants. The `.path` field pinpoints the location of the problem.
 pub fn build_plan(value: &serde_json::Value) -> Result<QueryPlan, BuildError> {
-    let obj = value.as_object().ok_or_else(|| {
-        BuildError::new("", format!("expected object, got {}", type_name(value)))
-    })?;
+    let obj = value
+        .as_object()
+        .ok_or_else(|| BuildError::new("", format!("expected object, got {}", type_name(value))))?;
     build_plan_from_obj(obj)
 }
 
@@ -168,9 +177,7 @@ fn build_plan_from_obj(
 
     let r#where = obj
         .get("where")
-        .and_then(|v| {
-            if v.is_null() { None } else { Some(v) }
-        })
+        .and_then(|v| if v.is_null() { None } else { Some(v) })
         .map(|v| build_predicate(v).map_err(|e| e.at("where")))
         .transpose()?;
 
@@ -188,9 +195,7 @@ fn build_plan_from_obj(
 
     let having = obj
         .get("having")
-        .and_then(|v| {
-            if v.is_null() { None } else { Some(v) }
-        })
+        .and_then(|v| if v.is_null() { None } else { Some(v) })
         .map(|v| build_predicate(v).map_err(|e| e.at("having")))
         .transpose()?;
 
@@ -251,7 +256,10 @@ fn build_plan_from_obj(
 
 fn build_projection(val: &serde_json::Value) -> Result<Projection, BuildError> {
     let obj = val.as_object().ok_or_else(|| {
-        BuildError::new("", format!("expected object for Projection, got {}", type_name(val)))
+        BuildError::new(
+            "",
+            format!("expected object for Projection, got {}", type_name(val)),
+        )
     })?;
     let type_str = req_str(obj, "type", "")?;
     match type_str {
@@ -259,16 +267,19 @@ fn build_projection(val: &serde_json::Value) -> Result<Projection, BuildError> {
             let column = req_str(obj, "column", "")?.to_owned();
             let table = opt_str(obj, "table").map(|s| s.to_owned());
             let alias = opt_str(obj, "alias").map(|s| s.to_owned());
-            Ok(Projection::Column { table, column, alias })
+            Ok(Projection::Column {
+                table,
+                column,
+                alias,
+            })
         }
         "expr" => {
-            let e = req_obj(obj, "expression", "")
-                .or_else(|_| {
-                    // Accept bare `expr` field
-                    obj.get("expr")
-                        .and_then(|v| v.as_object())
-                        .ok_or_else(|| BuildError::new("", "missing `expression` field"))
-                })?;
+            let e = req_obj(obj, "expression", "").or_else(|_| {
+                // Accept bare `expr` field
+                obj.get("expr")
+                    .and_then(|v| v.as_object())
+                    .ok_or_else(|| BuildError::new("", "missing `expression` field"))
+            })?;
             let expression = build_expression(&serde_json::Value::Object(e.clone()))?;
             let alias = opt_str(obj, "alias").map(|s| s.to_owned());
             Ok(Projection::Expr { expression, alias })
@@ -277,7 +288,10 @@ fn build_projection(val: &serde_json::Value) -> Result<Projection, BuildError> {
             let table = opt_str(obj, "table").map(|s| s.to_owned());
             Ok(Projection::Star { table })
         }
-        other => Err(BuildError::new("type", format!("unknown Projection variant `{other}`"))),
+        other => Err(BuildError::new(
+            "type",
+            format!("unknown Projection variant `{other}`"),
+        )),
     }
 }
 
@@ -340,7 +354,10 @@ pub fn build_expression(val: &serde_json::Value) -> Result<Expression, BuildErro
                 .enumerate()
                 .map(|(i, v)| build_expression(v).map_err(|e| e.at(&format!("args[{i}]"))))
                 .collect::<Result<Vec<_>, _>>()?;
-            let distinct = obj.get("distinct").and_then(|v| v.as_bool()).unwrap_or(false);
+            let distinct = obj
+                .get("distinct")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
             Ok(Expression::FunctionCall {
                 name,
                 args,
@@ -378,7 +395,10 @@ pub fn build_expression(val: &serde_json::Value) -> Result<Expression, BuildErro
                 query: Box::new(query),
             })
         }
-        other => Err(BuildError::new("type", format!("unknown Expression variant `{other}`"))),
+        other => Err(BuildError::new(
+            "type",
+            format!("unknown Expression variant `{other}`"),
+        )),
     }
 }
 
@@ -405,10 +425,7 @@ fn build_literal_expr(val: &serde_json::Value) -> Result<Expression, BuildError>
 fn build_literal_from_obj(
     obj: &serde_json::Map<String, serde_json::Value>,
 ) -> Result<Expression, BuildError> {
-    let value = obj
-        .get("value")
-        .cloned()
-        .unwrap_or(serde_json::Value::Null);
+    let value = obj.get("value").cloned().unwrap_or(serde_json::Value::Null);
     let data_type_str = opt_str(obj, "data_type").unwrap_or("null");
     let data_type = parse_data_type(data_type_str)?;
     Ok(Expression::Literal { value, data_type })
@@ -449,21 +466,19 @@ pub fn build_predicate(val: &serde_json::Value) -> Result<Predicate, BuildError>
 
     match type_str {
         "comparison" | "Comparison" => {
-            let left = build_expression(obj.get("left").ok_or_else(|| {
-                BuildError::new("left", "missing `left` field on comparison")
-            })?)
-            .map_err(|e| e.at("left"))?;
+            let left =
+                build_expression(obj.get("left").ok_or_else(|| {
+                    BuildError::new("left", "missing `left` field on comparison")
+                })?)
+                .map_err(|e| e.at("left"))?;
             let op_str = req_str(obj, "op", "")?;
             let op = parse_comparison_op(op_str)?;
-            let right = build_expression(obj.get("right").ok_or_else(|| {
-                BuildError::new("right", "missing `right` field on comparison")
-            })?)
-            .map_err(|e| e.at("right"))?;
-            Ok(Predicate::Comparison {
-                left,
-                op,
-                right,
-            })
+            let right =
+                build_expression(obj.get("right").ok_or_else(|| {
+                    BuildError::new("right", "missing `right` field on comparison")
+                })?)
+                .map_err(|e| e.at("right"))?;
+            Ok(Predicate::Comparison { left, op, right })
         }
         "and" | "And" => {
             let left = build_predicate(
@@ -523,11 +538,7 @@ pub fn build_predicate(val: &serde_json::Value) -> Result<Predicate, BuildError>
                     .ok_or_else(|| BuildError::new("high", "missing `high` field on between"))?,
             )
             .map_err(|e| e.at("high"))?;
-            Ok(Predicate::Between {
-                expr,
-                low,
-                high,
-            })
+            Ok(Predicate::Between { expr, low, high })
         }
         "in" | "In" => {
             let expr = build_expression(
@@ -551,7 +562,10 @@ pub fn build_predicate(val: &serde_json::Value) -> Result<Predicate, BuildError>
             } else {
                 return Err(BuildError::new(
                     "target",
-                    format!("expected array or object for IN target, got {}", type_name(target_val)),
+                    format!(
+                        "expected array or object for IN target, got {}",
+                        type_name(target_val)
+                    ),
                 ));
             };
             Ok(Predicate::In { expr, target })
@@ -602,7 +616,10 @@ fn build_from_clause(
 
 fn build_join_clause(val: &serde_json::Value) -> Result<JoinClause, BuildError> {
     let obj = val.as_object().ok_or_else(|| {
-        BuildError::new("", format!("expected object for JoinClause, got {}", type_name(val)))
+        BuildError::new(
+            "",
+            format!("expected object for JoinClause, got {}", type_name(val)),
+        )
     })?;
     let join_type_str = req_str(obj, "join_type", "")?;
     let join_type = parse_join_type(join_type_str)?;
@@ -621,23 +638,30 @@ fn build_join_clause(val: &serde_json::Value) -> Result<JoinClause, BuildError> 
 
 fn build_order_by_term(val: &serde_json::Value) -> Result<OrderByTerm, BuildError> {
     let obj = val.as_object().ok_or_else(|| {
-        BuildError::new("", format!("expected object for OrderByTerm, got {}", type_name(val)))
+        BuildError::new(
+            "",
+            format!("expected object for OrderByTerm, got {}", type_name(val)),
+        )
     })?;
     let expr = build_expression(
         obj.get("expr")
             .ok_or_else(|| BuildError::new("expr", "missing `expr` field on order_by term"))?,
     )
     .map_err(|e| e.at("expr"))?;
-    let descending = obj.get("descending").and_then(|v| v.as_bool()).unwrap_or(false);
+    let descending = obj
+        .get("descending")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
     Ok(OrderByTerm { expr, descending })
 }
 
 #[allow(clippy::unnecessary_wraps)]
-fn build_cte(val: &serde_json::Value) -> Result<vlorql_core::schema::CommonTableExpression, BuildError> {
+fn build_cte(
+    val: &serde_json::Value,
+) -> Result<vlorql_core::schema::CommonTableExpression, BuildError> {
     // CTE is rare: serde-deserialize to avoid maintaining parallel builder.
-    serde_json::from_value(val.clone()).map_err(|e| {
-        BuildError::new("", format!("CTE deserialization: {e}"))
-    })
+    serde_json::from_value(val.clone())
+        .map_err(|e| BuildError::new("", format!("CTE deserialization: {e}")))
 }
 
 // ------------------------------------------------------------------
@@ -653,7 +677,10 @@ fn parse_comparison_op(s: &str) -> Result<vlorql_core::schema::ComparisonOperato
         "gte" | ">=" => Ok(Gte),
         "lt" | "<" => Ok(Lt),
         "lte" | "<=" => Ok(Lte),
-        _ => Err(BuildError::new("op", format!("unknown comparison operator `{s}`"))),
+        _ => Err(BuildError::new(
+            "op",
+            format!("unknown comparison operator `{s}`"),
+        )),
     }
 }
 
@@ -665,7 +692,10 @@ fn parse_binary_op(s: &str) -> Result<vlorql_core::schema::BinaryOperator, Build
         "mul" | "*" => Ok(Mul),
         "div" | "/" => Ok(Div),
         "mod" | "%" => Ok(Mod),
-        _ => Err(BuildError::new("op", format!("unknown binary operator `{s}`"))),
+        _ => Err(BuildError::new(
+            "op",
+            format!("unknown binary operator `{s}`"),
+        )),
     }
 }
 
@@ -677,7 +707,10 @@ fn parse_join_type(s: &str) -> Result<JoinType, BuildError> {
         "right" | "RIGHT" => Ok(Right),
         "full" | "FULL" | "outer" | "OUTER" => Ok(Full),
         "cross" | "CROSS" => Ok(Cross),
-        _ => Err(BuildError::new("join_type", format!("unknown join type `{s}`"))),
+        _ => Err(BuildError::new(
+            "join_type",
+            format!("unknown join type `{s}`"),
+        )),
     }
 }
 
@@ -690,7 +723,10 @@ fn parse_data_type(s: &str) -> Result<DataType, BuildError> {
         "boolean" | "bool" => Ok(Boolean),
         "timestamp" | "datetime" => Ok(Timestamp),
         "null" | "NULL" => Ok(Null),
-        _ => Err(BuildError::new("data_type", format!("unknown data type `{s}`"))),
+        _ => Err(BuildError::new(
+            "data_type",
+            format!("unknown data type `{s}`"),
+        )),
     }
 }
 

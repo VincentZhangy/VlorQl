@@ -21,10 +21,7 @@ pub fn inject_default_select(val: &mut serde_json::Value) -> bool {
         return false;
     };
     if !obj.contains_key("select") && obj.contains_key("from") {
-        obj.insert(
-            "select".to_owned(),
-            serde_json::json!([{"type": "star"}]),
-        );
+        obj.insert("select".to_owned(), serde_json::json!([{"type": "star"}]));
         return true;
     }
     false
@@ -178,10 +175,14 @@ mod tests {
 
     #[test]
     fn inject_missing_type_on_column_ref() {
-        let mut val = json!({"select": [{"column": "name", "table": "users"}], "from": {"table": "users"}});
+        let mut val =
+            json!({"select": [{"column": "name", "table": "users"}], "from": {"table": "users"}});
         assert!(inject_missing_type(&mut val));
         let item = &val.get("select").unwrap().as_array().unwrap()[0];
-        assert_eq!(item.get("type").and_then(|v| v.as_str()), Some("column_ref"));
+        assert_eq!(
+            item.get("type").and_then(|v| v.as_str()),
+            Some("column_ref")
+        );
     }
 
     #[test]
@@ -203,7 +204,10 @@ mod tests {
     fn remove_invalid_removes_empty_select() {
         let mut val = json!({"select": [{"type": "invalid"}], "from": {"table": "users"}});
         assert!(remove_invalid(&mut val));
-        assert!(val.get("select").is_none(), "empty select should be removed");
+        assert!(
+            val.get("select").is_none(),
+            "empty select should be removed"
+        );
     }
 
     #[test]
@@ -216,7 +220,8 @@ mod tests {
 
     #[test]
     fn inject_default_select_noop_when_select_exists() {
-        let mut val = json!({"select": [{"type": "column_ref", "column": "id"}], "from": {"table": "users"}});
+        let mut val =
+            json!({"select": [{"type": "column_ref", "column": "id"}], "from": {"table": "users"}});
         assert!(!inject_default_select(&mut val));
     }
 
@@ -231,7 +236,10 @@ mod tests {
         let mut val = json!({"select": ["id", "name"], "from": {"table": "users"}});
         assert!(normalize_projection_items(&mut val));
         let arr = val.get("select").unwrap().as_array().unwrap();
-        assert_eq!(arr[0].get("type").and_then(|v| v.as_str()), Some("column_ref"));
+        assert_eq!(
+            arr[0].get("type").and_then(|v| v.as_str()),
+            Some("column_ref")
+        );
         assert_eq!(arr[0].get("column").and_then(|v| v.as_str()), Some("id"));
         assert_eq!(arr[1].get("column").and_then(|v| v.as_str()), Some("name"));
     }
@@ -250,8 +258,14 @@ mod tests {
         let mut val = json!({"select": [{"type": "star"}], "from": {"table": "users"}, "group_by": ["status", "type"]});
         assert!(normalize_group_by_strings(&mut val));
         let arr = val.get("group_by").unwrap().as_array().unwrap();
-        assert_eq!(arr[0].get("type").and_then(|v| v.as_str()), Some("column_ref"));
-        assert_eq!(arr[0].get("column").and_then(|v| v.as_str()), Some("status"));
+        assert_eq!(
+            arr[0].get("type").and_then(|v| v.as_str()),
+            Some("column_ref")
+        );
+        assert_eq!(
+            arr[0].get("column").and_then(|v| v.as_str()),
+            Some("status")
+        );
         assert_eq!(arr[1].get("column").and_then(|v| v.as_str()), Some("type"));
     }
 
@@ -264,9 +278,15 @@ mod tests {
         assert!(normalize(&mut val));
         let arr = val.get("select").unwrap().as_array().unwrap();
         assert_eq!(arr.len(), 2);
-        assert_eq!(arr[0].get("type").and_then(|v| v.as_str()), Some("column_ref"));
+        assert_eq!(
+            arr[0].get("type").and_then(|v| v.as_str()),
+            Some("column_ref")
+        );
         assert_eq!(arr[0].get("column").and_then(|v| v.as_str()), Some("id"));
-        assert_eq!(arr[1].get("type").and_then(|v| v.as_str()), Some("column_ref"));
+        assert_eq!(
+            arr[1].get("type").and_then(|v| v.as_str()),
+            Some("column_ref")
+        );
         assert_eq!(arr[1].get("column").and_then(|v| v.as_str()), Some("name"));
     }
 

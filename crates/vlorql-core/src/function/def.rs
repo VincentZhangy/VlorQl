@@ -70,6 +70,8 @@ impl FunctionDef {
 
     /// Returns `true` if this function is available for the given dialect.
     pub fn supports_dialect(&self, dialect: Dialect) -> bool {
-        self.dialects.is_empty() || self.dialects.contains(&Dialect::Generic) || self.dialects.contains(&dialect)
+        self.dialects.is_empty()
+            || self.dialects.contains(&Dialect::Generic)
+            || self.dialects.contains(&dialect)
     }
 }

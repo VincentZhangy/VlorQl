@@ -1,7 +1,7 @@
+use std::sync::Arc;
+use vlorql_core::policy::PolicyConfig;
 use vlorql_core::prompt::PromptBuilder;
 use vlorql_core::schema::*;
-use vlorql_core::policy::PolicyConfig;
-use std::sync::Arc;
 
 #[test]
 fn check_prompt_size() {
@@ -10,10 +10,38 @@ fn check_prompt_size() {
             TableSchema {
                 name: "users".into(),
                 columns: vec![
-                    ColumnSchema { name: "id".into(), data_type: DataType::Int, nullable: false, description: None, is_primary_key: true, foreign_key: None },
-                    ColumnSchema { name: "name".into(), data_type: DataType::String, nullable: false, description: None, is_primary_key: false, foreign_key: None },
-                    ColumnSchema { name: "email".into(), data_type: DataType::String, nullable: false, description: None, is_primary_key: false, foreign_key: None },
-                    ColumnSchema { name: "created_at".into(), data_type: DataType::String, nullable: false, description: None, is_primary_key: false, foreign_key: None },
+                    ColumnSchema {
+                        name: "id".into(),
+                        data_type: DataType::Int,
+                        nullable: false,
+                        description: None,
+                        is_primary_key: true,
+                        foreign_key: None,
+                    },
+                    ColumnSchema {
+                        name: "name".into(),
+                        data_type: DataType::String,
+                        nullable: false,
+                        description: None,
+                        is_primary_key: false,
+                        foreign_key: None,
+                    },
+                    ColumnSchema {
+                        name: "email".into(),
+                        data_type: DataType::String,
+                        nullable: false,
+                        description: None,
+                        is_primary_key: false,
+                        foreign_key: None,
+                    },
+                    ColumnSchema {
+                        name: "created_at".into(),
+                        data_type: DataType::String,
+                        nullable: false,
+                        description: None,
+                        is_primary_key: false,
+                        foreign_key: None,
+                    },
                 ],
                 description: None,
                 primary_key: Some(vec!["id".into()]),
@@ -21,8 +49,22 @@ fn check_prompt_size() {
             TableSchema {
                 name: "organizations".into(),
                 columns: vec![
-                    ColumnSchema { name: "id".into(), data_type: DataType::Int, nullable: false, description: None, is_primary_key: true, foreign_key: None },
-                    ColumnSchema { name: "name".into(), data_type: DataType::String, nullable: false, description: None, is_primary_key: false, foreign_key: None },
+                    ColumnSchema {
+                        name: "id".into(),
+                        data_type: DataType::Int,
+                        nullable: false,
+                        description: None,
+                        is_primary_key: true,
+                        foreign_key: None,
+                    },
+                    ColumnSchema {
+                        name: "name".into(),
+                        data_type: DataType::String,
+                        nullable: false,
+                        description: None,
+                        is_primary_key: false,
+                        foreign_key: None,
+                    },
                 ],
                 description: None,
                 primary_key: Some(vec!["id".into()]),
@@ -30,7 +72,7 @@ fn check_prompt_size() {
         ],
         SchemaMetadata::default(),
     ));
-    
+
     let builder = PromptBuilder::new(schema, DialectProfile::default(), PolicyConfig::default());
     let prompt = builder.build_system_prompt("Show users and their organizations");
     println!("Prompt size: {} chars", prompt.chars().count());

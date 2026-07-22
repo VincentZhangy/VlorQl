@@ -54,7 +54,8 @@ use vlorql_core::policy::PolicyConfig;
 use vlorql_core::prompt::PromptBuilder;
 use vlorql_core::schema::{
     ColumnSchema, ComparisonOperator, DataType, Expression, ForeignKey, FromClause, InTarget,
-    JoinClause, JoinType, OrderByTerm, Predicate, Projection, QueryPlan, SchemaMetadata, TableSchema,
+    JoinClause, JoinType, OrderByTerm, Predicate, Projection, QueryPlan, SchemaMetadata,
+    TableSchema,
 };
 use vlorql_core::validate::ValidatedPlan;
 use vlorql_llm::{LlmClient, LlmConfig, LlmProvider, create_llm_client};
@@ -169,31 +170,51 @@ fn table(name: &str, description: &str, columns: Vec<ColumnSchema>) -> TableSche
 fn build_schema() -> Arc<SchemaSnapshot> {
     Arc::new(SchemaSnapshot::new(
         vec![
-            table("users", "应用注册用户", vec![
-                pk("id", "用户唯一标识符"),
-                col("name", DataType::String, "用户显示名称"),
-                col("email", DataType::String, "用户邮箱地址"),
-                col("created_at", DataType::String, "用户注册时间 (ISO-8601)"),
-            ]),
-            table("orders", "客户订单记录", vec![
-                pk("id", "订单唯一标识符"),
-                fk("user_id", "users", "id", "关联到 users.id"),
-                col("total", DataType::Float, "订单总金额"),
-                col("status", DataType::String, "订单状态: pending/shipped/completed/cancelled"),
-                col("created_at", DataType::String, "下单时间 (ISO-8601)"),
-            ]),
-            table("products", "产品目录", vec![
-                pk("id", "产品唯一标识符"),
-                col("name", DataType::String, "产品名称"),
-                col("price", DataType::Float, "产品单价"),
-            ]),
-            table("order_items", "订单中的商品明细", vec![
-                pk("id", "明细唯一标识符"),
-                fk("order_id", "orders", "id", "关联到 orders.id"),
-                fk("product_id", "products", "id", "关联到 products.id"),
-                col("quantity", DataType::Int, "购买数量"),
-                col("unit_price", DataType::Float, "购买时单价"),
-            ]),
+            table(
+                "users",
+                "应用注册用户",
+                vec![
+                    pk("id", "用户唯一标识符"),
+                    col("name", DataType::String, "用户显示名称"),
+                    col("email", DataType::String, "用户邮箱地址"),
+                    col("created_at", DataType::String, "用户注册时间 (ISO-8601)"),
+                ],
+            ),
+            table(
+                "orders",
+                "客户订单记录",
+                vec![
+                    pk("id", "订单唯一标识符"),
+                    fk("user_id", "users", "id", "关联到 users.id"),
+                    col("total", DataType::Float, "订单总金额"),
+                    col(
+                        "status",
+                        DataType::String,
+                        "订单状态: pending/shipped/completed/cancelled",
+                    ),
+                    col("created_at", DataType::String, "下单时间 (ISO-8601)"),
+                ],
+            ),
+            table(
+                "products",
+                "产品目录",
+                vec![
+                    pk("id", "产品唯一标识符"),
+                    col("name", DataType::String, "产品名称"),
+                    col("price", DataType::Float, "产品单价"),
+                ],
+            ),
+            table(
+                "order_items",
+                "订单中的商品明细",
+                vec![
+                    pk("id", "明细唯一标识符"),
+                    fk("order_id", "orders", "id", "关联到 orders.id"),
+                    fk("product_id", "products", "id", "关联到 products.id"),
+                    col("quantity", DataType::Int, "购买数量"),
+                    col("unit_price", DataType::Float, "购买时单价"),
+                ],
+            ),
         ],
         SchemaMetadata {
             version: Some("1.0".to_owned()),
@@ -655,27 +676,39 @@ macro_rules! make_pg_num {
     };
 }
 
-make_pg_num!(PgInt, i64, |val, ty, out| {
-    if *ty == tokio_postgres::types::Type::INT2 {
-        out.put_i16(val as i16);
-    } else if *ty == tokio_postgres::types::Type::INT4 {
-        out.put_i32(val as i32);
-    } else if *ty == tokio_postgres::types::Type::INT8 {
-        out.put_i64(val);
-    } else {
-        out.extend_from_slice(val.to_string().as_bytes());
-    }
-}, INT2 | INT4 | INT8 | TEXT, "PgInt");
+make_pg_num!(
+    PgInt,
+    i64,
+    |val, ty, out| {
+        if *ty == tokio_postgres::types::Type::INT2 {
+            out.put_i16(val as i16);
+        } else if *ty == tokio_postgres::types::Type::INT4 {
+            out.put_i32(val as i32);
+        } else if *ty == tokio_postgres::types::Type::INT8 {
+            out.put_i64(val);
+        } else {
+            out.extend_from_slice(val.to_string().as_bytes());
+        }
+    },
+    INT2 | INT4 | INT8 | TEXT,
+    "PgInt"
+);
 
-make_pg_num!(PgFloat, f64, |val, ty, out| {
-    if *ty == tokio_postgres::types::Type::FLOAT4 {
-        out.put_f32(val as f32);
-    } else if *ty == tokio_postgres::types::Type::FLOAT8 {
-        out.put_f64(val);
-    } else {
-        out.extend_from_slice(val.to_string().as_bytes());
-    }
-}, FLOAT4 | FLOAT8 | TEXT, "PgFloat");
+make_pg_num!(
+    PgFloat,
+    f64,
+    |val, ty, out| {
+        if *ty == tokio_postgres::types::Type::FLOAT4 {
+            out.put_f32(val as f32);
+        } else if *ty == tokio_postgres::types::Type::FLOAT8 {
+            out.put_f64(val);
+        } else {
+            out.extend_from_slice(val.to_string().as_bytes());
+        }
+    },
+    FLOAT4 | FLOAT8 | TEXT,
+    "PgFloat"
+);
 
 /// Convert a `Parameter` to a boxed `ToSql` value for tokio-postgres.
 fn to_pg_param(p: &vlorql::Parameter) -> Box<dyn tokio_postgres::types::ToSql + Sync> {
