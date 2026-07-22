@@ -116,8 +116,6 @@ impl ServerCertVerifier for SkipVerify {
 // 1. 定义数据库 Schema
 // ============================================================================
 
-use vlorql_core::schema::{ColumnSchema, DataType, ForeignKey, SchemaMetadata, TableSchema};
-
 /// 辅助函数：创建一个普通列。
 fn col(name: &str, data_type: DataType, description: &str) -> ColumnSchema {
     ColumnSchema {
@@ -289,25 +287,20 @@ fn select_llm_client() -> Option<Box<dyn LlmClient>> {
 // 在真实 LLM 模式下，QueryPlan 由 LLM 自动生成，完全不需要这段代码。
 // 离线演示模式使用 compile_only() 直接编译这些预设的 Plan。
 
-/// 返回所有自然语言问题及其对应的预设 QueryPlan。
-fn build_all_plans() -> Vec<(&'static str, QueryPlan)> {
+const QUESTIONS: [&str; 4] = [
+    "列出总金额超过150的已完成订单，显示订单号、客户名和总金额，按金额从高到低排序，最多10条",
+    "查询状态为已完成或已发货的订单，显示订单号、金额、状态和客户名",
+    "哪些商品从未被购买过？",
+    "每种产品卖了多少件？",
+];
+
+/// 返回所有预设的 QueryPlan（离线模式使用）。
+fn build_all_plans() -> Vec<QueryPlan> {
     vec![
-        (
-            "列出总金额超过150的已完成订单，显示订单号、客户名和总金额，按金额从高到低排序，最多10条",
-            build_demo_plan(),
-        ),
-        (
-            "查询状态为已完成或已发货的订单，显示订单号、金额、状态和客户名",
-            build_in_predicate_plan(),
-        ),
-        (
-            "哪些商品从未被购买过？",
-            build_is_null_plan(),
-        ),
-        (
-            "每种产品卖了多少件？",
-            build_aggregate_plan(),
-        ),
+        build_demo_plan(),
+        build_in_predicate_plan(),
+        build_is_null_plan(),
+        build_aggregate_plan(),
     ]
 }
 
@@ -624,7 +617,7 @@ fn build_aggregate_plan() -> QueryPlan {
 ///
 /// Macro to generate a thin wrapper type implementing `ToSql` for multiple PG types.
 macro_rules! make_pg_num {
-    ($name:ident, $inner:ty, |$val:ident, $ty:ident| $to_sql_body:expr,
+    ($name:ident, $inner:ty, |$val:ident, $ty:ident, $out:ident| $body:block,
      $( $accept:ident )|+, $label:expr) => {
         #[derive(Debug)]
         struct $name($inner);
@@ -633,16 +626,16 @@ macro_rules! make_pg_num {
             fn to_sql(
                 &self,
                 $ty: &tokio_postgres::types::Type,
-                out: &mut bytes::BytesMut,
+                $out: &mut bytes::BytesMut,
             ) -> Result<tokio_postgres::types::IsNull, Box<dyn std::error::Error + Sync + Send>> {
                 use tokio_postgres::types::IsNull;
                 let $val = self.0;
-                $to_sql_body
+                $body
                 Ok(IsNull::No)
             }
 
             fn accepts(ty: &tokio_postgres::types::Type) -> bool {
-                matches!(ty, $( tokio_postgres::types::Type::$accept )|+)
+                matches!(*ty, $( tokio_postgres::types::Type::$accept )|+)
             }
 
             fn to_sql_checked(
@@ -662,7 +655,7 @@ macro_rules! make_pg_num {
     };
 }
 
-make_pg_num!(PgInt, i64, |val, ty| {
+make_pg_num!(PgInt, i64, |val, ty, out| {
     if *ty == tokio_postgres::types::Type::INT2 {
         out.put_i16(val as i16);
     } else if *ty == tokio_postgres::types::Type::INT4 {
@@ -670,15 +663,15 @@ make_pg_num!(PgInt, i64, |val, ty| {
     } else {
         out.extend_from_slice(val.to_string().as_bytes());
     }
-}, INT2 | INT4 | INT8, "PgInt");
+}, INT2 | INT4 | INT8 | TEXT, "PgInt");
 
-make_pg_num!(PgFloat, f64, |val, ty| {
+make_pg_num!(PgFloat, f64, |val, ty, out| {
     if *ty == tokio_postgres::types::Type::FLOAT4 {
         out.put_f32(val as f32);
     } else {
         out.put_f64(val);
     }
-}, FLOAT4 | FLOAT8, "PgFloat");
+}, FLOAT4 | FLOAT8 | TEXT, "PgFloat");
 
 /// Convert a `Parameter` to a boxed `ToSql` value for tokio-postgres.
 fn to_pg_param(p: &vlorql::Parameter) -> Box<dyn tokio_postgres::types::ToSql + Sync> {
@@ -696,7 +689,7 @@ fn to_pg_param(p: &vlorql::Parameter) -> Box<dyn tokio_postgres::types::ToSql + 
         },
         serde_json::Value::String(s) => Box::new(s.clone()),
         serde_json::Value::Bool(b) => Box::new(*b),
-        _ => Box::new(String::new()),
+        _ => panic!("不支持的参数类型: {:?} (value: {:?})", p.data_type, p.value),
     }
 }
 
@@ -725,18 +718,7 @@ fn print_results(qidx: usize, rows: &[tokio_postgres::Row]) {
     for row in rows {
         let values: Vec<String> = (0..row.len())
             .map(|i| {
-                // Try types in order of specificity: i32 → i64 → f64 → String → "NULL"
-                if let Ok(v) = row.try_get::<_, i32>(i) {
-                    v.to_string()
-                } else if let Ok(v) = row.try_get::<_, i64>(i) {
-                    v.to_string()
-                } else if let Ok(v) = row.try_get::<_, f64>(i) {
-                    v.to_string()
-                } else if let Ok(v) = row.try_get::<_, String>(i) {
-                    v
-                } else {
-                    "NULL".to_string()
-                }
+                row.try_get::<_, String>(i).unwrap_or_else(|_| "NULL".to_string())
             })
             .collect();
         println!("  │ {} │", values.join(" │ "));
@@ -943,8 +925,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // ──────────────────────────────────────────────────────────────
     // C. 编译全部自然语言查询
     // ──────────────────────────────────────────────────────────────
-    let questions_and_plans = build_all_plans();
-    let count = questions_and_plans.len();
+    let count = QUESTIONS.len();
 
     if is_llm_mode {
         println!("─── 步骤 C: 使用 LLM 生成全部 {count} 条查询 ───\n");
@@ -962,17 +943,19 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
 
     let mut all_compiled = Vec::with_capacity(count);
-    for (i, (question, plan)) in questions_and_plans.iter().enumerate() {
-        let compiled = if is_llm_mode {
+    if is_llm_mode {
+        for (i, question) in QUESTIONS.iter().enumerate() {
             println!("[{}/{}] 查询: \"{}\"", i + 1, count, question);
-            let c = vlorql.query(question).await?;
+            let compiled = vlorql.query(question).await?;
             println!("[OK]\n");
-            c
-        } else {
-            let validated = ValidatedPlan(Arc::new(plan.clone()));
-            vlorql.compile_only(&validated)?
-        };
-        all_compiled.push(compiled);
+            all_compiled.push(compiled);
+        }
+    } else {
+        for plan in build_all_plans() {
+            let validated = ValidatedPlan(Arc::new(plan));
+            let compiled = vlorql.compile_only(&validated)?;
+            all_compiled.push(compiled);
+        }
     }
 
     // ──────────────────────────────────────────────────────────────
@@ -983,7 +966,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     println!();
 
     for (i, compiled) in all_compiled.iter().enumerate() {
-        let (question, _) = &questions_and_plans[i];
+        let question = QUESTIONS[i];
         println!("查询 {}: \"{}\"", i + 1, question);
         println!();
         println!("  SQL:");
