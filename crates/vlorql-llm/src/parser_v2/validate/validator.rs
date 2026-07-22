@@ -27,6 +27,8 @@ pub enum ValidationErrorKind {
     InvalidLimit,
     /// CTE error (e.g. empty name).
     CteError,
+    /// GROUP BY without aggregate functions in SELECT.
+    MissingAggregate,
 }
 
 /// A validation error with a kind and a human-readable message.
