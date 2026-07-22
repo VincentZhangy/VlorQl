@@ -930,7 +930,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .with_schema(Arc::clone(&schema))
         .with_dialect_name("postgres")
         .with_policy(PolicyConfig::default())
-        .with_max_retries(2);
+        .with_max_retries(3);
     if let Some(client) = llm_client {
         builder = builder.with_llm_client(client);
     }
