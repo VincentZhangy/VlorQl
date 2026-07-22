@@ -367,6 +367,25 @@ fn normalize_impl(val: &mut Value) -> bool {
                 }
             }
 
+            // Fix: LLMs sometimes emit aggregate function names as `type`
+            // (e.g. `{"type": "sum", "args": [...]}`) instead of the
+            // canonical `{"type": "function_call", "name": "sum", ...}`.
+            // Convert them here before the builder rejects them.
+            let type_str = map
+                .get("type")
+                .and_then(|t| t.as_str())
+                .map(|s| s.to_lowercase())
+                .unwrap_or_default();
+            const AGG_NAMES: &[&str] = &["sum", "count", "avg", "min", "max", "string_agg", "array_agg"];
+            if AGG_NAMES.contains(&type_str.as_str()) {
+                if let Some(args) = map.remove("args") {
+                    map.insert("type".to_owned(), Value::String("function_call".to_owned()));
+                    map.insert("name".to_owned(), Value::String(type_str));
+                    map.insert("args".to_owned(), args);
+                    changed = true;
+                }
+            }
+
             // Recurse into children (some may be predicates or expressions).
             let keys: Vec<String> = map.keys().cloned().collect();
             for key in &keys {
