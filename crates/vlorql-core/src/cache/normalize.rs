@@ -38,7 +38,7 @@ use serde_json::Value;
 ///     from: FromClause { table: "users".to_owned(), alias: None },
 ///     r#where: None, group_by: None, having: None,
 ///     order_by: None, limit: None, offset: None,
-///     joins: None, ctes: None,
+///     joins: None, ctes: None, distinct: false, distinct_on: None, set_operation: None,
 /// };
 /// let validated = ValidatedPlan(Arc::new(plan));
 /// let json = normalize_plan(&validated);
@@ -125,7 +125,9 @@ mod tests {
                 offset: None,
                 joins: None,
                 ctes: None,
-            }))
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,            }))
         };
 
         assert_eq!(normalize_plan(&plan()), normalize_plan(&plan()));
@@ -152,6 +154,9 @@ mod tests {
             offset: None,
             joins: None,
             ctes: None,
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,
         }));
 
         let plan_b = ValidatedPlan(Arc::new(QueryPlan {
@@ -172,6 +177,9 @@ mod tests {
             offset: None,
             joins: None,
             ctes: None,
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,
         }));
 
         assert_ne!(normalize_plan(&plan_a), normalize_plan(&plan_b));

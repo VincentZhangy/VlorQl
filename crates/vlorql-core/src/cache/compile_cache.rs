@@ -36,7 +36,7 @@ use std::sync::Arc;
 ///     from: FromClause { table: "users".to_owned(), alias: None },
 ///     r#where: None, group_by: None, having: None,
 ///     order_by: None, limit: None, offset: None,
-///     joins: None, ctes: None,
+///     joins: None, ctes: None, distinct: false, distinct_on: None, set_operation: None,
 /// }));
 /// let profile = DialectProfile::default();
 ///
@@ -178,6 +178,9 @@ mod tests {
             offset: None,
             joins: None,
             ctes: None,
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,
         }))
     }
 
@@ -263,6 +266,9 @@ mod tests {
             offset: None,
             joins: None,
             ctes: None,
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,
         }));
 
         let compiled_a = make_compiled(SqlDialect::Postgres);
@@ -307,7 +313,9 @@ mod tests {
                 offset: None,
                 joins: None,
                 ctes: None,
-            }));
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,            }));
             let compiled = CompiledQuery {
                 sql: format!("SELECT \"col_{i}\" FROM \"t\""),
                 parameters: vec![],
@@ -411,7 +419,9 @@ mod tests {
                     offset: None,
                     joins: None,
                     ctes: None,
-                }));
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,                }));
                 let compiled = CompiledQuery {
                     sql: format!("SELECT \"col_{i}\" FROM \"t\""),
                     parameters: vec![],

@@ -183,7 +183,9 @@ fn sample_plan() -> QueryPlan {
         offset: Some(100),
         joins: None,
         ctes: None,
-    }
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,    }
 }
 
 #[tokio::main]

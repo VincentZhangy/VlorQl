@@ -75,6 +75,9 @@ mod tests {
             offset: None,
             joins: None,
             ctes: None,
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,
         }
     }
 
@@ -340,6 +343,9 @@ mod extra_tests {
             offset: None,
             joins: None,
             ctes: None,
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,
         }
     }
 
@@ -493,6 +499,9 @@ mod extra_tests {
                 },
             }]),
             ctes: None,
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,
         };
         let errors = engine
             .validate(&plan, &snapshot)

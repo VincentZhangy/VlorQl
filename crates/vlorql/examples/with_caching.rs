@@ -81,6 +81,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
             offset: None,
             joins: None,
             ctes: None,
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,
         }))
         // Enable all three caches.
         .with_schema_cache(10, 3600)

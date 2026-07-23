@@ -182,7 +182,9 @@ fn build_query_plan() -> QueryPlan {
             },
         }]),
         ctes: None,
-    }
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,    }
 }
 
 #[derive(Clone)]

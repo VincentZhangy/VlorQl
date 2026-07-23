@@ -57,6 +57,9 @@ mod tests {
             offset: None,
             joins: None,
             ctes: None,
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,
         }
     }
 
@@ -213,6 +216,9 @@ mod tests {
             offset: Some(100),
             joins: None,
             ctes: None,
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,
         };
         let value = to_value(&plan).expect("plan should serialize");
         assert_eq!(value["limit"], 50);

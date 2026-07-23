@@ -101,6 +101,9 @@ mod tests {
             offset: None,
             joins: None,
             ctes: None,
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,
         }
     }
 
@@ -206,7 +209,9 @@ mod tests {
                 offset: None,
                 joins: None,
                 ctes: None,
-            }),
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,            }),
         }]);
         assert!(optimize(&mut plan));
         // CTE subquery should have its AND TRUE simplified.

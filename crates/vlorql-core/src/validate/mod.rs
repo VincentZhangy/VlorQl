@@ -70,6 +70,9 @@ mod tests {
             offset: None,
             joins: None,
             ctes: None,
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,
         }
     }
 
@@ -178,7 +181,8 @@ mod tests {
         }]);
         plan.ctes = Some(vec![CommonTableExpression {
             name: "user_ids".to_owned(),
-            query: Box::new(base_plan()),, recursive: false
+            query: Box::new(base_plan()),
+            recursive: false,
         }]);
         let profile = DialectProfile::builder()
             .supports_cte(false)
@@ -242,7 +246,8 @@ mod tests {
         }]);
         plan.ctes = Some(vec![CommonTableExpression {
             name: "user_ids".to_owned(),
-            query: Box::new(base_plan()),, recursive: false
+            query: Box::new(base_plan()),
+            recursive: false,
         }]);
 
         let policy = PolicyEngine::new(PolicyConfig {
@@ -340,6 +345,9 @@ mod tests {
             offset: None,
             joins: None,
             ctes: None,
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,
         };
         let errors = OperandValidator::validate(&plan, &snapshot)
             .expect_err("string literal declared as Int must fail");
@@ -375,7 +383,8 @@ mod tests {
         let mut plan = base_plan();
         plan.ctes = Some(vec![CommonTableExpression {
             name: "active_users".to_owned(),
-            query: Box::new(base_plan()),, recursive: false
+            query: Box::new(base_plan()),
+            recursive: false,
         }]);
         let profile = DialectProfile::builder()
             .supports_cte(false)
@@ -463,6 +472,9 @@ mod tests {
             offset: None,
             joins: None,
             ctes: None,
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,
         };
         let errors = validate_schema(&plan, &snapshot)
             .expect_err("qualifier that resolves to no source must be reported");

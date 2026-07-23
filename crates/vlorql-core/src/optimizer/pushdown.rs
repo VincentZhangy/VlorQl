@@ -417,11 +417,12 @@ mod tests {
     fn plan_with_cte(outer_where: Predicate) -> QueryPlan {
         let cte = CommonTableExpression {
             name: "active".to_owned(),
+            recursive: false,
             query: Box::new(QueryPlan {
                 select: vec![select_col("orders", "id"), select_col("orders", "amount")],
                 from: FromClause {
                     table: "orders".to_owned(),
-                    alias: None, recursive: false
+                    alias: None,
                 },
                 r#where: None,
                 group_by: None,
@@ -431,7 +432,9 @@ mod tests {
                 offset: None,
                 joins: None,
                 ctes: None,
-            }),
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,            }),
         };
         QueryPlan {
             select: vec![select_col("active", "id")],
@@ -447,6 +450,9 @@ mod tests {
             offset: None,
             joins: None,
             ctes: Some(vec![cte]),
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,
         }
     }
 

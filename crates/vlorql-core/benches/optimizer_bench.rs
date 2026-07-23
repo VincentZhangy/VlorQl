@@ -65,7 +65,9 @@ fn build_chain_join_plan(n: usize) -> QueryPlan {
         offset: None,
         joins: Some(joins),
         ctes: None,
-    }
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,    }
 }
 
 /// Builds a statistics catalog with `n` tables, each having `row_count`

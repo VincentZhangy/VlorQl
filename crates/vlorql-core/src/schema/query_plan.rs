@@ -146,6 +146,9 @@ pub struct SetOperationClause {
 ///     offset: None,
 ///     joins: None,
 ///     ctes: None,
+///     distinct: false,
+///     distinct_on: None,
+///     set_operation: None,
 /// };
 /// assert_eq!(plan.select.len(), 1);
 /// assert!(plan.r#where.is_some());

@@ -95,7 +95,9 @@ fn plan_with_joins() -> QueryPlan {
             },
         }]),
         ctes: None,
-    }
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,    }
 }
 
 // ---------------------------------------------------------------------------
@@ -203,7 +205,9 @@ async fn optimized_plan_still_enforces_policy() {
         offset: None,
         joins: None,
         ctes: None,
-    };
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,    };
     let result = vlorql.validate_and_optimize(&bad_plan).await;
     assert!(
         result.is_err(),

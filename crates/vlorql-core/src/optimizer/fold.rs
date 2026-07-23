@@ -54,7 +54,7 @@ use super::visitor::{ExpressionFold, default_fold_expression, default_fold_predi
 ///     }],
 ///     from: FromClause { table: "t".to_owned(), alias: None },
 ///     r#where: None, group_by: None, having: None,
-///     order_by: None, limit: None, offset: None, joins: None, ctes: None,
+///     order_by: None, limit: None, offset: None, joins: None, ctes: None, distinct: false, distinct_on: None, set_operation: None,
 /// };
 ///
 /// let folded = ConstantFolding.rewrite(&plan).unwrap();
@@ -653,6 +653,9 @@ mod tests {
             offset: None,
             joins: None,
             ctes: None,
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,
         };
         let folded = ConstantFolding.rewrite(&plan).unwrap();
         assert_eq!(

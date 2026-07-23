@@ -83,7 +83,9 @@ fn leaf_cte() -> QueryPlan {
         offset: None,
         joins: None,
         ctes: None,
-    }
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,    }
 }
 
 /// Builds a CTE that joins `orders` and `customers`.
@@ -303,7 +305,9 @@ fn build_complex_plan() -> ValidatedPlan {
                     offset: None,
                     joins: None,
                     ctes: None,
-                }),
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,                }),
             },
             CommonTableExpression {
                 name: "active_customers".to_owned(),
@@ -327,7 +331,9 @@ fn build_complex_plan() -> ValidatedPlan {
                     offset: None,
                     joins: None,
                     ctes: None,
-                }),
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,                }),
             },
         ]),
     };

@@ -463,7 +463,9 @@ fn build_demo_plan() -> QueryPlan {
             },
         }]),
         ctes: None,
-    }
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,    }
 }
 
 /// Plan 2: IN 谓词 —— 查询状态为 completed 或 shipped 的订单
@@ -551,7 +553,9 @@ fn build_in_predicate_plan() -> QueryPlan {
         limit: None,
         offset: None,
         ctes: None,
-    }
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,    }
 }
 
 /// Plan 3: IS NULL + LEFT JOIN —— 查找从未被购买过的商品
@@ -617,7 +621,9 @@ fn build_is_null_plan() -> QueryPlan {
         limit: None,
         offset: None,
         ctes: None,
-    }
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,    }
 }
 
 /// Plan 4: GROUP BY + 聚合函数 —— 每种产品的累计销售量
@@ -682,7 +688,9 @@ fn build_aggregate_plan() -> QueryPlan {
         limit: None,
         offset: None,
         ctes: None,
-    }
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,    }
 }
 
 /// Plan 5: HAVING + COUNT + GROUP BY + JOIN —— 统计每个客户的订单数，仅显示超过 2 个的
@@ -779,7 +787,9 @@ fn build_having_plan() -> QueryPlan {
         limit: None,
         offset: None,
         ctes: None,
-    }
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,    }
 }
 
 /// Plan 6: BETWEEN 范围查询 —— 查找金额在 100~600 之间的订单
@@ -842,7 +852,9 @@ fn build_between_plan() -> QueryPlan {
         limit: None,
         offset: None,
         ctes: None,
-    }
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,    }
 }
 
 /// Plan 7: LIKE 模式匹配 —— 查找邮箱以 example.com 结尾的用户
@@ -891,7 +903,9 @@ fn build_like_plan() -> QueryPlan {
         limit: None,
         offset: None,
         ctes: None,
-    }
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,    }
 }
 
 /// Plan 8: 子查询 IN —— 查询下过超过 200 元订单的用户
@@ -956,7 +970,9 @@ fn build_subquery_in_plan() -> QueryPlan {
                 offset: None,
                 joins: None,
                 ctes: None,
-            })),
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,            })),
         }),
         joins: None,
         group_by: None,
@@ -965,7 +981,9 @@ fn build_subquery_in_plan() -> QueryPlan {
         limit: None,
         offset: None,
         ctes: None,
-    }
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,    }
 }
 
 /// Plan 9: CTE (WITH) + GROUP BY + 聚合 + 二元运算 —— 每个产品的总销售额
@@ -1054,7 +1072,9 @@ fn build_cte_plan() -> QueryPlan {
         limit: None,
         offset: None,
         ctes: None,
-    };
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,    };
 
     QueryPlan {
         select: vec![
@@ -1227,7 +1247,9 @@ fn build_multi_join_plan() -> QueryPlan {
         limit: None,
         offset: None,
         ctes: None,
-    }
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,    }
 }
 
 /// Plan 11: NOT EXISTS —— 使用 NOT EXISTS 查找从未被购买过的商品（与 Plan 3 不同实现方式）
@@ -1296,7 +1318,9 @@ fn build_not_exists_plan() -> QueryPlan {
                     offset: None,
                     joins: None,
                     ctes: None,
-                }),
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,                }),
             }),
         }),
         joins: None,
@@ -1306,7 +1330,9 @@ fn build_not_exists_plan() -> QueryPlan {
         limit: None,
         offset: None,
         ctes: None,
-    }
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,    }
 }
 
 /// Plan 12: FULL OUTER JOIN —— 查询所有用户及其订单（包括从未下单的用户）
@@ -1388,7 +1414,9 @@ fn build_full_outer_join_plan() -> QueryPlan {
         limit: None,
         offset: None,
         ctes: None,
-    }
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,    }
 }
 
 /// Plan 13: CROSS JOIN —— 生成所有用户和所有产品的笛卡尔积组合
@@ -1460,7 +1488,9 @@ fn build_cross_join_plan() -> QueryPlan {
         limit: None,
         offset: None,
         ctes: None,
-    }
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,    }
 }
 
 /// Plan 14: 表自连接 (SELF JOIN) —— 查询员工及其直属上级的姓名和部门
@@ -1528,7 +1558,9 @@ fn build_self_join_plan() -> QueryPlan {
         limit: None,
         offset: None,
         ctes: None,
-    }
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,    }
 }
 
 /// Plan 15: DATE_TRUNC + GROUP BY —— 按月统计订单数量和总金额
@@ -1599,7 +1631,9 @@ fn build_date_trunc_plan() -> QueryPlan {
         limit: None,
         offset: None,
         ctes: None,
-    }
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,    }
 }
 
 /// Plan 16: STRING_AGG —— 查询每个订单包含的商品名称列表和总件数
@@ -1711,7 +1745,9 @@ fn build_string_agg_plan() -> QueryPlan {
         limit: None,
         offset: None,
         ctes: None,
-    }
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,    }
 }
 
 /// Plan 17: COUNT(DISTINCT) + multiple aggregates —— 统计每个商品的不同购买客户数和总销量
@@ -1821,7 +1857,9 @@ fn build_distinct_count_plan() -> QueryPlan {
         limit: None,
         offset: None,
         ctes: None,
-    }
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,    }
 }
 
 /// Plan 18: NOT + AND —— 查询状态不是已完成且金额大于 100 的订单
@@ -1896,7 +1934,9 @@ fn build_complex_not_plan() -> QueryPlan {
         limit: None,
         offset: None,
         ctes: None,
-    }
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,    }
 }
 
 /// Plan 19: CASE WHEN 条件分支 —— 按金额区间给订单打标
@@ -2251,7 +2291,9 @@ fn build_union_all_plan() -> QueryPlan {
         offset: None,
         joins: None,
         ctes: None,
-    }
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,    }
 }
 
 /// Plan 23: 递归 CTE —— 组织架构树向下穿透

@@ -78,7 +78,9 @@ fn fix_empty_select_in_pipeline() {
         offset: None,
         joins: None,
         ctes: None,
-    };
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,    };
     assert!(fixer::fix_plan(&mut plan));
     assert_eq!(plan.select.len(), 1);
     assert!(validator::validate_plan(&plan).is_ok());

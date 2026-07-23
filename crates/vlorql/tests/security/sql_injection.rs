@@ -67,7 +67,9 @@ fn base_plan() -> QueryPlan {
         offset: None,
         joins: None,
         ctes: None,
-    }
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,    }
 }
 
 fn plan_with_string_literal(value: &str) -> QueryPlan {

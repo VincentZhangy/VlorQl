@@ -137,7 +137,9 @@ fn denied_table_cannot_be_referenced_via_case_insensitive_alias() {
         offset: None,
         joins: None,
         ctes: None,
-    };
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,    };
     let errors = facade(policy_with_restricted_users())
         .validate_only(&plan)
         .expect_err("uppercase `USERS` should be rejected");
@@ -176,7 +178,9 @@ fn denied_table_cannot_be_referenced_via_trailing_whitespace() {
         offset: None,
         joins: None,
         ctes: None,
-    };
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,    };
     let errors = facade(policy_with_restricted_users())
         .validate_only(&plan)
         .expect_err("`users ` (with trailing space) should be rejected");
@@ -210,7 +214,9 @@ fn denied_table_cannot_be_referenced_via_unicode_lookalike() {
         offset: None,
         joins: None,
         ctes: None,
-    };
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,    };
     let errors = facade(policy_with_restricted_users())
         .validate_only(&plan)
         .expect_err("unicode-prefixed table name should be rejected");
@@ -245,7 +251,9 @@ fn denied_secrets_table_is_rejected_even_when_aliased() {
         offset: None,
         joins: None,
         ctes: None,
-    };
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,    };
     let errors = facade(policy_with_restricted_users())
         .validate_only(&plan)
         .expect_err("the `secrets` table must be denied by policy");
@@ -282,7 +290,9 @@ fn table_denied_column_is_rejected() {
         offset: None,
         joins: None,
         ctes: None,
-    };
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,    };
     let errors = facade(policy_with_restricted_users())
         .validate_only(&plan)
         .expect_err("password_hash must be denied");
@@ -317,7 +327,9 @@ fn globally_denied_column_is_rejected_from_any_table() {
         offset: None,
         joins: None,
         ctes: None,
-    };
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,    };
     let mut policy = policy_with_restricted_users();
     // Remove the per-table denylist so the only thing that catches the
     // attempt is the global one.
@@ -361,7 +373,9 @@ fn column_outside_allowlist_is_rejected() {
         offset: None,
         joins: None,
         ctes: None,
-    };
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,    };
     let mut policy = policy_with_restricted_users();
     policy
         .table_policies
@@ -422,7 +436,9 @@ fn joining_against_a_denied_table_is_rejected() {
             },
         }]),
         ctes: None,
-    };
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,    };
     let errors = facade(policy_with_restricted_users())
         .validate_only(&plan)
         .expect_err("joining against a denied table should be rejected");
@@ -474,7 +490,9 @@ fn selecting_from_a_denied_table_via_join_alias_is_rejected() {
             },
         }]),
         ctes: None,
-    };
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,    };
     let errors = facade(policy_with_restricted_users())
         .validate_only(&plan)
         .expect_err("aliased reference to a denied table should be rejected");
@@ -526,7 +544,9 @@ fn selecting_a_denied_column_via_join_alias_is_rejected() {
             },
         }]),
         ctes: None,
-    };
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,    };
     let errors = facade(policy_with_restricted_users())
         .validate_only(&plan)
         .expect_err("denied column via aliased reference should be rejected");
@@ -581,7 +601,9 @@ fn globally_denied_column_referenced_via_join_is_rejected() {
             },
         }]),
         ctes: None,
-    };
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,    };
     let errors = facade(policy_with_restricted_users())
         .validate_only(&plan)
         .expect_err("joining the secrets table must fail");
@@ -620,7 +642,9 @@ fn row_filter_is_applied_even_when_plan_author_omits_a_where_clause() {
         offset: None,
         joins: None,
         ctes: None,
-    };
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,    };
     let predicate = policy_engine
         .apply_row_filters(&plan)
         .expect("a row filter must be derived from the policy");
@@ -668,7 +692,9 @@ fn row_filter_combines_multiple_conditions_with_and() {
         offset: None,
         joins: None,
         ctes: None,
-    };
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,    };
     let predicate = PolicyEngine::new(policy)
         .apply_row_filters(&plan)
         .expect("two filters should combine");

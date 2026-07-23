@@ -26,7 +26,7 @@ use std::sync::Arc;
 ///     from: FromClause { table: "users".to_owned(), alias: None },
 ///     r#where: None, group_by: None, having: None,
 ///     order_by: None, limit: None, offset: None,
-///     joins: None, ctes: None,
+///     joins: None, ctes: None, distinct: false, distinct_on: None, set_operation: None,
 /// };
 /// let validated = ValidatedPlan(Arc::new(plan));
 /// assert_eq!(validated.as_plan().from.table, "users");
@@ -75,7 +75,7 @@ impl Deref for ValidatedPlan {
 ///     from: FromClause { table: "users".to_owned(), alias: None },
 ///     r#where: None, group_by: None, having: None,
 ///     order_by: None, limit: None, offset: None,
-///     joins: None, ctes: None,
+///     joins: None, ctes: None, distinct: false, distinct_on: None, set_operation: None,
 /// };
 /// let validated = ValidatedPlan(Arc::new(plan));
 /// let optimized = OptimizedPlan::from(validated);
@@ -149,7 +149,7 @@ impl Deref for OptimizedPlan {
 ///     from: FromClause { table: "users".to_owned(), alias: None },
 ///     r#where: None, group_by: None, having: None,
 ///     order_by: None, limit: None, offset: None,
-///     joins: None, ctes: None,
+///     joins: None, ctes: None, distinct: false, distinct_on: None, set_operation: None,
 /// };
 /// assert!(pipeline.validate(&plan).is_ok());
 /// ```

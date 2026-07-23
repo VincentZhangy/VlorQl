@@ -114,7 +114,7 @@ pub enum StreamEvent {
 ///     from: FromClause { table: "users".to_owned(), alias: None },
 ///     r#where: None, group_by: None, having: None,
 ///     order_by: None, limit: None, offset: None,
-///     joins: None, ctes: None,
+///     joins: None, ctes: None, distinct: false, distinct_on: None, set_operation: None,
 /// };
 /// let validated = vlorql.validate_only(&plan).expect("plan is valid");
 /// let compiled = vlorql.compile_only(&validated).expect("plan compiles");
@@ -1003,6 +1003,9 @@ mod tests {
             offset: None,
             joins: None,
             ctes: None,
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,
         }
     }
 

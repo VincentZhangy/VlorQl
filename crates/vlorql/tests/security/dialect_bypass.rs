@@ -49,7 +49,9 @@ fn base_plan() -> QueryPlan {
         offset: None,
         joins: None,
         ctes: None,
-    }
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,    }
 }
 
 fn restricted_profile() -> DialectProfile {
@@ -496,7 +498,9 @@ fn plan_that_respects_every_constraint_passes_validation() {
         offset: None,
         joins: None,
         ctes: None,
-    };
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,    };
     DialectValidator::validate(&plan, &restricted_profile())
         .expect("a trivial plan should respect the strict profile");
 }

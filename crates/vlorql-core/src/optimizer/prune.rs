@@ -456,11 +456,12 @@ mod tests {
     ) -> QueryPlan {
         let cte = CommonTableExpression {
             name: cte_name.to_owned(),
+            recursive: false,
             query: Box::new(QueryPlan {
                 select: cte_projection,
                 from: FromClause {
                     table: "orders".to_owned(),
-                    alias: None, recursive: false
+                    alias: None,
                 },
                 r#where: None,
                 group_by: cte_gb,
@@ -470,7 +471,9 @@ mod tests {
                 offset: None,
                 joins: None,
                 ctes: None,
-            }),
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,            }),
         };
         QueryPlan {
             select: outer_select,
@@ -486,6 +489,9 @@ mod tests {
             offset: None,
             joins: None,
             ctes: Some(vec![cte]),
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,
         }
     }
 
