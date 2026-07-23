@@ -504,6 +504,8 @@ impl PromptBuilder {
              - `data_type` only belongs inside `literal` objects.\n\
              - `order_by`, `limit`, `offset` go at the top level, never inside `where`.\n\
              - Predicate keys (`where`/`left`/`right`/`child`/`on`) are normal JSON keys — write `\"where\":{{...}}`, never `\"where\\\\\":`.\n\
+             - CRITICAL: `\"type\": \"expr\"` is ONLY valid inside `select` (as a Projection wrapper). In `having`, `order_by[].expr`, `group_by`, `where`, `on`, and all other Expression positions, use the Expression type DIRECTLY: `{{\"type\":\"function_call\",...}}`, `{{\"type\":\"binary_op\",...}}`, etc. NEVER wrap an Expression in `{{\"type\":\"expr\",\"expression\":...}}` outside of `select`.\n\
+             - CRITICAL: Arithmetic like `unit_price * quantity` must be a `binary_op` expression, NOT a string column name. Example: `{{\"type\":\"binary_op\",\"left\":{{\"type\":\"column_ref\",\"column\":\"unit_price\",\"table\":\"order_items\"}},\"op\":\"mul\",\"right\":{{\"type\":\"column_ref\",\"column\":\"quantity\",\"table\":\"order_items\"}}}}`.\n\
              \n\
              Nested `WHERE` (and/or):\n\
              {{\"where\":{{\"type\":\"and\",\"left\":{{\"type\":\"comparison\",\"left\":{{\"type\":\"column_ref\",\"column\":\"total\",\"table\":\"orders\"}},\"op\":\"gt\",\"right\":{{\"type\":\"literal\",\"value\":150,\"data_type\":\"float\"}}}},\"right\":{{\"type\":\"comparison\",\"left\":{{\"type\":\"column_ref\",\"column\":\"status\",\"table\":\"orders\"}},\"op\":\"eq\",\"right\":{{\"type\":\"literal\",\"value\":\"completed\",\"data_type\":\"string\"}}}}}}}\n\
