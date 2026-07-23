@@ -439,9 +439,46 @@ fn fix_order_by_aliases(plan: &mut QueryPlan) -> bool {
                 }
             }
         }
+        // Case 3: Recursively replace alias column_refs inside the expression tree.
+        changed |= replace_alias_refs_in_expr(&mut term.expr, &alias_map);
     }
 
     changed
+}
+
+/// Recursively walk an expression and replace any ColumnRef that references
+/// a SELECT alias with the original expression.
+fn replace_alias_refs_in_expr(
+    expr: &mut Expression,
+    alias_map: &[(String, Expression)],
+) -> bool {
+    match expr {
+        Expression::ColumnRef { column, .. } => {
+            if let Some((_, original_expr)) = alias_map.iter().find(|(alias, _)| alias == column) {
+                *expr = original_expr.clone();
+                true
+            } else {
+                false
+            }
+        }
+        Expression::FunctionCall { args, .. } => {
+            let mut changed = false;
+            for arg in args.iter_mut() {
+                changed |= replace_alias_refs_in_expr(arg, alias_map);
+            }
+            changed
+        }
+        Expression::BinaryOp { left, right, .. } => {
+            let mut changed = false;
+            changed |= replace_alias_refs_in_expr(left, alias_map);
+            changed |= replace_alias_refs_in_expr(right, alias_map);
+            changed
+        }
+        Expression::SubQuery { .. } => {
+            false
+        }
+        _ => false,
+    }
 }
 
 /// Convenience: create a fix pipeline function that returns a new
