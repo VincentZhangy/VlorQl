@@ -1,4 +1,4 @@
-use crate::schema::{Expression, FromClause, InTarget, Predicate, Projection, QueryPlan};
+use crate::schema::{Expression, FromClause, InTarget, JoinType, Predicate, Projection, QueryPlan};
 use std::collections::HashSet;
 
 #[derive(Debug, Clone)]
@@ -117,7 +117,11 @@ pub(crate) fn collect_plan_references(plan: &QueryPlan) -> PlanReferences {
     }
     if let Some(joins) = &plan.joins {
         for join in joins {
-            collect_predicate_references(&join.on, &mut references.columns);
+            // CROSS JOIN has no ON condition in SQL; the compiler ignores it.
+            // Skip reference collection so hallucinated columns don't fail validation.
+            if join.join_type != JoinType::Cross {
+                collect_predicate_references(&join.on, &mut references.columns);
+            }
         }
     }
 

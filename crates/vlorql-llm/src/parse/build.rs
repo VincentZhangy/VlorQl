@@ -343,6 +343,19 @@ pub fn build_expression(val: &serde_json::Value) -> Result<Expression, BuildErro
     };
 
     match type_str {
+        // `expr` is the `Projection` wrapper, only valid in `select`. LLMs
+        // frequently emit it in bare Expression positions (order_by, having,
+        // comparison operands, group_by). Unwrap the inner expression so the
+        // plan still builds instead of failing on an "unknown variant".
+        "expr" | "Expr" => {
+            let inner = obj
+                .get("expression")
+                .or_else(|| obj.get("expr"))
+                .ok_or_else(|| {
+                    BuildError::new("expression", "`expr` wrapper missing `expression` field")
+                })?;
+            build_expression(inner).map_err(|e| e.at("expression"))
+        }
         "column_ref" | "ColumnRef" => {
             let column = req_str(obj, "column", "")?.to_owned();
             let table = opt_str(obj, "table").map(|s| s.to_owned());
@@ -758,4 +771,50 @@ pub fn from_canonical_str(canonical: &str) -> Result<QueryPlan, serde_json::Erro
 /// Returns a `serde_json::Error` (wrapping [`BuildError`]) on failure.
 pub fn from_canonical_value(canonical: &serde_json::Value) -> Result<QueryPlan, serde_json::Error> {
     build_plan(canonical).map_err(Into::into)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    /// LLMs often wrap a bare Expression in the `select`-only `expr`
+    /// Projection shape when it appears in `order_by`, `having`, or a
+    /// comparison operand. The builder should transparently unwrap it.
+    #[test]
+    fn unwraps_expr_wrapper_in_expression_positions() {
+        let wrapped = json!({
+            "type": "expr",
+            "expression": {
+                "type": "function_call",
+                "name": "count",
+                "args": [{"type": "column_ref", "column": "id", "table": "orders"}],
+                "distinct": false
+            },
+            "alias": "order_count"
+        });
+        let expr = build_expression(&wrapped).expect("expr wrapper should unwrap");
+        match expr {
+            Expression::FunctionCall { name, args, distinct } => {
+                assert_eq!(name, "count");
+                assert_eq!(args.len(), 1);
+                assert!(!distinct);
+            }
+            other => panic!("expected unwrapped FunctionCall, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn unwraps_expr_wrapper_in_order_by() {
+        let term = json!({
+            "expr": {
+                "type": "expr",
+                "expression": {"type": "column_ref", "column": "total", "table": "orders"}
+            },
+            "descending": true
+        });
+        let parsed = build_order_by_term(&term).expect("order_by term should build");
+        assert!(parsed.descending);
+        assert!(matches!(parsed.expr, Expression::ColumnRef { .. }));
+    }
 }

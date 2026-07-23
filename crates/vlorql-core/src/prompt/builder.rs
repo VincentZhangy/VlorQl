@@ -375,7 +375,8 @@ impl PromptBuilder {
              3. Every table in `select` / `where` must be in `from` or `joins`. Never reference an unjoined table. Example: selecting `users.name` requires joining `users`.\n\
              4. `limit` / `order_by` / `offset` only at top level, never inside `where` or subqueries.\n\
              5. Only use GROUP BY when the question asks for \"each / every / per\" (e.g. \"per product\" → GROUP BY + SUM/COUNT). For other queries, omit GROUP BY entirely.\n\
-             6. Output valid JSON: keys unescaped (`\"where\":` not `\"where\\\":`). No backslash-escaped quotes, no fences.\n\
+             6. \"all combinations / every pairing / cartesian product\" questions: use CROSS JOIN. A CROSS JOIN has NO real matching condition — never invent a foreign key for it. For filtered relationships, use INNER JOIN with a real `on` instead.\n\
+             7. Output valid JSON: keys unescaped (`\"where\":` not `\"where\\\":`). No backslash-escaped quotes, no fences.\n\
              \n",
         );
     }
