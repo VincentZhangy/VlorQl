@@ -261,6 +261,19 @@ pub fn build_expression(val: &Value) -> Result<Expression, BuildError> {
     };
 
     match type_str {
+        // `expr` is the `Projection` wrapper, only valid in `select`. LLMs
+        // frequently emit it in bare Expression positions (order_by, having,
+        // comparison operands, group_by). Unwrap the inner expression so the
+        // plan still builds instead of failing on an "unknown variant".
+        "expr" | "Expr" => {
+            let inner = obj
+                .get("expression")
+                .or_else(|| obj.get("expr"))
+                .ok_or_else(|| {
+                    BuildError::new("expression", "`expr` wrapper missing `expression` field")
+                })?;
+            build_expression(inner).map_err(|e| e.at("expression"))
+        }
         "column_ref" => {
             let column = req_str(obj, "column", "")?.to_owned();
             let table = opt_str(obj, "table").map(|s| s.to_owned());

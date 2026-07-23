@@ -27,6 +27,8 @@ pub fn fix_plan(plan: &mut QueryPlan) -> bool {
     changed |= fix_missing_group_by(plan);
     // fix_missing_aliases must run last because it adds new aliases.
     changed |= fix_missing_aliases(plan);
+    // Replace ORDER BY alias references with the original SELECT expressions.
+    changed |= fix_order_by_aliases(plan);
     // Recursively fix CTE subqueries.
     if let Some(ref mut ctes) = plan.ctes {
         for cte in ctes.iter_mut() {
@@ -305,6 +307,73 @@ fn fix_join_alias(join: &mut JoinClause, counter: &mut u32, used: &mut Vec<Strin
     } else {
         false
     }
+}
+
+/// Replace ORDER BY expressions that reference SELECT aliases with the
+/// original SELECT expression.
+///
+/// LLMs frequently emit order_by terms that reference an alias from the
+/// SELECT list (e.g. `ORDER BY total_amount DESC`), but in the canonical
+/// JSON the ORDER BY `expr` must be the actual expression (not an alias).
+/// This function builds an alias → expression map from the SELECT list
+/// and replaces any ORDER BY `column_ref` that resolves to an alias with
+/// the original SELECT expression.
+#[must_use]
+fn fix_order_by_aliases(plan: &mut QueryPlan) -> bool {
+    let Some(ref mut order_by) = plan.order_by else {
+        return false;
+    };
+    if order_by.is_empty() {
+        return false;
+    }
+
+    // Build alias → expression map from SELECT projections.
+    let mut alias_map: Vec<(String, Expression)> = Vec::new();
+    for proj in &plan.select {
+        match proj {
+            Projection::Column { column, alias: Some(a), .. } => {
+                alias_map.push((a.clone(), Expression::ColumnRef {
+                    table: None,
+                    column: column.clone(),
+                }));
+            }
+            Projection::Expr { expression, alias: Some(a), .. } => {
+                alias_map.push((a.clone(), expression.clone()));
+            }
+            _ => {}
+        }
+    }
+
+    if alias_map.is_empty() {
+        return false;
+    }
+
+    let mut changed = false;
+    for term in order_by.iter_mut() {
+        // Case 1: Direct column_ref matching an alias.
+        if let Expression::ColumnRef { ref column, .. } = term.expr {
+            if let Some((_, original_expr)) = alias_map.iter().find(|(alias, _)| alias == column) {
+                term.expr = original_expr.clone();
+                changed = true;
+                continue;
+            }
+        }
+        // Case 2: desc(...) function call wrapping a column_ref matching an alias.
+        if let Expression::FunctionCall { ref name, ref args, .. } = term.expr {
+            if name == "desc" && args.len() == 1 {
+                if let Expression::ColumnRef { ref column, .. } = args[0] {
+                    if let Some((_, original_expr)) = alias_map.iter().find(|(alias, _)| alias == column) {
+                        term.expr = original_expr.clone();
+                        term.descending = true;
+                        changed = true;
+                        continue;
+                    }
+                }
+            }
+        }
+    }
+
+    changed
 }
 
 /// Convenience: create a fix pipeline function that returns a new
