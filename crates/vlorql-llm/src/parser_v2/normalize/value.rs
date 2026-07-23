@@ -74,6 +74,28 @@ fn normalize_impl(val: &mut Value) -> bool {
                     }
                 }
             }
+
+            // Fix: LLM sometimes emits `data_type: "null"` with a non-null value.
+            // Infer the correct data type from the `value` field.
+            if let Some(dt_val) = map.get("data_type") {
+                if dt_val.as_str() == Some("null") {
+                    if let Some(val_field) = map.get("value") {
+                        let inferred = match val_field {
+                            Value::Null => None,                    // correct already
+                            Value::Bool(_) => Some("boolean"),
+                            Value::Number(n) => {
+                                if n.is_f64() { Some("float") } else { Some("int") }
+                            }
+                            Value::String(_) => Some("string"),
+                            Value::Array(_) | Value::Object(_) => None,
+                        };
+                        if let Some(inferred_dt) = inferred {
+                            map.insert("data_type".to_owned(), Value::String(inferred_dt.to_owned()));
+                            changed = true;
+                        }
+                    }
+                }
+            }
             // Recurse into children.
             let keys: Vec<String> = map.keys().cloned().collect();
             for key in &keys {
