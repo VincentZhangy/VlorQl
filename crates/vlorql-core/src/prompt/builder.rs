@@ -747,6 +747,8 @@ fn compact_output_schema() -> &'static str {
                         ]
                     }
                 },
+                "distinct": {"type": "boolean"},
+                "distinct_on": {"type": "array", "items": {"type": "object"}},
                 "from": {"type": "object", "properties": {"table": {"type": "string"}, "alias": {"type": "string"}}, "required": ["table"]},
                 "where": {
                     "oneOf": [
@@ -789,9 +791,21 @@ fn compact_output_schema() -> &'static str {
                     "type": "array",
                     "items": {
                         "type": "object",
-                        "properties": {"name": {"type": "string"}, "query": {"type": "object"}},
+                        "properties": {
+                            "name": {"type": "string"},
+                            "recursive": {"type": "boolean"},
+                            "query": {"type": "object"}
+                        },
                         "required": ["name","query"]
                     }
+                },
+                "set_operation": {
+                    "type": "object",
+                    "properties": {
+                        "operation": {"enum": ["union_all","union","intersect","except"]},
+                        "right": {"type": "object"}
+                    },
+                    "required": ["operation","right"]
                 }
             },
             "required": ["select", "from"]

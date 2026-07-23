@@ -1396,6 +1396,8 @@ pub fn create_llm_client(config: LlmConfig) -> Result<Box<dyn LlmClient>, VlorQL
 fn default_plan() -> QueryPlan {
     QueryPlan {
         select: vec![vlorql_core::schema::Projection::Star { table: None }],
+        distinct: false,
+        distinct_on: None,
         from: vlorql_core::schema::FromClause {
             table: "placeholder".to_owned(),
             alias: None,
@@ -1408,6 +1410,7 @@ fn default_plan() -> QueryPlan {
         offset: None,
         joins: None,
         ctes: None,
+        set_operation: None,
     }
 }
 

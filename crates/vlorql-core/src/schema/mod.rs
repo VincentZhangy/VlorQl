@@ -7,9 +7,13 @@ pub mod snapshot;
 pub mod types;
 
 pub use dialect::{DialectProfile, DialectProfileBuilder};
-pub use expressions::{Expression, InTarget, Predicate};
+pub use expressions::{
+    Expression, InTarget, Predicate, WhenThen, WindowFrame, WindowFrameBound, WindowFrameKind,
+    WindowSpec,
+};
 pub use query_plan::{
     CommonTableExpression, FromClause, JoinClause, OrderByTerm, Projection, QueryPlan,
+    SetOperation, SetOperationClause,
 };
 pub use snapshot::{
     ArcSchemaSnapshot, ColumnSchema, ForeignKey, SchemaMetadata, SchemaSnapshot, TableSchema,

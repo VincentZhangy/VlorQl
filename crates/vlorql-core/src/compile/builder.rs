@@ -8,7 +8,8 @@ use super::types::Parameter;
 use crate::errors::{CompilationErrorKind, VlorQLError};
 use crate::schema::{
     BinaryOperator, ComparisonOperator, DataType, Expression, FromClause, IdentifierQuoting,
-    InTarget, JoinType, Predicate, Projection, QueryPlan, SqlDialect,
+    InTarget, JoinType, Predicate, Projection, QueryPlan, SetOperation, SetOperationClause,
+    SqlDialect, WindowFrame, WindowFrameBound, WindowFrameKind, WindowSpec,
 };
 use crate::validate::ValidatedPlan;
 use serde_json::{Value, json};
@@ -58,7 +59,8 @@ impl<'a> QueryBuilder<'a> {
 
     fn collect_aliases(from: &FromClause, map: &mut HashMap<String, String>) {
         let effective = from.alias.clone().unwrap_or_else(|| from.table.clone());
-        map.insert(from.table.clone(), effective.clone());
+        // 保留首次注册的表名→别名映射，避免自连接中后注册的 JOIN 覆盖 FROM 的映射
+        map.entry(from.table.clone()).or_insert_with(|| effective.clone());
         if let Some(ref alias) = from.alias {
             map.insert(alias.clone(), effective);
         }
@@ -140,6 +142,51 @@ impl<'a> QueryBuilder<'a> {
                 buf.push('(');
                 self.build_query(query, buf)?;
                 buf.push(')');
+                Ok(())
+            }
+            Expression::Case {
+                operand,
+                when_thens,
+                else_result,
+            } => {
+                buf.push_str("CASE");
+                if let Some(op) = operand {
+                    buf.push(' ');
+                    self.render_expression_to(op, buf)?;
+                }
+                for wt in when_thens {
+                    buf.push_str(" WHEN ");
+                    self.render_expression_to(&wt.when, buf)?;
+                    buf.push_str(" THEN ");
+                    self.render_expression_to(&wt.then, buf)?;
+                }
+                if let Some(el) = else_result {
+                    buf.push_str(" ELSE ");
+                    self.render_expression_to(el, buf)?;
+                }
+                buf.push_str(" END");
+                Ok(())
+            }
+            Expression::WindowFunction {
+                name,
+                args,
+                distinct,
+                over,
+            } => {
+                let function = self.render_function_name(name)?;
+                buf.push_str(&function);
+                buf.push('(');
+                if *distinct {
+                    buf.push_str("DISTINCT ");
+                }
+                for (i, argument) in args.iter().enumerate() {
+                    if i > 0 {
+                        buf.push_str(", ");
+                    }
+                    self.render_expression_to(argument, buf)?;
+                }
+                buf.push(')');
+                self.render_window_spec(over, buf)?;
                 Ok(())
             }
         }
@@ -267,6 +314,12 @@ impl<'a> QueryBuilder<'a> {
         self.build_order_by(plan, sql)?;
         self.build_limit_offset(plan, sql)?;
         self.alias_stack.pop();
+
+        // Render set operation (UNION / INTERSECT / EXCEPT) after the primary query.
+        if let Some(set_op) = &plan.set_operation {
+            self.render_set_operation(set_op, sql)?;
+        }
+
         Ok(())
     }
 
@@ -275,7 +328,11 @@ impl<'a> QueryBuilder<'a> {
             return Ok(());
         };
 
-        sql.push_str("WITH ");
+        if ctes.iter().any(|cte| cte.recursive) {
+            sql.push_str("WITH RECURSIVE ");
+        } else {
+            sql.push_str("WITH ");
+        }
         for (index, cte) in ctes.iter().enumerate() {
             if index > 0 {
                 sql.push_str(", ");
@@ -298,6 +355,19 @@ impl<'a> QueryBuilder<'a> {
         }
 
         sql.push_str("SELECT ");
+        if plan.distinct {
+            sql.push_str("DISTINCT ");
+            if let Some(on) = &plan.distinct_on {
+                sql.push_str("ON (");
+                for (i, expr) in on.iter().enumerate() {
+                    if i > 0 {
+                        sql.push_str(", ");
+                    }
+                    self.render_expression_to(expr, sql)?;
+                }
+                sql.push_str(") ");
+            }
+        }
         for (index, projection) in plan.select.iter().enumerate() {
             if index > 0 {
                 sql.push_str(", ");
@@ -511,6 +581,96 @@ impl<'a> QueryBuilder<'a> {
         Ok(Cow::Borrowed(function))
     }
 
+    fn render_window_spec(
+        &mut self,
+        spec: &WindowSpec,
+        buf: &mut String,
+    ) -> Result<(), VlorQLError> {
+        buf.push_str(" OVER (");
+        let mut clause_added = false;
+
+        if let Some(partition_by) = &spec.partition_by {
+            clause_added = true;
+            buf.push_str("PARTITION BY ");
+            for (i, expr) in partition_by.iter().enumerate() {
+                if i > 0 {
+                    buf.push_str(", ");
+                }
+                self.render_expression_to(expr, buf)?;
+            }
+        }
+
+        if let Some(order_by) = &spec.order_by {
+            if clause_added {
+                buf.push(' ');
+            }
+            clause_added = true;
+            buf.push_str("ORDER BY ");
+            for (i, term) in order_by.iter().enumerate() {
+                if i > 0 {
+                    buf.push_str(", ");
+                }
+                self.render_expression_to(&term.expr, buf)?;
+                if term.descending {
+                    buf.push_str(" DESC");
+                } else {
+                    buf.push_str(" ASC");
+                }
+            }
+        }
+
+        if let Some(frame) = &spec.frame {
+            if clause_added {
+                buf.push(' ');
+            }
+            self.render_window_frame(frame, buf)?;
+        }
+
+        buf.push(')');
+        Ok(())
+    }
+
+    fn render_window_frame(
+        &mut self,
+        frame: &WindowFrame,
+        buf: &mut String,
+    ) -> Result<(), VlorQLError> {
+        match frame.kind {
+            WindowFrameKind::Rows => buf.push_str("ROWS"),
+            WindowFrameKind::Range => buf.push_str("RANGE"),
+            WindowFrameKind::Groups => buf.push_str("GROUPS"),
+        }
+        buf.push_str(" BETWEEN ");
+        self.render_window_frame_bound(&frame.start, buf)?;
+        buf.push_str(" AND ");
+        match &frame.end {
+            Some(end) => self.render_window_frame_bound(end, buf)?,
+            None => buf.push_str("CURRENT ROW"),
+        }
+        Ok(())
+    }
+
+    fn render_window_frame_bound(
+        &mut self,
+        bound: &WindowFrameBound,
+        buf: &mut String,
+    ) -> Result<(), VlorQLError> {
+        match bound {
+            WindowFrameBound::UnboundedPreceding => buf.push_str("UNBOUNDED PRECEDING"),
+            WindowFrameBound::Preceding(expr) => {
+                self.render_expression_to(expr, buf)?;
+                buf.push_str(" PRECEDING");
+            }
+            WindowFrameBound::CurrentRow => buf.push_str("CURRENT ROW"),
+            WindowFrameBound::Following(expr) => {
+                self.render_expression_to(expr, buf)?;
+                buf.push_str(" FOLLOWING");
+            }
+            WindowFrameBound::UnboundedFollowing => buf.push_str("UNBOUNDED FOLLOWING"),
+        }
+        Ok(())
+    }
+
     fn render_binary_operator(&self, operator: BinaryOperator) -> &'static str {
         match operator {
             BinaryOperator::Add => "+",
@@ -530,6 +690,21 @@ impl<'a> QueryBuilder<'a> {
             BinaryOperator::ILike if self.dialect == SqlDialect::Postgres => "ILIKE",
             BinaryOperator::ILike => "LIKE",
         }
+    }
+
+    fn render_set_operation(
+        &mut self,
+        set_op: &SetOperationClause,
+        sql: &mut String,
+    ) -> Result<(), VlorQLError> {
+        let keyword = match set_op.operation {
+            SetOperation::UnionAll => " UNION ALL ",
+            SetOperation::Union => " UNION ",
+            SetOperation::Intersect => " INTERSECT ",
+            SetOperation::Except => " EXCEPT ",
+        };
+        sql.push_str(keyword);
+        self.build_query(&set_op.right, sql)
     }
 
     fn render_comparison_operator(

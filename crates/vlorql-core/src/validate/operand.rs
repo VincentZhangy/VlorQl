@@ -4,7 +4,7 @@ use crate::errors::{ValidationErrorKind, VlorQLError};
 use crate::query::QuerySource;
 use crate::schema::{
     BinaryOperator, ComparisonOperator, DataType, Expression, InTarget, Predicate, Projection,
-    QueryPlan, SchemaSnapshot,
+    QueryPlan, SchemaSnapshot, WindowFrameBound,
 };
 use serde_json::{Value, json};
 use std::collections::HashSet;
@@ -143,6 +143,66 @@ impl<'a> OperandValidator<'a> {
             Expression::SubQuery { query } => {
                 self.validate_plan_inner(query, errors);
                 None
+            }
+            Expression::Case {
+                operand,
+                when_thens,
+                else_result,
+            } => {
+                if let Some(op) = operand {
+                    self.validate_expression_inner(op, scope, errors);
+                }
+                for wt in when_thens {
+                    self.validate_expression_inner(&wt.when, scope, errors);
+                    self.validate_expression_inner(&wt.then, scope, errors);
+                }
+                if let Some(el) = else_result {
+                    self.validate_expression_inner(el, scope, errors);
+                }
+                // CASE type = common type of all THEN and ELSE branches
+                let then_types: Vec<DataType> = when_thens
+                    .iter()
+                    .filter_map(|wt| {
+                        self.validate_expression_inner(&wt.then, scope, errors)
+                    })
+                    .collect();
+                let else_type = else_result
+                    .as_ref()
+                    .and_then(|el| self.validate_expression_inner(el, scope, errors));
+                then_types
+                    .into_iter()
+                    .chain(else_type)
+                    .reduce(|a, b| if a == b { a } else { DataType::String })
+            }
+            Expression::WindowFunction {
+                name, args, over, ..
+            } => {
+                let argument_types = args
+                    .iter()
+                    .map(|argument| self.validate_expression_inner(argument, scope, errors))
+                    .collect::<Vec<_>>();
+                // Validate expressions inside the window spec.
+                if let Some(partition_by) = &over.partition_by {
+                    for expr in partition_by {
+                        self.validate_expression_inner(expr, scope, errors);
+                    }
+                }
+                if let Some(order_by) = &over.order_by {
+                    for term in order_by {
+                        self.validate_expression_inner(&term.expr, scope, errors);
+                    }
+                }
+                if let Some(frame) = &over.frame {
+                    if let Some(start) = frame_bound_expr(&frame.start) {
+                        self.validate_expression_inner(start, scope, errors);
+                    }
+                    if let Some(end) = &frame.end {
+                        if let Some(expr) = frame_bound_expr(end) {
+                            self.validate_expression_inner(expr, scope, errors);
+                        }
+                    }
+                }
+                Some(self.validate_function(name, &argument_types, errors))
             }
         }
     }
@@ -607,4 +667,12 @@ fn is_any_of_ignore_case(name: &str, candidates: &[&str]) -> bool {
     candidates
         .iter()
         .any(|candidate| candidate.eq_ignore_ascii_case(name))
+}
+
+/// Extracts the inner expression from a window frame bound, if any.
+fn frame_bound_expr(bound: &WindowFrameBound) -> Option<&Expression> {
+    match bound {
+        WindowFrameBound::Preceding(expr) | WindowFrameBound::Following(expr) => Some(expr),
+        _ => None,
+    }
 }

@@ -238,6 +238,8 @@ fn build_plan_from_obj(
 
     Ok(QueryPlan {
         select,
+        distinct: false,
+        distinct_on: None,
         from,
         r#where,
         group_by,
@@ -247,6 +249,7 @@ fn build_plan_from_obj(
         offset,
         joins,
         ctes,
+        set_operation: None,
     })
 }
 

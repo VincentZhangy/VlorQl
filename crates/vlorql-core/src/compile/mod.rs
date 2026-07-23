@@ -20,7 +20,7 @@ mod tests {
     use crate::schema::{
         BinaryOperator, CommonTableExpression, ComparisonOperator, DataType, Expression,
         FromClause, IdentifierQuoting, InTarget, JoinClause, JoinType, OrderByTerm, Predicate,
-        Projection, QueryPlan, SqlDialect,
+        Projection, QueryPlan, SetOperation, SetOperationClause, SqlDialect, WindowSpec,
     };
     use crate::validate::ValidatedPlan;
     use serde_json::json;
@@ -56,6 +56,9 @@ mod tests {
             offset: None,
             joins: None,
             ctes: None,
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,
         }
     }
 
@@ -241,7 +244,7 @@ mod tests {
         });
         plan.ctes = Some(vec![CommonTableExpression {
             name: "active_users".to_owned(),
-            query: Box::new(cte_query),
+            query: Box::new(cte_query), recursive: false
         }]);
 
         let compiled = PostgresCompiler
@@ -406,5 +409,227 @@ mod tests {
         // MySQL adds offset first, then limit
         assert_eq!(compiled.parameters[0].value, json!(200));
         assert_eq!(compiled.parameters[1].value, json!(50));
+    }
+
+    #[test]
+    fn postgres_compiles_window_function_row_number() {
+        let plan = QueryPlan {
+            select: vec![
+                Projection::Column {
+                    table: Some("users".to_owned()),
+                    column: "id".to_owned(),
+                    alias: None,
+                },
+                Projection::Expr {
+                    expression: Expression::WindowFunction {
+                        name: "ROW_NUMBER".to_owned(),
+                        args: vec![],
+                        distinct: false,
+                        over: WindowSpec {
+                            partition_by: Some(vec![column_ref("users", "name")]),
+                            order_by: Some(vec![OrderByTerm {
+                                expr: column_ref("users", "id"),
+                                descending: true,
+                            }]),
+                            frame: None,
+                        },
+                    },
+                    alias: Some("rn".to_owned()),
+                },
+            ],
+            from: FromClause {
+                table: "users".to_owned(),
+                alias: None,
+            },
+            r#where: None,
+            group_by: None,
+            having: None,
+            order_by: None,
+            limit: None,
+            offset: None,
+            joins: None,
+            ctes: None,
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,
+        };
+        let compiled = PostgresCompiler
+            .compile(&validated(plan))
+            .expect("window function should compile");
+        assert_eq!(
+            compiled.sql,
+            "SELECT \"users\".\"id\", ROW_NUMBER() OVER (PARTITION BY \"users\".\"name\" ORDER BY \"users\".\"id\" DESC) AS \"rn\" FROM \"users\""
+        );
+    }
+
+    #[test]
+    fn postgres_compiles_window_function_with_frame() {
+        let plan = QueryPlan {
+            select: vec![
+                Projection::Column {
+                    table: Some("users".to_owned()),
+                    column: "id".to_owned(),
+                    alias: None,
+                },
+                Projection::Expr {
+                    expression: Expression::WindowFunction {
+                        name: "SUM".to_owned(),
+                        args: vec![column_ref("users", "id")],
+                        distinct: false,
+                        over: WindowSpec {
+                            partition_by: None,
+                            order_by: Some(vec![OrderByTerm {
+                                expr: column_ref("users", "id"),
+                                descending: false,
+                            }]),
+                            frame: Some(crate::schema::WindowFrame {
+                                kind: crate::schema::WindowFrameKind::Rows,
+                                start: crate::schema::WindowFrameBound::UnboundedPreceding,
+                                end: Some(crate::schema::WindowFrameBound::CurrentRow),
+                            }),
+                        },
+                    },
+                    alias: Some("running_total".to_owned()),
+                },
+            ],
+            from: FromClause {
+                table: "users".to_owned(),
+                alias: None,
+            },
+            r#where: None,
+            group_by: None,
+            having: None,
+            order_by: None,
+            limit: None,
+            offset: None,
+            joins: None,
+            ctes: None,
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,
+        };
+        let compiled = PostgresCompiler
+            .compile(&validated(plan))
+            .expect("window function with frame should compile");
+        assert_eq!(
+            compiled.sql,
+            "SELECT \"users\".\"id\", SUM(\"users\".\"id\") OVER (ORDER BY \"users\".\"id\" ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS \"running_total\" FROM \"users\""
+        );
+    }
+
+    #[test]
+    fn postgres_compiles_union_all() {
+        let right = QueryPlan {
+            select: vec![
+                Projection::Column {
+                    table: Some("users".to_owned()),
+                    column: "id".to_owned(),
+                    alias: None,
+                },
+                Projection::Column {
+                    table: Some("users".to_owned()),
+                    column: "name".to_owned(),
+                    alias: None,
+                },
+            ],
+            from: FromClause {
+                table: "users".to_owned(),
+                alias: None,
+            },
+            r#where: Some(Predicate::Comparison {
+                left: column_ref("users", "id"),
+                op: ComparisonOperator::Gt,
+                right: literal(json!(50), DataType::Int),
+            }),
+            group_by: None,
+            having: None,
+            order_by: None,
+            limit: None,
+            offset: None,
+            joins: None,
+            ctes: None,
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,
+        };
+        let plan = QueryPlan {
+            select: vec![
+                Projection::Column {
+                    table: Some("users".to_owned()),
+                    column: "id".to_owned(),
+                    alias: None,
+                },
+                Projection::Column {
+                    table: Some("users".to_owned()),
+                    column: "name".to_owned(),
+                    alias: None,
+                },
+            ],
+            from: FromClause {
+                table: "users".to_owned(),
+                alias: None,
+            },
+            r#where: Some(Predicate::Comparison {
+                left: column_ref("users", "id"),
+                op: ComparisonOperator::Lte,
+                right: literal(json!(50), DataType::Int),
+            }),
+            group_by: None,
+            having: None,
+            order_by: None,
+            limit: None,
+            offset: None,
+            joins: None,
+            ctes: None,
+            distinct: false,
+            distinct_on: None,
+            set_operation: Some(SetOperationClause {
+                operation: SetOperation::UnionAll,
+                right: Box::new(right),
+            }),
+        };
+        let compiled = PostgresCompiler
+            .compile(&validated(plan))
+            .expect("UNION ALL should compile");
+        assert_eq!(
+            compiled.sql,
+            "SELECT \"users\".\"id\", \"users\".\"name\" FROM \"users\" WHERE \"users\".\"id\" <= $1 UNION ALL SELECT \"users\".\"id\", \"users\".\"name\" FROM \"users\" WHERE \"users\".\"id\" > $2"
+        );
+        assert_eq!(compiled.parameters.len(), 2);
+    }
+
+    #[test]
+    fn postgres_compiles_select_distinct() {
+        let plan = QueryPlan {
+            select: vec![
+                Projection::Column {
+                    table: Some("users".to_owned()),
+                    column: "name".to_owned(),
+                    alias: None,
+                },
+            ],
+            distinct: true,
+            distinct_on: None,
+            from: FromClause {
+                table: "users".to_owned(),
+                alias: None,
+            },
+            r#where: None,
+            group_by: None,
+            having: None,
+            order_by: None,
+            limit: None,
+            offset: None,
+            joins: None,
+            ctes: None,
+            set_operation: None,
+        };
+        let compiled = PostgresCompiler
+            .compile(&validated(plan))
+            .expect("SELECT DISTINCT should compile");
+        assert_eq!(
+            compiled.sql,
+            "SELECT DISTINCT \"users\".\"name\" FROM \"users\""
+        );
     }
 }

@@ -336,7 +336,7 @@ mod tests {
                 ],
                 from: FromClause {
                     table: "orders".to_owned(),
-                    alias: None,
+                    alias: None, recursive: false
                 },
                 r#where: None,
                 group_by: None,
@@ -824,7 +824,7 @@ mod tests {
                     Projection::Column {
                         table: Some("orders".to_owned()),
                         column: "id".to_owned(),
-                        alias: None,
+                        alias: None, recursive: false
                     },
                     Projection::Column {
                         table: Some("orders".to_owned()),
@@ -1067,11 +1067,11 @@ mod tests {
             ctes: Some(vec![
                 CommonTableExpression {
                     name: "cte2".to_owned(),
-                    query: Box::new(cte2_body),
+                    query: Box::new(cte2_body), recursive: false
                 },
                 CommonTableExpression {
                     name: "cte1".to_owned(),
-                    query: Box::new(cte1_body),
+                    query: Box::new(cte1_body), recursive: false
                 },
             ]),
         };
@@ -1174,11 +1174,11 @@ mod tests {
             ctes: Some(vec![
                 CommonTableExpression {
                     name: "cte2".to_owned(),
-                    query: Box::new(cte2_body),
+                    query: Box::new(cte2_body), recursive: false
                 },
                 CommonTableExpression {
                     name: "cte1".to_owned(),
-                    query: Box::new(cte1_body),
+                    query: Box::new(cte1_body), recursive: false
                 },
             ]),
         };

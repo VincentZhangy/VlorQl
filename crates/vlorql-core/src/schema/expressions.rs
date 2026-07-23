@@ -5,7 +5,7 @@
 //! validators and the SQL compiler inspect the tag to decide how to
 //! type-check or render the node.
 
-use super::query_plan::QueryPlan;
+use super::query_plan::{OrderByTerm, QueryPlan};
 use super::types::{BinaryOperator, ComparisonOperator, DataType};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -81,6 +81,94 @@ pub enum Expression {
         /// The inner query plan.
         query: Box<QueryPlan>,
     },
+    /// A `CASE WHEN ... THEN ... ELSE ... END` expression.
+    Case {
+        /// Optional base expression for `CASE expr WHEN ... THEN ...` shorthand.
+        operand: Option<Box<Expression>>,
+        /// The list of `WHEN`/`THEN` pairs.
+        when_thens: Vec<WhenThen>,
+        /// Optional `ELSE` result expression.
+        else_result: Option<Box<Expression>>,
+    },
+    /// A window function call with an OVER clause, e.g. `ROW_NUMBER() OVER (PARTITION BY ... ORDER BY ...)`.
+    /// The `name` and `args` fields work identically to [`FunctionCall`], but the result is
+    /// computed over a window frame rather than grouped rows.
+    WindowFunction {
+        /// Function name (e.g. `"row_number"`, `"lag"`, `"sum"`).
+        name: String,
+        /// Arguments passed positionally to the function.
+        args: Vec<Expression>,
+        /// When `true`, the call is rendered as `DISTINCT`.
+        distinct: bool,
+        /// The window specification (PARTITION BY, ORDER BY, frame).
+        over: WindowSpec,
+    },
+}
+
+/// A single `WHEN ... THEN ...` branch inside a `CASE` expression.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct WhenThen {
+    /// The boolean condition.
+    pub when: Expression,
+    /// The result expression when the condition evaluates to true.
+    pub then: Expression,
+}
+
+/// The window specification for a window function (`OVER (PARTITION BY ... ORDER BY ...)`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct WindowSpec {
+    /// Columns to partition the window by (optional).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub partition_by: Option<Vec<Expression>>,
+    /// Ordering of rows within each partition (optional).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub order_by: Option<Vec<OrderByTerm>>,
+    /// Optional window frame clause (`ROWS` / `RANGE` / `GROUPS`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub frame: Option<WindowFrame>,
+}
+
+/// The frame clause of a window specification.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct WindowFrame {
+    /// The frame type: `ROWS`, `RANGE`, or `GROUPS`.
+    pub kind: WindowFrameKind,
+    /// The start bound of the frame.
+    pub start: WindowFrameBound,
+    /// The end bound of the frame (defaults to `CURRENT ROW` when `None`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub end: Option<WindowFrameBound>,
+}
+
+/// The kind of window frame.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum WindowFrameKind {
+    /// `ROWS` — frame is defined by physical row offsets.
+    Rows,
+    /// `RANGE` — frame is defined by logical value ranges.
+    Range,
+    /// `GROUPS` — frame is defined by groups of peers.
+    Groups,
+}
+
+/// A bound in a window frame clause.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum WindowFrameBound {
+    /// `UNBOUNDED PRECEDING`.
+    UnboundedPreceding,
+    /// `<n> PRECEDING`.
+    Preceding(Box<Expression>),
+    /// `CURRENT ROW`.
+    CurrentRow,
+    /// `<n> FOLLOWING`.
+    Following(Box<Expression>),
+    /// `UNBOUNDED FOLLOWING`.
+    UnboundedFollowing,
 }
 
 /// The target of an `IN` predicate: either a list of literal values

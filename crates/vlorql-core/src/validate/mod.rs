@@ -178,7 +178,7 @@ mod tests {
         }]);
         plan.ctes = Some(vec![CommonTableExpression {
             name: "user_ids".to_owned(),
-            query: Box::new(base_plan()),
+            query: Box::new(base_plan()),, recursive: false
         }]);
         let profile = DialectProfile::builder()
             .supports_cte(false)
@@ -242,7 +242,7 @@ mod tests {
         }]);
         plan.ctes = Some(vec![CommonTableExpression {
             name: "user_ids".to_owned(),
-            query: Box::new(base_plan()),
+            query: Box::new(base_plan()),, recursive: false
         }]);
 
         let policy = PolicyEngine::new(PolicyConfig {
@@ -375,7 +375,7 @@ mod tests {
         let mut plan = base_plan();
         plan.ctes = Some(vec![CommonTableExpression {
             name: "active_users".to_owned(),
-            query: Box::new(base_plan()),
+            query: Box::new(base_plan()),, recursive: false
         }]);
         let profile = DialectProfile::builder()
             .supports_cte(false)

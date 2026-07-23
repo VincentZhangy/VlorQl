@@ -92,7 +92,7 @@ fn cte_is_rejected_when_profile_disables_it() {
     let mut plan = base_plan();
     plan.ctes = Some(vec![vlorql_core::schema::CommonTableExpression {
         name: "active_users".to_owned(),
-        query: Box::new(base_plan()),
+        query: Box::new(base_plan()),, recursive: false
     }]);
     let errors = DialectValidator::validate(&plan, &restricted_profile())
         .expect_err("CTE should be rejected");
@@ -112,7 +112,7 @@ fn cte_in_nested_query_is_rejected_recursively() {
         query: Box::new(QueryPlan {
             ctes: Some(vec![vlorql_core::schema::CommonTableExpression {
                 name: "inner_staging".to_owned(),
-                query: Box::new(base_plan()),
+                query: Box::new(base_plan()),, recursive: false
             }]),
             ..base_plan()
         }),
@@ -272,7 +272,7 @@ fn offset_inside_a_cte_is_rejected() {
     let mut plan = base_plan();
     plan.ctes = Some(vec![vlorql_core::schema::CommonTableExpression {
         name: "paged".to_owned(),
-        query: Box::new(cte_inner),
+        query: Box::new(cte_inner),, recursive: false
     }]);
     // For this test we still need a CTE-enabled profile, otherwise the
     // CTE itself is rejected and we never reach the offset check.
@@ -394,7 +394,7 @@ fn multiple_dialect_violations_are_collected_together() {
     let mut plan = base_plan();
     plan.ctes = Some(vec![vlorql_core::schema::CommonTableExpression {
         name: "staging".to_owned(),
-        query: Box::new(base_plan()),
+        query: Box::new(base_plan()),, recursive: false
     }]);
     plan.joins = Some(vec![
         JoinClause {

@@ -122,7 +122,7 @@ impl ColumnPruning {
     ) -> CommonTableExpression {
         let keep_all = || CommonTableExpression {
             name: cte.name.clone(),
-            query: Box::new(inner.clone()),
+            query: Box::new(inner.clone()), recursive: false
         };
 
         // A consumer that reads `<this cte>.*` needs every column.
@@ -213,7 +213,7 @@ impl ColumnPruning {
         body.select = kept;
         CommonTableExpression {
             name: cte.name.clone(),
-            query: Box::new(body),
+            query: Box::new(body), recursive: false
         }
     }
 
@@ -460,7 +460,7 @@ mod tests {
                 select: cte_projection,
                 from: FromClause {
                     table: "orders".to_owned(),
-                    alias: None,
+                    alias: None, recursive: false
                 },
                 r#where: None,
                 group_by: cte_gb,

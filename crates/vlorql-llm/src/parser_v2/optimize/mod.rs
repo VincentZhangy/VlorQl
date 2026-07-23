@@ -183,7 +183,7 @@ mod tests {
         plan.ctes = Some(vec![CommonTableExpression {
             name: "active".to_owned(),
             query: Box::new(QueryPlan {
-                select: vec![Projection::Star { table: None }],
+                select: vec![Projection::Star { table: None, recursive: false }],
                 from: FromClause {
                     table: "users".to_owned(),
                     alias: None,

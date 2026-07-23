@@ -137,7 +137,7 @@ fn orders_with_customers_cte() -> QueryPlan {
         }]),
         ctes: Some(vec![CommonTableExpression {
             name: "paid_orders".to_owned(),
-            query: Box::new(leaf_cte()),
+            query: Box::new(leaf_cte()),, recursive: false
         }]),
     }
 }
@@ -277,7 +277,7 @@ fn build_complex_plan() -> ValidatedPlan {
         ctes: Some(vec![
             CommonTableExpression {
                 name: "regional_orders".to_owned(),
-                query: Box::new(orders_with_customers_cte()),
+                query: Box::new(orders_with_customers_cte()),, recursive: false
             },
             CommonTableExpression {
                 name: "high_value".to_owned(),
@@ -285,7 +285,7 @@ fn build_complex_plan() -> ValidatedPlan {
                     select: vec![Projection::Column {
                         table: Some("orders".to_owned()),
                         column: "id".to_owned(),
-                        alias: Some("order_id".to_owned()),
+                        alias: Some("order_id".to_owned()),, recursive: false
                     }],
                     from: FromClause {
                         table: "orders".to_owned(),
@@ -311,7 +311,7 @@ fn build_complex_plan() -> ValidatedPlan {
                     select: vec![Projection::Column {
                         table: Some("customers".to_owned()),
                         column: "id".to_owned(),
-                        alias: Some("customer_id".to_owned()),
+                        alias: Some("customer_id".to_owned()),, recursive: false
                     }],
                     from: FromClause {
                         table: "customers".to_owned(),

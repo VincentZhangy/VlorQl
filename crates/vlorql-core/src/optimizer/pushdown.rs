@@ -59,7 +59,7 @@ fn push_plan(plan: &QueryPlan) -> QueryPlan {
             ctes.iter()
                 .map(|cte| crate::schema::CommonTableExpression {
                     name: cte.name.clone(),
-                    query: Box::new(push_plan(&cte.query)),
+                    query: Box::new(push_plan(&cte.query)), recursive: false
                 })
                 .collect()
         })
@@ -421,7 +421,7 @@ mod tests {
                 select: vec![select_col("orders", "id"), select_col("orders", "amount")],
                 from: FromClause {
                     table: "orders".to_owned(),
-                    alias: None,
+                    alias: None, recursive: false
                 },
                 r#where: None,
                 group_by: None,
