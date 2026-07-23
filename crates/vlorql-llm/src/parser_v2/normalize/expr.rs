@@ -22,6 +22,20 @@ use serde_json::Value;
 /// Returns `true` if any change was made.
 #[must_use]
 pub fn repair_expression_value(val: &mut Value) -> bool {
+    // Fix: `{"type": "expr", "expression": {...}}` is a Projection::Expr format,
+    // not a valid Expression. The LLM sometimes uses this format in expression
+    // contexts (like inside WHERE predicates). Unwrap the inner expression.
+    if let Some(obj) = val.as_object() {
+        if obj.get("type").and_then(|t| t.as_str()) == Some("expr")
+            && obj.contains_key("expression")
+        {
+            if let Some(inner) = obj.get("expression").cloned() {
+                *val = inner;
+                return true;
+            }
+        }
+    }
+
     let obj = match val.as_object_mut() {
         Some(o) => o,
         None => return false,
