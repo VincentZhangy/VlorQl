@@ -139,8 +139,12 @@ fn orders_with_customers_cte() -> QueryPlan {
         }]),
         ctes: Some(vec![CommonTableExpression {
             name: "paid_orders".to_owned(),
-            query: Box::new(leaf_cte()),, recursive: false
+            recursive: false,
+            query: Box::new(leaf_cte()),
         }]),
+        distinct: false,
+        distinct_on: None,
+        set_operation: None,
     }
 }
 
@@ -279,15 +283,17 @@ fn build_complex_plan() -> ValidatedPlan {
         ctes: Some(vec![
             CommonTableExpression {
                 name: "regional_orders".to_owned(),
-                query: Box::new(orders_with_customers_cte()),, recursive: false
+                recursive: false,
+                query: Box::new(orders_with_customers_cte()),
             },
             CommonTableExpression {
                 name: "high_value".to_owned(),
+                recursive: false,
                 query: Box::new(QueryPlan {
                     select: vec![Projection::Column {
                         table: Some("orders".to_owned()),
                         column: "id".to_owned(),
-                        alias: Some("order_id".to_owned()),, recursive: false
+                        alias: Some("order_id".to_owned()),
                     }],
                     from: FromClause {
                         table: "orders".to_owned(),
@@ -311,11 +317,12 @@ fn build_complex_plan() -> ValidatedPlan {
             },
             CommonTableExpression {
                 name: "active_customers".to_owned(),
+                recursive: false,
                 query: Box::new(QueryPlan {
                     select: vec![Projection::Column {
                         table: Some("customers".to_owned()),
                         column: "id".to_owned(),
-                        alias: Some("customer_id".to_owned()),, recursive: false
+                        alias: Some("customer_id".to_owned()),
                     }],
                     from: FromClause {
                         table: "customers".to_owned(),
@@ -331,11 +338,15 @@ fn build_complex_plan() -> ValidatedPlan {
                     offset: None,
                     joins: None,
                     ctes: None,
-            distinct: false,
-            distinct_on: None,
-            set_operation: None,                }),
+                    distinct: false,
+                    distinct_on: None,
+                    set_operation: None,
+                }),
             },
         ]),
+        distinct: false,
+        distinct_on: None,
+        set_operation: None,
     };
 
     ValidatedPlan(Arc::new(plan))

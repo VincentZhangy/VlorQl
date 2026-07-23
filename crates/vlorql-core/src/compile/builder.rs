@@ -576,7 +576,17 @@ impl<'a> QueryBuilder<'a> {
             ));
         }
         for segment in function.split('.') {
-            validate_unquoted_identifier(segment)?;
+            // Function names follow identifier syntax but are not subject to
+            // reserved-keyword restrictions (e.g. EXISTS, COALESCE, NULLIF).
+            let mut chars = segment.chars();
+            let valid = chars.next().is_some_and(|c| c == '_' || c.is_ascii_alphabetic())
+                && chars.all(|c| c == '_' || c.is_ascii_alphanumeric());
+            if !valid {
+                return Err(compilation_error(
+                    "invalid_function_name",
+                    json!({"function": function}),
+                ));
+            }
         }
         Ok(Cow::Borrowed(function))
     }
