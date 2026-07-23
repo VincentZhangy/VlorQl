@@ -2259,13 +2259,7 @@ fn build_union_all_plan() -> QueryPlan {
         }),
         distinct: false,
         distinct_on: None,
-        order_by: Some(vec![OrderByTerm {
-            expr: Expression::ColumnRef {
-                table: Some("orders".to_owned()),
-                column: "total".to_owned(),
-            },
-            descending: true,
-        }]),
+        order_by: None,  // Must be None when set_operation is present (PG syntax: ORDER BY before UNION is invalid).
         set_operation: Some(SetOperationClause {
             operation: SetOperation::UnionAll,
             right: Box::new(right),
@@ -2505,11 +2499,15 @@ make_pg_num!(
             out.put_i32(val as i32);
         } else if *ty == tokio_postgres::types::Type::INT8 {
             out.put_i64(val);
+        } else if *ty == tokio_postgres::types::Type::FLOAT4 {
+            out.put_f32(val as f32);
+        } else if *ty == tokio_postgres::types::Type::FLOAT8 {
+            out.put_f64(val as f64);
         } else {
             out.extend_from_slice(val.to_string().as_bytes());
         }
     },
-    INT2 | INT4 | INT8 | TEXT,
+    INT2 | INT4 | INT8 | FLOAT4 | FLOAT8 | TEXT,
     "PgInt"
 );
 
@@ -2517,7 +2515,13 @@ make_pg_num!(
     PgFloat,
     f64,
     |val, ty, out| {
-        if *ty == tokio_postgres::types::Type::FLOAT4 {
+        if *ty == tokio_postgres::types::Type::INT2 {
+            out.put_i16(val as i16);
+        } else if *ty == tokio_postgres::types::Type::INT4 {
+            out.put_i32(val as i32);
+        } else if *ty == tokio_postgres::types::Type::INT8 {
+            out.put_i64(val as i64);
+        } else if *ty == tokio_postgres::types::Type::FLOAT4 {
             out.put_f32(val as f32);
         } else if *ty == tokio_postgres::types::Type::FLOAT8 {
             out.put_f64(val);
@@ -2525,7 +2529,7 @@ make_pg_num!(
             out.extend_from_slice(val.to_string().as_bytes());
         }
     },
-    FLOAT4 | FLOAT8 | TEXT,
+    INT2 | INT4 | INT8 | FLOAT4 | FLOAT8 | TEXT,
     "PgFloat"
 );
 
@@ -2545,6 +2549,11 @@ fn to_pg_param(p: &vlorql::Parameter) -> Box<dyn tokio_postgres::types::ToSql + 
         },
         serde_json::Value::String(s) => Box::new(s.clone()),
         serde_json::Value::Bool(b) => Box::new(*b),
+        serde_json::Value::Null => {
+            // Use Option::<String>::None which serializes as SQL NULL.
+            let none: Option<String> = None;
+            Box::new(none)
+        }
         _ => panic!("不支持的参数类型: {:?} (value: {:?})", p.data_type, p.value),
     }
 }
@@ -2735,6 +2744,7 @@ async fn execute_on_postgres(queries: &[vlorql::CompiledQuery]) -> Result<(), Bo
             Ok(rows) => print_results(qidx, &rows),
             Err(e) => {
                 eprintln!("[ERROR] 查询 {} 执行失败: {}", qidx + 1, e);
+                eprintln!("[ERROR] 详细信息: {:?}", e);
             }
         }
     }
@@ -2800,7 +2810,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .with_schema(Arc::clone(&schema))
         .with_dialect_name("postgres")
         .with_policy(PolicyConfig::default())
-        .with_max_retries(3);
+        .with_max_retries(1);
     if let Some(client) = llm_client {
         builder = builder.with_llm_client(client);
     }
@@ -2828,15 +2838,38 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
 
     let mut all_compiled = Vec::with_capacity(count);
+    let preset_plans = build_all_plans();
     if is_llm_mode {
         for (i, question) in QUESTIONS.iter().enumerate() {
             println!("[{}/{}] 查询: \"{}\"", i + 1, count, question);
-            let compiled = vlorql.query(question).await?;
-            println!("[OK]\n");
-            all_compiled.push(compiled);
+            match vlorql.query(question).await {
+                Ok(compiled) => {
+                    println!("[OK]\n");
+                    all_compiled.push(compiled);
+                }
+                Err(e) => {
+                    eprintln!("[WARN] LLM 生成失败，使用预设 Plan 回退: {e}");
+                    // 回退到预设 Plan
+                    if let Some(plan) = preset_plans.get(i) {
+                        match vlorql.compile_only(&ValidatedPlan(Arc::new(plan.clone()))) {
+                            Ok(compiled) => {
+                                eprintln!("[OK] 预设 Plan 编译成功\n");
+                                all_compiled.push(compiled);
+                            }
+                            Err(e2) => {
+                                eprintln!("[ERROR] 预设 Plan 编译也失败: {e2}");
+                                return Err(e2.into());
+                            }
+                        }
+                    } else {
+                        eprintln!("[ERROR] 没有预设 Plan 可用于查询 {}", i + 1);
+                        return Err(e.into());
+                    }
+                }
+            }
         }
     } else {
-        for plan in build_all_plans() {
+        for plan in preset_plans {
             let validated = ValidatedPlan(Arc::new(plan));
             let compiled = vlorql.compile_only(&validated)?;
             all_compiled.push(compiled);

@@ -215,7 +215,20 @@ fn build_literal_expr(val: &Value) -> Result<Expression, BuildError> {
 /// Build a literal expression from a JSON object with `value` and `data_type`.
 fn build_literal_from_obj(obj: &serde_json::Map<String, Value>) -> Result<Expression, BuildError> {
     let value = obj.get("value").cloned().unwrap_or(Value::Null);
-    let data_type = match obj.get("data_type").and_then(|v| v.as_str()) {
+    let dt_str = obj.get("data_type").and_then(|v| v.as_str()).map(|s| s.to_owned());
+    let data_type = match dt_str.as_deref() {
+        Some("null") => {
+            // Small local LLMs (llama3.2, etc.) frequently set data_type to "null"
+            // while providing a non-null value.  Infer the correct type from the value.
+            match &value {
+                Value::Null => DataType::Null,
+                Value::Bool(_) => DataType::Boolean,
+                Value::Number(n) if n.is_f64() => DataType::Float,
+                Value::Number(_) => DataType::Int,
+                Value::String(_) => DataType::String,
+                _ => DataType::Null,
+            }
+        }
         Some(dt) => parse_data_type(dt)?,
         None => DataType::Null,
     };

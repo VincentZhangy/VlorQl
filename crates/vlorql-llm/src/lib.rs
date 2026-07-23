@@ -40,17 +40,10 @@ pub(crate) const SSE_DONE: &str = "[DONE]";
 pub mod anthropic;
 pub mod deepseek;
 pub mod local;
-pub mod parse;
-/// Parse pipeline: recover → canonicalize → build (`QueryPlan`).
+/// V2 parse pipeline: recover → normalize → build → validate → optimize.
 ///
-/// Public helpers are re-exported at the crate root for compatibility:
-/// [`extract_json_content`], [`repair_query_plan_json`],
-/// [`detect_template_leak`].
-/// V2 parse pipeline: recover → canonicalize → build → validate → optimize.
-///
-/// A staged pipeline designed for multi-model compatibility.  Built
-/// alongside the existing `parse` module; will eventually replace it.
-// V2 pipeline (recommended for all new code).
+/// Replaces the legacy `parse` module. All new code should use
+/// `parser_v2` directly.
 pub mod parser_v2;
 pub mod zhipu;
 

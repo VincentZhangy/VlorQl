@@ -557,8 +557,10 @@ fn normalize_data_types(val: &mut serde_json::Value) -> bool {
 fn normalize_data_types_inner(val: &mut serde_json::Value, changed: &mut bool) {
     match val {
         serde_json::Value::Object(map) => {
-            if let Some(dt) = map.get("data_type").and_then(|v| v.as_str()) {
-                let normalized = match dt {
+            // Clone the data_type string to avoid holding a borrow across mutable ops.
+            let dt_str = map.get("data_type").and_then(|v| v.as_str()).map(|s| s.to_owned());
+            if let Some(ref dt) = dt_str {
+                let normalized = match dt.as_str() {
                     "integer" | "int4" | "int8" | "bigint" | "smallint" | "tinyint" => "int",
                     "varchar" | "text" | "char" | "character" | "character varying" => "string",
                     "decimal" | "numeric" | "real" | "double" | "double precision" => "float",
@@ -570,14 +572,38 @@ fn normalize_data_types_inner(val: &mut serde_json::Value, changed: &mut bool) {
                     | "timestamp without time zone"
                     | "date" => "timestamp",
                     "NULL" | "Null" => "null",
-                    _ => dt,
+                    _ => dt.as_str(),
                 };
-                if normalized != dt {
+                if normalized != dt.as_str() {
                     map.insert(
                         "data_type".to_owned(),
                         serde_json::Value::String(normalized.to_owned()),
                     );
                     *changed = true;
+                }
+                // Small local LLMs (e.g. llama3.2) frequently set data_type to "null"
+                // while providing a non-null value.  Infer the correct type from the value.
+                if normalized == "null" {
+                    // Read value with a separate borrow, then close it before the mutable insert.
+                    let inferred = map.get("value").and_then(|value| match value {
+                        serde_json::Value::String(_) => Some("string"),
+                        serde_json::Value::Bool(_) => Some("boolean"),
+                        serde_json::Value::Number(n) => {
+                            if n.is_f64() || n.as_f64().is_some_and(|f| f.fract() != 0.0) {
+                                Some("float")
+                            } else {
+                                Some("int")
+                            }
+                        }
+                        _ => None,
+                    });
+                    if let Some(inferred) = inferred {
+                        map.insert(
+                            "data_type".to_owned(),
+                            serde_json::Value::String(inferred.to_owned()),
+                        );
+                        *changed = true;
+                    }
                 }
             }
             // Recurse into all child values (but don't recurse from null/empty Vec entries).

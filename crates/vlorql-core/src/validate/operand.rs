@@ -110,6 +110,23 @@ impl<'a> OperandValidator<'a> {
         match expression {
             Expression::Literal { value, data_type } => {
                 if !literal_matches_type(value, *data_type) {
+                    // Small local LLMs frequently set data_type to Null with a non-null
+                    // value (e.g. {"value":"done","data_type":"null"}).  Infer the
+                    // correct data type from the JSON value and treat it as a warning-free
+                    // auto-fix so the plan can proceed.
+                    if *data_type == DataType::Null && !value.is_null() {
+                        let inferred = match value {
+                            Value::String(_) => DataType::String,
+                            Value::Bool(_) => DataType::Boolean,
+                            Value::Number(n) if n.is_f64() => DataType::Float,
+                            Value::Number(_) => DataType::Int,
+                            _ => DataType::Null,
+                        };
+                        tracing::debug!(
+                            "Literal with declared data_type=null and non-null value; inferred {inferred:?}"
+                        );
+                        return Some(inferred);
+                    }
                     errors.push(type_mismatch_error(
                         data_type_name(*data_type),
                         json_value_type(value),

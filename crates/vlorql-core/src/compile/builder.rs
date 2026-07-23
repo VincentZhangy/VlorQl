@@ -26,6 +26,10 @@ pub struct QueryBuilder<'a> {
     /// Stack of alias maps for each query level (outermost first).
     /// Each map resolves table names (and aliases) to effective aliases.
     alias_stack: Vec<HashMap<String, String>>,
+    /// Deduplication cache: (value_json_string, data_type) → parameter index (0-based).
+    /// Used so the SAME literal expression always produces the SAME placeholder,
+    /// which PostgreSQL requires for GROUP BY / ORDER BY matching.
+    param_cache: HashMap<(String, DataType), usize>,
 }
 
 impl<'a> QueryBuilder<'a> {
@@ -41,6 +45,7 @@ impl<'a> QueryBuilder<'a> {
             parameters: Vec::new(),
             quote_style,
             alias_stack: Vec::new(),
+            param_cache: HashMap::new(),
         };
         builder.push_alias_scope(plan.as_plan());
         builder
@@ -99,6 +104,27 @@ impl<'a> QueryBuilder<'a> {
     ) -> Result<(), VlorQLError> {
         match expression {
             Expression::Literal { value, data_type } => {
+                // Inline small integer/float literals directly in the SQL so
+                // PostgreSQL can infer column types (especially in recursive CTEs
+                // where parameterized literals are inferred as `text`).
+                if *data_type == DataType::Int {
+                    if let Some(n) = value.as_i64() {
+                        write!(buf, "{n}").map_err(formatting_error)?;
+                        return Ok(());
+                    }
+                }
+                if *data_type == DataType::Float {
+                    if let Some(f) = value.as_f64() {
+                        write!(buf, "{f}").map_err(formatting_error)?;
+                        return Ok(());
+                    }
+                }
+                if *data_type == DataType::Boolean {
+                    if let Some(b) = value.as_bool() {
+                        write!(buf, "{b}").map_err(formatting_error)?;
+                        return Ok(());
+                    }
+                }
                 buf.push_str(&self.add_parameter(value.clone(), *data_type));
                 Ok(())
             }
@@ -290,10 +316,25 @@ impl<'a> QueryBuilder<'a> {
     }
 
     /// Adds a parameter and returns the placeholder for the selected dialect.
+    /// Deduplicates parameters: the same (value, data_type) pair always produces
+    /// the same placeholder index, which PostgreSQL requires for GROUP BY matching.
     pub fn add_parameter(&mut self, value: Value, data_type: DataType) -> String {
+        // Build a cache key from the serialized value + data_type string.
+        let val_str = serde_json::to_string(&value).unwrap_or_default();
+        let key = (val_str, data_type);
+
+        // Check the dedup cache first.
+        if let Some(&idx) = self.param_cache.get(&key) {
+            // PostgreSQL placeholders are 1-based.
+            return format!("${}", idx + 1);
+        }
+
+        // New parameter: push and cache.
+        let idx = self.parameters.len();
         self.parameters.push(Parameter { value, data_type });
+        self.param_cache.insert(key, idx);
         match self.dialect {
-            SqlDialect::Postgres => format!("${}", self.parameters.len()),
+            SqlDialect::Postgres => format!("${}", idx + 1),
             SqlDialect::Sqlite | SqlDialect::MySql => "?".to_owned(),
         }
     }
