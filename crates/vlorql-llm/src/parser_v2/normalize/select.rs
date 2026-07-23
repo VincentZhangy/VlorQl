@@ -122,9 +122,18 @@ pub fn remove_invalid(val: &mut serde_json::Value) -> bool {
 /// If the projection is a plain string like `"id"`, convert it to
 /// `{"type": "column_ref", "column": "id"}`.
 /// If the string is `"*"`, convert it to `{"type": "star"}`.
+/// Strings containing JSON corruption artifacts (quotes, colons, etc.)
+/// are converted to `null` so the caller can remove them.
 #[must_use]
 pub fn normalize_projection_item(item: &mut serde_json::Value) -> bool {
     if let Some(s) = item.as_str() {
+        // Detect JSON corruption artifacts: strings from LLM output that
+        // contain quotes, colons, or `alias:` patterns are clearly not
+        // valid column names.  Set to null so the caller drops them.
+        if s.contains('\'') || s.contains('\"') || s.contains(':') || s.contains("alias") {
+            *item = serde_json::Value::Null;
+            return true;
+        }
         if s == "*" {
             *item = serde_json::json!({"type": "star"});
         } else {

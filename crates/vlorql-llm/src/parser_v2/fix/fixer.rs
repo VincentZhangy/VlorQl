@@ -388,6 +388,12 @@ fn contains_aggregate(pred: &Predicate) -> bool {
 /// the original SELECT expression.
 #[must_use]
 fn fix_order_by_aliases(plan: &mut QueryPlan) -> bool {
+    // Build alias map FIRST (immutable borrow of plan) before accessing order_by.
+    let alias_map: Vec<(String, Expression)> = build_alias_map(plan);
+    if alias_map.is_empty() {
+        return false;
+    }
+
     let Some(ref mut order_by) = plan.order_by else {
         return false;
     };
@@ -395,8 +401,21 @@ fn fix_order_by_aliases(plan: &mut QueryPlan) -> bool {
         return false;
     }
 
-    // Build alias → expression map from SELECT projections.
-    let mut alias_map: Vec<(String, Expression)> = Vec::new();
+    let mut changed = false;
+    for term in order_by.iter_mut() {
+        // Try to find any alias reference in the ORDER BY expression tree.
+        if let Some((_, original_expr)) = find_alias_match(&term.expr, &alias_map) {
+            term.expr = original_expr.clone();
+            changed = true;
+        }
+    }
+
+    changed
+}
+
+/// Build a map of alias → original expression from SELECT projections.
+fn build_alias_map(plan: &QueryPlan) -> Vec<(String, Expression)> {
+    let mut alias_map = Vec::new();
     for proj in &plan.select {
         match proj {
             Projection::Column { column, alias: Some(a), .. } => {
@@ -411,73 +430,39 @@ fn fix_order_by_aliases(plan: &mut QueryPlan) -> bool {
             _ => {}
         }
     }
-
-    if alias_map.is_empty() {
-        return false;
-    }
-
-    let mut changed = false;
-    for term in order_by.iter_mut() {
-        // Case 1: Direct column_ref matching an alias.
-        if let Expression::ColumnRef { ref column, .. } = term.expr {
-            if let Some((_, original_expr)) = alias_map.iter().find(|(alias, _)| alias == column) {
-                term.expr = original_expr.clone();
-                changed = true;
-                continue;
-            }
-        }
-        // Case 2: desc(...) function call wrapping a column_ref matching an alias.
-        if let Expression::FunctionCall { ref name, ref args, .. } = term.expr {
-            if name == "desc" && args.len() == 1 {
-                if let Expression::ColumnRef { ref column, .. } = args[0] {
-                    if let Some((_, original_expr)) = alias_map.iter().find(|(alias, _)| alias == column) {
-                        term.expr = original_expr.clone();
-                        term.descending = true;
-                        changed = true;
-                        continue;
-                    }
-                }
-            }
-        }
-        // Case 3: Recursively replace alias column_refs inside the expression tree.
-        changed |= replace_alias_refs_in_expr(&mut term.expr, &alias_map);
-    }
-
-    changed
+    alias_map
 }
 
-/// Recursively walk an expression and replace any ColumnRef that references
-/// a SELECT alias with the original expression.
-fn replace_alias_refs_in_expr(
-    expr: &mut Expression,
-    alias_map: &[(String, Expression)],
-) -> bool {
+/// Search an expression tree for any ColumnRef that matches a SELECT alias.
+/// Returns the (alias_name, original_expression) pair on match.
+///
+/// This is used by `fix_order_by_aliases` to replace ORDER BY expressions
+/// that reference aliases (either directly or inside function wrappers like
+/// `sum(total_amount)` or `desc(total_amount)`).  When a match is found,
+/// the caller replaces the ENTIRE ORDER BY term expression, avoiding
+/// double-wrapping like `sum(sum(orders.total))`.
+fn find_alias_match<'a>(
+    expr: &Expression,
+    alias_map: &'a [(String, Expression)],
+) -> Option<&'a (String, Expression)> {
     match expr {
         Expression::ColumnRef { column, .. } => {
-            if let Some((_, original_expr)) = alias_map.iter().find(|(alias, _)| alias == column) {
-                *expr = original_expr.clone();
-                true
-            } else {
-                false
-            }
+            alias_map.iter().find(|(alias, _)| alias == column)
         }
         Expression::FunctionCall { args, .. } => {
-            let mut changed = false;
-            for arg in args.iter_mut() {
-                changed |= replace_alias_refs_in_expr(arg, alias_map);
+            // Check if any arg has a direct alias match.
+            for arg in args {
+                if let Some(match_entry) = find_alias_match(arg, alias_map) {
+                    return Some(match_entry);
+                }
             }
-            changed
+            None
         }
         Expression::BinaryOp { left, right, .. } => {
-            let mut changed = false;
-            changed |= replace_alias_refs_in_expr(left, alias_map);
-            changed |= replace_alias_refs_in_expr(right, alias_map);
-            changed
+            find_alias_match(left, alias_map)
+                .or_else(|| find_alias_match(right, alias_map))
         }
-        Expression::SubQuery { .. } => {
-            false
-        }
-        _ => false,
+        _ => None,
     }
 }
 

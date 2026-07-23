@@ -372,11 +372,11 @@ impl PromptBuilder {
             "## Planning Rules\n\
              1. Prefer the simplest plan. Fewer joins, shallower nesting.\n\
              2. \"never / not / without / anti-join\" questions: MUST use LEFT JOIN + `is_null` on the right key. NEVER use `NOT EXISTS`.\n\
-             3. Every table in `select` / `where` must be in `from` or `joins`. Never reference an unjoined table. Example: selecting `users.name` requires joining `users`.\n\
-             4. `limit` / `order_by` / `offset` only at top level, never inside `where` or subqueries.\n\
-             5. Only use GROUP BY when the question asks for \"each / every / per\" (e.g. \"per product\" → GROUP BY + SUM/COUNT). For other queries, omit GROUP BY entirely.\n\
-             6. \"all combinations / every pairing / cartesian product\" questions: use CROSS JOIN. A CROSS JOIN has NO real matching condition — never invent a foreign key for it. For filtered relationships, use INNER JOIN with a real `on` instead.\n\
-             7. Output valid JSON: keys unescaped (`\"where\":` not `\"where\\\":`). No backslash-escaped quotes, no fences.\n\
+             3. Every table in `select` / `where` must be in `from` or `joins`. Never reference an unjoined table.\n\
+             4. `limit`, `offset`, `order_by`, `group_by`, `having` ONLY at the top level of the JSON response, NEVER inside `where`.\n\
+             5. Only use GROUP BY when the question asks for \"each / every / per\". For those, always put the aggregate alias in HAVING, not WHERE.\n\
+             6. \"all combinations / every pairing / cartesian product\" questions: use CROSS JOIN with no `on` condition.\n\
+             7. Output valid JSON only — no markdown fences, no trailing backticks, no comments, no raw SQL.\n\
              \n",
         );
     }
@@ -501,21 +501,48 @@ impl PromptBuilder {
             "## JSON Type Reminder\n\
              Every tagged object must include a `\"type\"` field matching the JSON Schema above.\n\
              \n\
-             Notes:\n\
+             ### Common Mistakes — WRONG vs RIGHT\n\
+             \n\
+             1. AGGREGATE IN SELECT — Must use `expr` wrapper:\n\
+             WRONG: {{\"type\":\"function_call\",\"name\":\"sum\",\"args\":[...]}}\n\
+             RIGHT: {{\"type\":\"expr\",\"expression\":{{\"type\":\"function_call\",\"name\":\"sum\",\"args\":[...]}},\"alias\":\"total\"}}\n\
+             \n\
+             2. ORDER BY DESCENDING — Use boolean flag, not `desc()` function:\n\
+             WRONG: {{\"expr\":{{\"type\":\"function_call\",\"name\":\"desc\",\"args\":[{{\"type\":\"column_ref\",\"column\":\"total\"}}]}},\"descending\":false}}\n\
+             RIGHT: {{\"expr\":{{\"type\":\"column_ref\",\"column\":\"total\"}},\"descending\":true}}\n\
+             \n\
+             3. AGGREGATE FILTER — Use HAVING, not WHERE:\n\
+             WRONG: {{\"where\":{{\"type\":\"comparison\",\"left\":{{\"type\":\"function_call\",\"name\":\"count\",...}},\"op\":\"gt\",\"right\":{{\"type\":\"literal\",\"value\":2}}}}}}\n\
+             RIGHT: {{\"having\":{{\"type\":\"comparison\",\"left\":{{\"type\":\"function_call\",\"name\":\"count\",...}},\"op\":\"gt\",\"right\":{{\"type\":\"literal\",\"value\":2}}}}}}\n\
+             \n\
+             4. ORDER BY ALIAS — Use raw expression, never alias:\n\
+             WRONG: {{\"expr\":{{\"type\":\"column_ref\",\"column\":\"total_amount\"}},\"descending\":true}}\n\
+             RIGHT: {{\"expr\":{{\"type\":\"function_call\",\"name\":\"sum\",\"args\":[{{\"type\":\"column_ref\",\"column\":\"total\",\"table\":\"orders\"}}]}},\"descending\":true}}\n\
+             \n\
+             5. TOP-LEVEL FIELDS — group_by, having, order_by, limit, offset go at the TOP level:\n\
+             WRONG: {{\"where\":{{\"type\":\"and\",\"left\":{{\"type\":\"comparison\"}},\"right\":{{\"type\":\"comparison\"}},\"group_by\":[...],\"having\":{{...}}}}}}\n\
+             RIGHT: {{\"where\":{{\"type\":\"and\",\"left\":{{...}},\"right\":{{...}}}},\"group_by\":[...],\"having\":{{...}}}}\n\
+             \n\
+             ### Quick Reference\n\
              - `data_type` only belongs inside `literal` objects.\n\
-             - `order_by`, `limit`, `offset` go at the top level, never inside `where`.\n\
-             - Predicate keys (`where`/`left`/`right`/`child`/`on`) are normal JSON keys — write `\"where\":{{...}}`, never `\"where\\\\\":`.\n\
-             - CRITICAL: `\"type\": \"expr\"` is ONLY valid inside `select` (as a Projection wrapper). In `having`, `order_by[].expr`, `group_by`, `where`, `on`, and all other Expression positions, use the Expression type DIRECTLY: `{{\"type\":\"function_call\",...}}`, `{{\"type\":\"binary_op\",...}}`, etc. NEVER wrap an Expression in `{{\"type\":\"expr\",\"expression\":...}}` outside of `select`.\n\
-             - CRITICAL: Arithmetic like `unit_price * quantity` must be a `binary_op` expression, NOT a string column name. Example: `{{\"type\":\"binary_op\",\"left\":{{\"type\":\"column_ref\",\"column\":\"unit_price\",\"table\":\"order_items\"}},\"op\":\"mul\",\"right\":{{\"type\":\"column_ref\",\"column\":\"quantity\",\"table\":\"order_items\"}}}}`.\n\
-             - CRITICAL: In `order_by`, use the RAW expression (the actual column or aggregate expression like `sum`/`count`), NOT a `select` alias. Example: instead of {{\"expr\":{{\"type\":\"column_ref\",\"column\":\"total_amount\"}},\"descending\":true}}, use {{\"expr\":{{\"type\":\"function_call\",\"name\":\"sum\",\"args\":[{{\"type\":\"column_ref\",\"column\":\"total\",\"table\":\"orders\"}}],\"distinct\":false}},\"descending\":true}}.\n\
-             - CRITICAL: Do NOT use `desc` as a function_call name. Sort descending by setting `\"descending\": true` on the order_by term, NOT by wrapping the expression in a `desc(...)` function call.\n\
-             - CRITICAL: Use `having` for AGGREGATE filter conditions (COUNT, SUM, AVG, MIN, MAX). The `where` clause CANNOT contain aggregate functions. Example: to filter groups with COUNT > 2, use `\"having\": {{\"type\":\"comparison\",\"left\":{{\"type\":\"function_call\",\"name\":\"count\",\"args\":[{{\"type\":\"column_ref\",\"column\":\"id\",\"table\":\"orders\"}}],\"distinct\":false}},\"op\":\"gt\",\"right\":{{\"type\":\"literal\",\"value\":2,\"data_type\":\"int\"}}}}` — do NOT put this in `where`.\n\
+             - Inside `select` array: each item is {{type, column/expression, alias?}} — use `\"type\":\"column_ref\"` for columns, `\"type\":\"expr\"` for computed expressions.\n\
+             - `\"type\": \"expr\"` is ONLY valid in `select`. In all other positions (order_by[].expr, group_by, where, having, on), use the inner expression type directly: `{{\"type\":\"function_call\",...}}`, `{{\"type\":\"binary_op\",...}}`, etc.\n\
+             - WHERE and HAVING are separate top-level fields. Aggregate conditions go in HAVING; row-level conditions go in WHERE.\n\
              \n\
-             Nested `WHERE` (and/or):\n\
-             {{\"where\":{{\"type\":\"and\",\"left\":{{\"type\":\"comparison\",\"left\":{{\"type\":\"column_ref\",\"column\":\"total\",\"table\":\"orders\"}},\"op\":\"gt\",\"right\":{{\"type\":\"literal\",\"value\":150,\"data_type\":\"float\"}}}},\"right\":{{\"type\":\"comparison\",\"left\":{{\"type\":\"column_ref\",\"column\":\"status\",\"table\":\"orders\"}},\"op\":\"eq\",\"right\":{{\"type\":\"literal\",\"value\":\"completed\",\"data_type\":\"string\"}}}}}}}\n\
+             ### Valid Expression Types\n\
+             `{{\"type\":\"column_ref\",\"table\":?,\"column\":\"name\"}}` — column reference\n\
+             `{{\"type\":\"literal\",\"value\":...,\"data_type\":\"...\"}}` — literal value\n\
+             `{{\"type\":\"function_call\",\"name\":\"sum\",\"args\":[...]}}` — function call\n\
+             `{{\"type\":\"binary_op\",\"left\":{{...}},\"op\":\"add|sub|mul|div\",\"right\":{{...}}}}` — arithmetic\n\
              \n\
-             Anti-join (`LEFT` + `is_null`):\n\
-             {{\"joins\":[{{\"join_type\":\"left\",\"right_table\":{{\"table\":\"orders\"}},\"on\":{{\"type\":\"comparison\",\"left\":{{\"type\":\"column_ref\",\"column\":\"id\",\"table\":\"users\"}},\"op\":\"eq\",\"right\":{{\"type\":\"column_ref\",\"column\":\"user_id\",\"table\":\"orders\"}}}}}}],\"where\":{{\"type\":\"is_null\",\"expr\":{{\"type\":\"column_ref\",\"column\":\"id\",\"table\":\"orders\"}}}}}\n\
+             ### Valid Predicate Types\n\
+             `{{\"type\":\"comparison\",\"left\":{{...}},\"op\":\"eq|neq|gt|gte|lt|lte\",\"right\":{{...}}}}`\n\
+             `{{\"type\":\"and|or\",\"left\":{{...}},\"right\":{{...}}}}`\n\
+             `{{\"type\":\"not\",\"child\":{{...}}}}`\n\
+             `{{\"type\":\"between\",\"expr\":{{...}},\"low\":{{...}},\"high\":{{...}}}}`\n\
+             `{{\"type\":\"is_null\",\"expr\":{{...}}}}`\n\
+             \n\
+             Output JSON only — no markdown fences.\n\
              \n",
         );
     }
