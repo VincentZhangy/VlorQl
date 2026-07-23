@@ -289,10 +289,7 @@ fn validate_expression(expression: &Expression, errors: &mut Vec<ValidationError
             validate_expression(right, errors);
         }
         Expression::Star => {
-            errors.push(ValidationError::new(
-                ValidationErrorKind::InvalidExpression,
-                "`*` is only valid in SELECT, not in WHERE/ON/HAVING or other expression positions",
-            ));
+            // Star is valid inside COUNT(*) in SELECT, skip validation.
         }
         Expression::SubQuery { query } => {
             validate_plan(query, errors);
@@ -541,8 +538,9 @@ mod tests {
         let mut plan = valid_plan();
         plan.ctes = Some(vec![CommonTableExpression {
             name: "active".to_owned(),
+            recursive: false,
             query: Box::new(QueryPlan {
-                select: vec![Projection::Star { table: None, recursive: false }],
+                select: vec![Projection::Star { table: None }],
                 from: FromClause {
                     table: "users".to_owned(),
                     alias: None,
@@ -572,7 +570,8 @@ mod tests {
         let mut plan = valid_plan();
         plan.ctes = Some(vec![CommonTableExpression {
             name: "".to_owned(),
-            query: Box::new(valid_plan()),, recursive: false
+            recursive: false,
+            query: Box::new(valid_plan()),
         }]);
         let errors = validate(&plan);
         assert!(

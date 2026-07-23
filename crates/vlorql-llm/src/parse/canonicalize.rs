@@ -72,6 +72,7 @@ const FIELD_ALIASES: &[(&str, &str)] = &[
     ("operator", "op"),
     ("condition", "comparison"),
     ("comparisons", "comparison"),
+    ("group", "group_by"),
 ];
 
 /// Recursively rename fields in a JSON value according to `FIELD_ALIASES`.
@@ -440,6 +441,7 @@ fn repair_query_plan_object(obj: &mut serde_json::Map<String, serde_json::Value>
                 if let Some(term) = item.as_object_mut()
                     && term.contains_key("expr")
                     && !term.contains_key("type")
+                    && !term.contains_key("descending")
                 {
                     // group_by items are bare Expression objects, BUT the LLM
                     // often emits them in order_by format: {"expr": {...}}.

@@ -329,7 +329,7 @@ fn select_llm_client() -> Option<Box<dyn LlmClient>> {
 // 在真实 LLM 模式下，QueryPlan 由 LLM 自动生成，完全不需要这段代码。
 // 离线演示模式使用 compile_only() 直接编译这些预设的 Plan。
 
-const QUESTIONS: [&str; 22] = [
+const QUESTIONS: [&str; 23] = [
     "列出总金额超过150的已完成订单，显示订单号、客户名和总金额，按金额从高到低排序，最多10条",
     "查询状态为已完成或已发货的订单，显示订单号、金额、状态和客户名",
     "哪些商品从未被购买过？",
@@ -434,8 +434,7 @@ fn build_demo_plan() -> QueryPlan {
         }),
         group_by: None,
         having: None,
-        distinct: false,
-            distinct_on: None,order_by: Some(vec![vlorql_core::schema::OrderByTerm {
+        order_by: Some(vec![vlorql_core::schema::OrderByTerm {
             expr: Expression::ColumnRef {
                 table: Some("orders".to_owned()),
                 column: "total".to_owned(),
@@ -542,8 +541,7 @@ fn build_in_predicate_plan() -> QueryPlan {
         }),
         group_by: None,
         having: None,
-        distinct: false,
-            distinct_on: None,order_by: Some(vec![OrderByTerm {
+        order_by: Some(vec![OrderByTerm {
             expr: Expression::ColumnRef {
                 table: Some("orders".to_owned()),
                 column: "created_at".to_owned(),
@@ -616,8 +614,7 @@ fn build_is_null_plan() -> QueryPlan {
         }),
         group_by: None,
         having: None,
-        distinct: false,
-            distinct_on: None,order_by: None,
+        order_by: None,
         limit: None,
         offset: None,
         ctes: None,
@@ -683,8 +680,7 @@ fn build_aggregate_plan() -> QueryPlan {
             column: "name".to_owned(),
         }]),
         having: None,
-        distinct: false,
-            distinct_on: None,order_by: None,
+        order_by: None,
         limit: None,
         offset: None,
         ctes: None,
@@ -772,8 +768,7 @@ fn build_having_plan() -> QueryPlan {
                 data_type: DataType::Int,
             },
         }),
-        distinct: false,
-            distinct_on: None,order_by: Some(vec![OrderByTerm {
+        order_by: Some(vec![OrderByTerm {
             expr: Expression::FunctionCall {
                 name: "COUNT".to_owned(),
                 args: vec![Expression::ColumnRef {
@@ -838,8 +833,7 @@ fn build_between_plan() -> QueryPlan {
                 data_type: DataType::Int,
             },
         }),
-        distinct: false,
-            distinct_on: None,order_by: Some(vec![OrderByTerm {
+        order_by: Some(vec![OrderByTerm {
             expr: Expression::ColumnRef {
                 table: Some("orders".to_owned()),
                 column: "total".to_owned(),
@@ -898,8 +892,7 @@ fn build_like_plan() -> QueryPlan {
         joins: None,
         group_by: None,
         having: None,
-        distinct: false,
-            distinct_on: None,order_by: None,
+        order_by: None,
         limit: None,
         offset: None,
         ctes: None,
@@ -964,8 +957,7 @@ fn build_subquery_in_plan() -> QueryPlan {
                 }),
                 group_by: None,
                 having: None,
-                distinct: false,
-            distinct_on: None,order_by: None,
+                order_by: None,
                 limit: None,
                 offset: None,
                 joins: None,
@@ -1067,8 +1059,7 @@ fn build_cte_plan() -> QueryPlan {
             },
         ]),
         having: None,
-        distinct: false,
-            distinct_on: None,order_by: None,
+        order_by: None,
         limit: None,
         offset: None,
         ctes: None,
@@ -1093,8 +1084,7 @@ fn build_cte_plan() -> QueryPlan {
             table: "product_sales".to_owned(),
             alias: None,
         },
-        distinct: false,
-            distinct_on: None,order_by: Some(vec![OrderByTerm {
+        order_by: Some(vec![OrderByTerm {
             expr: Expression::ColumnRef {
                 table: Some("product_sales".to_owned()),
                 column: "revenue".to_owned(),
@@ -1103,7 +1093,8 @@ fn build_cte_plan() -> QueryPlan {
         }]),
         ctes: Some(vec![CommonTableExpression {
             name: "product_sales".to_owned(),
-            query: Box::new(cte_query),, recursive: false
+            recursive: false,
+            query: Box::new(cte_query),
         }]),
         joins: None,
         r#where: None,
@@ -1111,6 +1102,9 @@ fn build_cte_plan() -> QueryPlan {
         having: None,
         limit: None,
         offset: None,
+        distinct: false,
+        distinct_on: None,
+        set_operation: None,
     }
 }
 
@@ -1233,8 +1227,7 @@ fn build_multi_join_plan() -> QueryPlan {
                 },
             },
         ]),
-        distinct: false,
-            distinct_on: None,order_by: Some(vec![OrderByTerm {
+        order_by: Some(vec![OrderByTerm {
             expr: Expression::ColumnRef {
                 table: Some("orders".to_owned()),
                 column: "id".to_owned(),
@@ -1312,8 +1305,7 @@ fn build_not_exists_plan() -> QueryPlan {
                     }),
                     group_by: None,
                     having: None,
-                    distinct: false,
-            distinct_on: None,order_by: None,
+                    order_by: None,
                     limit: None,
                     offset: None,
                     joins: None,
@@ -1391,8 +1383,7 @@ fn build_full_outer_join_plan() -> QueryPlan {
                 },
             },
         }]),
-        distinct: false,
-            distinct_on: None,order_by: Some(vec![
+        order_by: Some(vec![
             OrderByTerm {
                 expr: Expression::ColumnRef {
                     table: Some("users".to_owned()),
@@ -1465,8 +1456,7 @@ fn build_cross_join_plan() -> QueryPlan {
                 },
             },
         }]),
-        distinct: false,
-            distinct_on: None,order_by: Some(vec![
+        order_by: Some(vec![
             OrderByTerm {
                 expr: Expression::ColumnRef {
                     table: Some("users".to_owned()),
@@ -1544,8 +1534,7 @@ fn build_self_join_plan() -> QueryPlan {
                 },
             },
         }]),
-        distinct: false,
-            distinct_on: None,order_by: Some(vec![OrderByTerm {
+        order_by: Some(vec![OrderByTerm {
             expr: Expression::ColumnRef {
                 table: Some("e".to_owned()),
                 column: "id".to_owned(),
@@ -1620,8 +1609,7 @@ fn build_date_trunc_plan() -> QueryPlan {
             alias: Some("o".to_owned()),
         },
         group_by: Some(vec![month_expr.clone()]),
-        distinct: false,
-            distinct_on: None,order_by: Some(vec![OrderByTerm {
+        order_by: Some(vec![OrderByTerm {
             expr: month_expr,
             descending: true,
         }]),
@@ -1732,8 +1720,7 @@ fn build_string_agg_plan() -> QueryPlan {
             table: Some("orders".to_owned()),
             column: "id".to_owned(),
         }]),
-        distinct: false,
-            distinct_on: None,order_by: Some(vec![OrderByTerm {
+        order_by: Some(vec![OrderByTerm {
             expr: Expression::ColumnRef {
                 table: Some("orders".to_owned()),
                 column: "id".to_owned(),
@@ -1840,8 +1827,7 @@ fn build_distinct_count_plan() -> QueryPlan {
             table: Some("products".to_owned()),
             column: "name".to_owned(),
         }]),
-        distinct: false,
-            distinct_on: None,order_by: Some(vec![OrderByTerm {
+        order_by: Some(vec![OrderByTerm {
             expr: Expression::FunctionCall {
                 name: "COUNT".to_owned(),
                 args: vec![Expression::ColumnRef {
@@ -1920,8 +1906,7 @@ fn build_complex_not_plan() -> QueryPlan {
                 },
             }),
         }),
-        distinct: false,
-            distinct_on: None,order_by: Some(vec![OrderByTerm {
+        order_by: Some(vec![OrderByTerm {
             expr: Expression::ColumnRef {
                 table: Some("orders".to_owned()),
                 column: "total".to_owned(),
@@ -2291,9 +2276,7 @@ fn build_union_all_plan() -> QueryPlan {
         offset: None,
         joins: None,
         ctes: None,
-            distinct: false,
-            distinct_on: None,
-            set_operation: None,    }
+    }
 }
 
 /// Plan 23: 递归 CTE —— 组织架构树向下穿透
@@ -2398,6 +2381,7 @@ fn build_recursive_cte_plan() -> QueryPlan {
                         },
                     },
                 }]),
+                r#where: None,
                 group_by: None,
                 having: None,
                 distinct: false,

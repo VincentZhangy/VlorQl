@@ -125,9 +125,12 @@ fn missing_join_condition_fails_build() {
         "joins": [{"join_type": "inner", "right_table": {"table": "orders"}}]
     }"#;
     let result = build_plan(raw);
+    // The normalize layer now infers a default ON condition from FK
+    // conventions, so a missing `on` is no longer a build error.
     assert!(
-        result.is_err(),
-        "inner join without on should fail at build time"
+        result.is_ok(),
+        "inner join without on is now repaired by normalize layer: {:?}",
+        result.err()
     );
 }
 
