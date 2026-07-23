@@ -12,7 +12,7 @@
 //! that the validator can focus on real errors.  When in doubt, it
 //! does nothing and lets the validator report the issue.
 
-use vlorql_core::schema::{Expression, JoinClause, Projection, QueryPlan};
+use vlorql_core::schema::{Expression, InTarget, JoinClause, Predicate, Projection, QueryPlan};
 
 /// Run all auto-fix rules on a [`QueryPlan`] recursively
 /// (including CTE subqueries).
@@ -29,6 +29,8 @@ pub fn fix_plan(plan: &mut QueryPlan) -> bool {
     changed |= fix_missing_aliases(plan);
     // Replace ORDER BY alias references with the original SELECT expressions.
     changed |= fix_order_by_aliases(plan);
+    // Move aggregate conditions from WHERE to HAVING.
+    changed |= fix_where_aggregates(plan);
     // Recursively fix CTE subqueries.
     if let Some(ref mut ctes) = plan.ctes {
         for cte in ctes.iter_mut() {
@@ -306,6 +308,72 @@ fn fix_join_alias(join: &mut JoinClause, counter: &mut u32, used: &mut Vec<Strin
         true
     } else {
         false
+    }
+}
+
+/// Move aggregate conditions from WHERE to HAVING.
+///
+/// LLMs frequently put aggregate filter conditions (e.g. `COUNT(*) > 5`) in
+/// the WHERE clause instead of HAVING.  This is invalid SQL because aggregate
+/// functions cannot appear in WHERE.  This function detects such conditions
+/// and moves them to HAVING.
+///
+/// When WHERE contains any expression with an aggregate function, the entire
+/// WHERE predicate is promoted to HAVING (since WHERE cannot contain aggregates,
+/// this is safe — the LLM intended these as HAVING conditions).
+#[must_use]
+fn fix_where_aggregates(plan: &mut QueryPlan) -> bool {
+    let Some(ref where_pred) = plan.r#where else {
+        return false;
+    };
+
+    // Check if WHERE contains any aggregate function call.
+    if !contains_aggregate(where_pred) {
+        return false;
+    }
+
+    // Move the entire WHERE to HAVING.
+    // If HAVING already exists, AND the two together.
+    let new_having = if let Some(ref having_pred) = plan.having {
+        Predicate::And {
+            left: Box::new(where_pred.clone()),
+            right: Box::new(having_pred.clone()),
+        }
+    } else {
+        where_pred.clone()
+    };
+
+    plan.having = Some(new_having);
+    plan.r#where = None;
+    true
+}
+
+/// Recursively check if a predicate tree contains any aggregate function call.
+fn contains_aggregate(pred: &Predicate) -> bool {
+    match pred {
+        Predicate::Comparison { left, right, .. } => {
+            is_aggregate_expr(left) || is_aggregate_expr(right)
+        }
+        Predicate::Between { expr, low, high } => {
+            is_aggregate_expr(expr) || is_aggregate_expr(low) || is_aggregate_expr(high)
+        }
+        Predicate::In { expr, target, .. } => {
+            if is_aggregate_expr(expr) {
+                return true;
+            }
+            match target {
+                InTarget::Values(values) => values.iter().any(|v| is_aggregate_expr(v)),
+                InTarget::SubQuery(_) => false,
+            }
+        }
+        Predicate::Like { expr, .. } => {
+            is_aggregate_expr(expr)
+        }
+        Predicate::IsNull { expr } => is_aggregate_expr(expr),
+        Predicate::And { left, right } => contains_aggregate(left) || contains_aggregate(right),
+        Predicate::Or { left, right } => contains_aggregate(left) || contains_aggregate(right),
+        Predicate::Not { child } => contains_aggregate(child),
+        Predicate::Exists { .. } => false,
     }
 }
 

@@ -68,6 +68,25 @@ pub fn normalize_item(item: &mut serde_json::Value) -> bool {
         }
     }
 
+    // Case 3: `{"descending": true}` — only descending, no expr.
+    // Merge with the next item if it has expr but no descending.
+    if !obj.contains_key("expr") && obj.contains_key("descending") {
+        // If descending without expr, this is a continuation from the previous
+        // item. The builder will fail.  Drop the malformed field so the
+        // builder at least processes the valid items.
+        obj.remove("descending");
+        changed = true;
+    }
+
+    // Strip non-standard fields that don't belong on OrderByTerm.
+    // The LLM sometimes emits `alias` or other fields.
+    for extra in &["alias", "name"] {
+        if obj.contains_key(*extra) {
+            obj.remove(*extra);
+            changed = true;
+        }
+    }
+
     changed
 }
 
