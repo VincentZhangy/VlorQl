@@ -517,8 +517,14 @@ fn normalize_malformed_case_expression_in_map(map: &mut serde_json::Map<String, 
             continue;
         }
         let mut when = current.clone();
-        // `comparison` in a `when` clause is valid as a Predicate.
-        // Do NOT convert to `binary_op` — the builder expects a Predicate here.
+        // `comparison` is a Predicate type, not an Expression.
+        // Convert it to `binary_op` so the expression builder can
+        // handle it inside `CASE WHEN`.
+        if let Some(when_obj) = when.as_object_mut() {
+            if when_obj.get("type").and_then(|t| t.as_str()) == Some("comparison") {
+                when_obj.insert("type".to_owned(), Value::String("binary_op".to_owned()));
+            }
+        }
         when_thens.push(serde_json::json!({
             "when": when,
             "then": next.clone(),

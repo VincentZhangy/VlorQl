@@ -135,6 +135,16 @@ pub fn parse_binary_op(s: &str) -> Result<BinaryOperator, BuildError> {
         "mul" => Ok(Mul),
         "div" => Ok(Div),
         "mod" => Ok(Mod),
+        "and" => Ok(And),
+        "or" => Ok(Or),
+        "eq" => Ok(Eq),
+        "neq" => Ok(Neq),
+        "gt" => Ok(Gt),
+        "lt" => Ok(Lt),
+        "gte" => Ok(Gte),
+        "lte" => Ok(Lte),
+        "like" => Ok(Like),
+        "ilike" => Ok(ILike),
         _ => Err(BuildError::new(
             "op",
             format!("unknown binary operator `{s}`"),
@@ -384,6 +394,29 @@ pub fn build_expression(val: &Value) -> Result<Expression, BuildError> {
                 operand,
                 when_thens,
                 else_result,
+            })
+        }
+        // `comparison` is a Predicate type, not an Expression.  LLMs often
+        // emit it inside CASE WHEN clauses.  Convert to BinaryOp here so
+        // the expression builder still succeeds even if normalization did
+        // not catch it (e.g. when plans come from serde directly).
+        "comparison" | "Comparison" => {
+            let left_val = obj
+                .get("left")
+                .ok_or_else(|| BuildError::new("", "missing `left` field on comparison"))?;
+            let left = build_expression(left_val).map_err(|e| e.at("left"))?;
+            let op_str = req_str(obj, "op", "")?;
+            // Map comparison operators to binary operators.
+            // Both share `eq`, `neq`, `gt`, `gte`, `lt`, `lte`.
+            let op = parse_binary_op(op_str)?;
+            let right_val = obj
+                .get("right")
+                .ok_or_else(|| BuildError::new("", "missing `right` field on comparison"))?;
+            let right = build_expression(right_val).map_err(|e| e.at("right"))?;
+            Ok(Expression::BinaryOp {
+                left: Box::new(left),
+                op,
+                right: Box::new(right),
             })
         }
         _ => {
