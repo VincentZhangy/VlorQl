@@ -40,6 +40,20 @@ fn find_column_via_fk(
             }
         }
     }
+    // Reverse FK lookup: check if any other table has a FK pointing TO this
+    // table AND has the desired column.  This handles LLM mistakes where a
+    // column from the FK-referencing table is incorrectly qualified with
+    // the FK-target table name (e.g. `users.user_id` instead of `orders.user_id`
+    // when `orders.user_id → users.id`).
+    for t in &schema.tables {
+        for col in &t.columns {
+            if let Some(fk) = &col.foreign_key {
+                if fk.foreign_table == table_name && t.columns.iter().any(|c| c.name == column) {
+                    return Some(t.name.clone());
+                }
+            }
+        }
+    }
     None
 }
 
@@ -172,6 +186,35 @@ fn fix_plan(plan: &mut QueryPlan, schema: &SchemaSnapshot) -> bool {
     if let Some(ref mut group_by) = plan.group_by {
         for expr in group_by.iter_mut() {
             changed |= fix_expr(expr, schema);
+        }
+        // After fixing table qualifiers, remove any GroupBy expressions that
+        // are still qualified ColumnRefs whose column doesn't exist in the
+        // schema at all — these are LLM hallucinations (e.g. `orders.category`
+        // when `category` is only a SELECT alias, not a real column).
+        let before = group_by.len();
+        group_by.retain(|expr| {
+            if let Expression::ColumnRef {
+                table: Some(table_name),
+                column,
+            } = expr
+            {
+                let exists = schema
+                    .get_table(table_name)
+                    .is_some_and(|t| t.columns.iter().any(|c| c.name == *column));
+                if exists {
+                    return true;
+                }
+                // Also check reverse FK — maybe the column exists on a
+                // related table (redundant with fix_expr above, but keeps
+                // the guard self-contained).
+                let via_fk = find_column_via_fk(table_name, column, schema).is_some();
+                via_fk
+            } else {
+                true
+            }
+        });
+        if group_by.len() != before {
+            changed = true;
         }
     }
     if let Some(ref mut order_by) = plan.order_by {
