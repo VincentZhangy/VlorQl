@@ -4,8 +4,8 @@
 
   <!-- Badges -->
   <p>
-    <a href="https://github.com/ql-tools/VlorQl/actions">
-      <img src="https://img.shields.io/github/actions/workflow/status/ql-tools/VlorQl/ci.yml?branch=main&style=flat-square" alt="CI status" />
+    <a href="https://github.com/VincentZhangy/VlorQl/actions">
+      <img src="https://img.shields.io/github/actions/workflow/status/VincentZhangy/VlorQl/ci.yml?branch=main&style=flat-square" alt="CI status" />
     </a>
     <a href="https://crates.io/crates/vlorql">
       <img src="https://img.shields.io/crates/v/vlorql.svg?style=flat-square" alt="crates.io" />
@@ -13,7 +13,7 @@
     <a href="https://docs.rs/vlorql">
       <img src="https://img.shields.io/badge/docs-latest-blue.svg?style=flat-square" alt="docs" />
     </a>
-    <a href="https://github.com/ql-tools/VlorQl/blob/main/LICENSE">
+    <a href="https://github.com/VincentZhangy/VlorQl/blob/main/LICENSE">
       <img src="https://img.shields.io/badge/license-MIT%2FApache--2.0-blue?style=flat-square" alt="license" />
     </a>
     <br>
