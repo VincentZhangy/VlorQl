@@ -1,6 +1,6 @@
 # VlorQl 用户指南
 
-本指南将引导您完成将 VlorQl 集成到 Rust 应用程序中的所有步骤。假设您已具备可用的 Rust 1.75+ 工具链以及一个希望通过自然语言查询暴露的数据库。
+本指南将引导您完成将 VlorQl 集成到 Rust 应用程序中的所有步骤。假设您已具备可用的 Rust 1.85+ 工具链以及一个希望通过自然语言查询暴露的数据库。
 
 > 需要**运维**指导？请参阅 [`deployment.md`](./deployment.md) 了解 vLLM/Ollama 的部署和生成环境调优。
 
@@ -540,6 +540,19 @@ pub enum Expression {
     Star,
     /// 标量子查询：`(SELECT ...)`。
     SubQuery { query: Box<QueryPlan> },
+    /// CASE WHEN ... THEN ... ELSE ... END 表达式。
+    Case {
+        operand: Option<Box<Expression>>,
+        when_thens: Vec<WhenThen>,
+        else_result: Option<Box<Expression>>,
+    },
+    /// 带 OVER 子句的窗口函数调用。
+    WindowFunction {
+        name: String,
+        args: Vec<Expression>,
+        distinct: bool,
+        over: WindowSpec,
+    },
 }
 ```
 

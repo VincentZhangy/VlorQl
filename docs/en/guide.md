@@ -1,7 +1,7 @@
 # VlorQl User Guide
 
 This guide walks through everything you need to integrate VlorQl
-into a Rust application. It assumes you have a working Rust 1.75+
+into a Rust application. It assumes you have a working Rust 1.85+
 toolchain and a database that you want to expose through natural-language
 queries.
 
@@ -613,6 +613,19 @@ pub enum Expression {
     Star,
     /// A scalar subquery: `(SELECT ...)`.
     SubQuery { query: Box<QueryPlan> },
+    /// A CASE WHEN ... THEN ... ELSE ... END expression.
+    Case {
+        operand: Option<Box<Expression>>,
+        when_thens: Vec<WhenThen>,
+        else_result: Option<Box<Expression>>,
+    },
+    /// A window function call with an OVER clause.
+    WindowFunction {
+        name: String,
+        args: Vec<Expression>,
+        distinct: bool,
+        over: WindowSpec,
+    },
 }
 ```
 
@@ -863,9 +876,10 @@ use vlorql_core::compile::{RewriteEngine, RewriteRule};
 
 let rules = vec![RewriteRule {
     name: "strip-semicolons".to_owned(),
-    pattern: r";\s*$".to_owned(),
-    replacement: "".to_owned(),
+    match_pattern: r";\s*$".to_owned(),
+    replace_template: "".to_owned(),
     description: Some("Remove trailing semicolons".to_owned()),
+    dialect_filter: None,
 }];
 let engine = RewriteEngine::new(rules);
 let clean = engine.apply("SELECT * FROM users;", "postgres")?;
