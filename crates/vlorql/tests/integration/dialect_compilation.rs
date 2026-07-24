@@ -117,7 +117,9 @@ fn plan_with_two_columns() -> QueryPlan {
         offset: None,
         joins: None,
         ctes: None,
-    }
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,    }
 }
 
 fn validate(plan: &QueryPlan) -> ValidatedPlan {

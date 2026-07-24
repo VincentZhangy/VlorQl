@@ -40,17 +40,10 @@ pub(crate) const SSE_DONE: &str = "[DONE]";
 pub mod anthropic;
 pub mod deepseek;
 pub mod local;
-pub mod parse;
-/// Parse pipeline: recover → canonicalize → build (`QueryPlan`).
+/// V2 parse pipeline: recover → normalize → build → validate → optimize.
 ///
-/// Public helpers are re-exported at the crate root for compatibility:
-/// [`extract_json_content`], [`repair_query_plan_json`],
-/// [`detect_template_leak`].
-/// V2 parse pipeline: recover → canonicalize → build → validate → optimize.
-///
-/// A staged pipeline designed for multi-model compatibility.  Built
-/// alongside the existing `parse` module; will eventually replace it.
-// V2 pipeline (recommended for all new code).
+/// Replaces the legacy `parse` module. All new code should use
+/// `parser_v2` directly.
 pub mod parser_v2;
 pub mod zhipu;
 
@@ -239,7 +232,7 @@ pub(crate) const DEFAULT_RETRY_DELAY: Duration = Duration::from_secs(1);
 ///     from: FromClause { table: "users".to_owned(), alias: None },
 ///     r#where: None, group_by: None, having: None,
 ///     order_by: None, limit: None, offset: None,
-///     joins: None, ctes: None,
+///     joins: None, ctes: None, distinct: false, distinct_on: None, set_operation: None,
 /// };
 /// let client = MockLlmClient::success(plan);
 /// let result = client.generate_plan("test", "prompt").await;
@@ -725,7 +718,7 @@ impl LlmClient for OpenAIClient {
 ///     from: FromClause { table: "users".to_owned(), alias: None },
 ///     r#where: None, group_by: None, having: None,
 ///     order_by: None, limit: None, offset: None,
-///     joins: None, ctes: None,
+///     joins: None, ctes: None, distinct: false, distinct_on: None, set_operation: None,
 /// };
 /// let client = MockLlmClient::success(plan);
 /// assert!(client.should_succeed);
@@ -1396,6 +1389,8 @@ pub fn create_llm_client(config: LlmConfig) -> Result<Box<dyn LlmClient>, VlorQL
 fn default_plan() -> QueryPlan {
     QueryPlan {
         select: vec![vlorql_core::schema::Projection::Star { table: None }],
+        distinct: false,
+        distinct_on: None,
         from: vlorql_core::schema::FromClause {
             table: "placeholder".to_owned(),
             alias: None,
@@ -1408,6 +1403,7 @@ fn default_plan() -> QueryPlan {
         offset: None,
         joins: None,
         ctes: None,
+        set_operation: None,
     }
 }
 
@@ -1438,6 +1434,9 @@ mod tests {
             offset: None,
             joins: None,
             ctes: None,
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,
         }
     }
 
@@ -1618,6 +1617,9 @@ mod tests {
             offset: None,
             joins: None,
             ctes: None,
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,
         };
         let client = MockLlmClient::success(plan);
         let mut stream = client

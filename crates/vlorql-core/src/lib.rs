@@ -21,6 +21,7 @@
 pub mod cache;
 pub mod compile;
 pub mod errors;
+pub(crate) mod fix;
 pub mod function;
 pub mod observability;
 pub mod optimizer;

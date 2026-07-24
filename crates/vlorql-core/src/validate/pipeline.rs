@@ -4,6 +4,7 @@ use super::dialect::DialectValidator;
 use super::operand::OperandValidator;
 use super::schema::validate_schema;
 use crate::errors::{ValidationErrors, VlorQLError};
+use crate::fix;
 use crate::optimizer::QueryOptimizer;
 use crate::policy::PolicyEngine;
 use crate::schema::{ArcSchemaSnapshot, DialectProfile, Predicate, QueryPlan, SchemaSnapshot};
@@ -26,7 +27,7 @@ use std::sync::Arc;
 ///     from: FromClause { table: "users".to_owned(), alias: None },
 ///     r#where: None, group_by: None, having: None,
 ///     order_by: None, limit: None, offset: None,
-///     joins: None, ctes: None,
+///     joins: None, ctes: None, distinct: false, distinct_on: None, set_operation: None,
 /// };
 /// let validated = ValidatedPlan(Arc::new(plan));
 /// assert_eq!(validated.as_plan().from.table, "users");
@@ -75,7 +76,7 @@ impl Deref for ValidatedPlan {
 ///     from: FromClause { table: "users".to_owned(), alias: None },
 ///     r#where: None, group_by: None, having: None,
 ///     order_by: None, limit: None, offset: None,
-///     joins: None, ctes: None,
+///     joins: None, ctes: None, distinct: false, distinct_on: None, set_operation: None,
 /// };
 /// let validated = ValidatedPlan(Arc::new(plan));
 /// let optimized = OptimizedPlan::from(validated);
@@ -149,7 +150,7 @@ impl Deref for OptimizedPlan {
 ///     from: FromClause { table: "users".to_owned(), alias: None },
 ///     r#where: None, group_by: None, having: None,
 ///     order_by: None, limit: None, offset: None,
-///     joins: None, ctes: None,
+///     joins: None, ctes: None, distinct: false, distinct_on: None, set_operation: None,
 /// };
 /// assert!(pipeline.validate(&plan).is_ok());
 /// ```
@@ -189,18 +190,24 @@ impl ValidationPipeline {
     /// injected into the plan's `WHERE` clause so they are enforced
     /// at the SQL level.
     pub fn validate(&self, plan: &QueryPlan) -> Result<ValidatedPlan, ValidationErrors> {
+        // Clone the plan early so we can apply schema-aware fixes before
+        // validation.  The fixer repairs common LLM mistakes (missing joins,
+        // nested aggregates, broken GROUP BY) using the real schema metadata.
+        let mut plan = plan.clone();
+        let _ = fix::schema_aware_fix(&mut plan, &self.schema);
+
         let mut errors = Vec::new();
 
-        if let Err(stage_errors) = self.validate_schema(plan) {
+        if let Err(stage_errors) = self.validate_schema(&plan) {
             extend_unique(&mut errors, stage_errors);
         }
-        if let Err(stage_errors) = self.policy.validate(plan, &self.schema) {
+        if let Err(stage_errors) = self.policy.validate(&plan, &self.schema) {
             extend_unique(&mut errors, stage_errors);
         }
-        if let Err(stage_errors) = OperandValidator::validate(plan, &self.schema) {
+        if let Err(stage_errors) = OperandValidator::validate(&plan, &self.schema) {
             extend_unique(&mut errors, stage_errors);
         }
-        if let Err(stage_errors) = DialectValidator::validate(plan, &self.dialect) {
+        if let Err(stage_errors) = DialectValidator::validate(&plan, &self.dialect) {
             extend_unique(&mut errors, stage_errors);
         }
 
@@ -211,7 +218,6 @@ impl ValidationPipeline {
         // Inject mandatory policy row filters into the plan's WHERE clause.
         // These are AND-ed with any existing WHERE predicate so they are
         // enforced at the SQL level and cannot be bypassed.
-        let mut plan = plan.clone();
         if let Some(row_filter) = self.policy.apply_row_filters(&plan) {
             plan.r#where = Some(match plan.r#where {
                 Some(existing) => Predicate::And {

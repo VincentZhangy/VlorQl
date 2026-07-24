@@ -7,9 +7,13 @@ pub mod snapshot;
 pub mod types;
 
 pub use dialect::{DialectProfile, DialectProfileBuilder};
-pub use expressions::{Expression, InTarget, Predicate};
+pub use expressions::{
+    Expression, InTarget, Predicate, WhenThen, WindowFrame, WindowFrameBound, WindowFrameKind,
+    WindowSpec,
+};
 pub use query_plan::{
     CommonTableExpression, FromClause, JoinClause, OrderByTerm, Projection, QueryPlan,
+    SetOperation, SetOperationClause,
 };
 pub use snapshot::{
     ArcSchemaSnapshot, ColumnSchema, ForeignKey, SchemaMetadata, SchemaSnapshot, TableSchema,
@@ -53,6 +57,9 @@ mod tests {
             offset: None,
             joins: None,
             ctes: None,
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,
         }
     }
 
@@ -209,6 +216,9 @@ mod tests {
             offset: Some(100),
             joins: None,
             ctes: None,
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,
         };
         let value = to_value(&plan).expect("plan should serialize");
         assert_eq!(value["limit"], 50);

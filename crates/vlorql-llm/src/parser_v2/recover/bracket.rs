@@ -76,6 +76,73 @@ pub fn is_balanced_object(text: &str) -> bool {
     find_outermost_json_obj(text).map_or(false, |found| found.len() == text.len())
 }
 
+/// Attempt to repair a truncated JSON string by appending missing
+/// closing braces (`}`) and brackets (`]`) based on the current
+/// brace depth.  Returns the repaired string, or the original if
+/// it is already valid JSON or cannot be repaired.
+#[must_use]
+pub fn repair_truncated_json(json: &str) -> std::borrow::Cow<'_, str> {
+    // Fast path: already valid JSON.
+    if serde_json::from_str::<serde_json::Value>(json).is_ok() {
+        return std::borrow::Cow::Borrowed(json);
+    }
+    // Only attempt repair if the input looks like the start of an object.
+    let trimmed = json.trim();
+    if !trimmed.starts_with('{') && !trimmed.starts_with('[') {
+        return std::borrow::Cow::Borrowed(json);
+    }
+    // Count brace/bracket depth, respecting strings.
+    let mut depth: i32 = 0;
+    let mut in_string = false;
+    let mut escaped = false;
+    for ch in trimmed.chars() {
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                in_string = false;
+            }
+        } else {
+            match ch {
+                '{' | '[' => depth += 1,
+                '}' | ']' => depth -= 1,
+                '"' => in_string = true,
+                _ => {}
+            }
+        }
+    }
+    if depth <= 0 {
+        return std::borrow::Cow::Borrowed(json);
+    }
+    // Append missing closing characters (last opened first).
+    let mut repaired = trimmed.to_owned();
+    // Re-scan to determine the order of missing closers.
+    let mut stack: Vec<char> = Vec::new();
+    in_string = false;
+    escaped = false;
+    for ch in trimmed.chars() {
+        if in_string {
+            if escaped { escaped = false; }
+            else if ch == '\\' { escaped = true; }
+            else if ch == '"' { in_string = false; }
+        } else {
+            match ch {
+                '{' => stack.push('}'),
+                '[' => stack.push(']'),
+                '}' | ']' => { stack.pop(); }
+                '"' => in_string = true,
+                _ => {}
+            }
+        }
+    }
+    while let Some(closer) = stack.pop() {
+        repaired.push(closer);
+    }
+    std::borrow::Cow::Owned(repaired)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

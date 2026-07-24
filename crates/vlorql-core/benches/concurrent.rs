@@ -12,11 +12,11 @@ use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_m
 use futures::future::join_all;
 use serde_json::json;
 use std::sync::Arc;
-use vlorql_core::compile::QueryBuilder;
+use vlorql_core::compile::{DialectConfig, QueryBuilder};
 use vlorql_core::policy::{PolicyConfig, PolicyEngine};
 use vlorql_core::schema::{
     ColumnSchema, ComparisonOperator, DataType, DialectProfile, Expression, FromClause,
-    IdentifierQuoting, JoinClause, JoinType, Predicate, Projection, QueryPlan, SchemaMetadata,
+    JoinClause, JoinType, Predicate, Projection, QueryPlan, SchemaMetadata,
     SchemaSnapshot, SqlDialect, TableSchema,
 };
 use vlorql_core::validate::ValidationPipeline;
@@ -182,14 +182,16 @@ fn build_query_plan() -> QueryPlan {
             },
         }]),
         ctes: None,
-    }
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,    }
 }
 
 #[derive(Clone)]
 struct Harness {
     pipeline: ValidationPipeline,
     plan: Arc<QueryPlan>,
-    dialect: SqlDialect,
+    config: DialectConfig,
 }
 
 impl Harness {
@@ -201,10 +203,15 @@ impl Harness {
         };
         let pipeline =
             ValidationPipeline::new(schema, profile, PolicyEngine::new(PolicyConfig::default()));
+        let config = match dialect {
+            SqlDialect::Postgres => DialectConfig::default_postgres(),
+            SqlDialect::Sqlite => DialectConfig::default_sqlite(),
+            SqlDialect::MySql => DialectConfig::default_mysql(),
+        };
         Self {
             pipeline,
             plan: Arc::new(build_query_plan()),
-            dialect,
+            config,
         }
     }
 
@@ -214,10 +221,9 @@ impl Harness {
             .pipeline
             .validate(&self.plan)
             .expect("plan should validate");
-        let (sql, params) =
-            QueryBuilder::new(&validated, self.dialect, IdentifierQuoting::DoubleQuote)
-                .build()
-                .expect("plan should compile");
+        let (sql, params) = QueryBuilder::new(&validated, &self.config)
+            .build()
+            .expect("plan should compile");
         (sql, params.len())
     }
 }

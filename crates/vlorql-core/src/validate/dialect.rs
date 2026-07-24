@@ -1,7 +1,10 @@
 //! Aggregating validation for controlled SQL dialect features.
 
 use crate::errors::{ValidationErrorKind, VlorQLError};
-use crate::schema::{DialectProfile, Expression, InTarget, Predicate, Projection, QueryPlan};
+use crate::schema::{
+    DialectProfile, Expression, InTarget, Predicate, Projection, QueryPlan, WindowFrame,
+    WindowFrameBound,
+};
 use serde_json::json;
 
 /// Entry points for validating controlled SQL dialect features.
@@ -98,6 +101,10 @@ impl BoundDialectValidator<'_> {
                     json!({"actual": actual, "max": max}),
                 ));
             }
+        }
+
+        if plan.distinct && !self.profile.allow_select_distinct {
+            errors.push(self.feature_disabled("select_distinct"));
         }
 
         self.validate_select_group_by(plan, errors);
@@ -237,6 +244,76 @@ impl BoundDialectValidator<'_> {
             Expression::SubQuery { query } => {
                 self.validate_inner(query, errors);
             }
+            Expression::Case {
+                operand,
+                when_thens,
+                else_result,
+            } => {
+                if let Some(op) = operand {
+                    self.validate_expression(op, errors);
+                }
+                for wt in when_thens {
+                    self.validate_expression(&wt.when, errors);
+                    self.validate_expression(&wt.then, errors);
+                }
+                if let Some(el) = else_result {
+                    self.validate_expression(el, errors);
+                }
+            }
+            Expression::WindowFunction {
+                name,
+                args,
+                distinct,
+                over,
+            } => {
+                if !self.profile.supports_window_functions {
+                    errors.push(self.feature_disabled("window_functions"));
+                }
+                let denied = self
+                    .profile
+                    .denied_functions
+                    .iter()
+                    .any(|function| function.eq_ignore_ascii_case(name));
+                let allowed = self.profile.allowed_functions.is_empty()
+                    || self
+                        .profile
+                        .allowed_functions
+                        .iter()
+                        .any(|function| function.eq_ignore_ascii_case(name));
+                if denied || !allowed {
+                    errors.push(VlorQLError::validation(
+                        ValidationErrorKind::InvalidFunction {
+                            function: name.clone(),
+                            allowed_functions: self.profile.allowed_functions.clone(),
+                        },
+                        json!({
+                            "function": name,
+                            "denied": denied,
+                            "allowed_functions": self.profile.allowed_functions,
+                        }),
+                    ));
+                }
+                if *distinct && !self.profile.allow_distinct {
+                    errors.push(self.feature_disabled("distinct"));
+                }
+                for argument in args {
+                    self.validate_expression(argument, errors);
+                }
+                // Validate expressions inside the window spec.
+                if let Some(partition_by) = &over.partition_by {
+                    for expr in partition_by {
+                        self.validate_expression(expr, errors);
+                    }
+                }
+                if let Some(order_by) = &over.order_by {
+                    for term in order_by {
+                        self.validate_expression(&term.expr, errors);
+                    }
+                }
+                if let Some(frame) = &over.frame {
+                    self.validate_window_frame_bounds(frame, errors);
+                }
+            }
         }
     }
 
@@ -289,6 +366,41 @@ impl BoundDialectValidator<'_> {
                 "dialect": self.profile.dialect,
             }),
         )
+    }
+
+    fn validate_window_frame_bounds(
+        &self,
+        frame: &WindowFrame,
+        errors: &mut Vec<VlorQLError>,
+    ) {
+        // Validate frame boundary expressions (PRECEDING / FOLLOWING values).
+        Self::validate_frame_bound(&frame.start, errors);
+        if let Some(end) = &frame.end {
+            Self::validate_frame_bound(end, errors);
+        }
+    }
+
+    fn validate_frame_bound(bound: &WindowFrameBound, errors: &mut Vec<VlorQLError>) {
+        match bound {
+            WindowFrameBound::Preceding(expr) | WindowFrameBound::Following(expr) => {
+                // The expression must be a literal or column ref (no subqueries).
+                if matches!(expr.as_ref(), Expression::SubQuery { .. }) {
+                    errors.push(VlorQLError::validation(
+                        ValidationErrorKind::TypeMismatch {
+                            expected: "literal or column".to_owned(),
+                            found: "subquery".to_owned(),
+                            expr: "window_frame_bound".to_owned(),
+                        },
+                        json!({
+                            "expected": "literal or column",
+                            "found": "subquery",
+                            "bound": format!("{bound:?}"),
+                        }),
+                    ));
+                }
+            }
+            _ => {}
+        }
     }
 }
 

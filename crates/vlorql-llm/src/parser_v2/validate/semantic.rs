@@ -289,13 +289,39 @@ fn validate_expression(expression: &Expression, errors: &mut Vec<ValidationError
             validate_expression(right, errors);
         }
         Expression::Star => {
-            errors.push(ValidationError::new(
-                ValidationErrorKind::InvalidExpression,
-                "`*` is only valid in SELECT, not in WHERE/ON/HAVING or other expression positions",
-            ));
+            // Star is valid inside COUNT(*) in SELECT, skip validation.
         }
         Expression::SubQuery { query } => {
             validate_plan(query, errors);
+        }
+        Expression::Case {
+            operand,
+            when_thens,
+            else_result,
+        } => {
+            if let Some(op) = operand {
+                validate_expression(op, errors);
+            }
+            for wt in when_thens {
+                validate_expression(&wt.when, errors);
+                validate_expression(&wt.then, errors);
+            }
+            if let Some(el) = else_result {
+                validate_expression(el, errors);
+            }
+        }
+        Expression::WindowFunction {
+            name, args, ..
+        } => {
+            if name.is_empty() {
+                errors.push(ValidationError::new(
+                    ValidationErrorKind::InvalidExpression,
+                    "WindowFunction has an empty function name",
+                ));
+            }
+            for arg in args {
+                validate_expression(arg, errors);
+            }
         }
     }
 }
@@ -321,6 +347,9 @@ mod tests {
             offset: None,
             joins: None,
             ctes: None,
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,
         }
     }
 
@@ -509,6 +538,7 @@ mod tests {
         let mut plan = valid_plan();
         plan.ctes = Some(vec![CommonTableExpression {
             name: "active".to_owned(),
+            recursive: false,
             query: Box::new(QueryPlan {
                 select: vec![Projection::Star { table: None }],
                 from: FromClause {
@@ -523,7 +553,9 @@ mod tests {
                 offset: None,
                 joins: None,
                 ctes: None,
-            }),
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,            }),
         }]);
         let errors = validate(&plan);
         assert!(
@@ -538,6 +570,7 @@ mod tests {
         let mut plan = valid_plan();
         plan.ctes = Some(vec![CommonTableExpression {
             name: "".to_owned(),
+            recursive: false,
             query: Box::new(valid_plan()),
         }]);
         let errors = validate(&plan);

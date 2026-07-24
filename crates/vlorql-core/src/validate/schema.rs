@@ -2,7 +2,9 @@
 
 use crate::errors::{SchemaErrorKind, VlorQLError};
 use crate::query::{ColumnReference, QueryScope, collect_plan_references};
-use crate::schema::{Expression, InTarget, Predicate, Projection, QueryPlan, SchemaSnapshot};
+use crate::schema::{
+    Expression, InTarget, JoinType, Predicate, Projection, QueryPlan, SchemaSnapshot,
+};
 use serde_json::json;
 use std::collections::HashSet;
 use tracing::debug;
@@ -28,6 +30,18 @@ fn validate_plan_with_outer(
     errors: &mut Vec<VlorQLError>,
     outer_scope: Option<&QueryScope>,
 ) {
+    // DISTINCT + GROUP BY simultaneously is semantically ambiguous:
+    // it is unclear whether DISTINCT is applied before or after
+    // aggregation.  Reject this combination to force clarity.
+    if plan.distinct && plan.group_by.is_some() && plan.group_by.as_ref().is_some_and(|g| !g.is_empty()) {
+        errors.push(VlorQLError::validation(
+            crate::errors::ValidationErrorKind::AggregationMismatch {
+                message: "DISTINCT and GROUP BY cannot be used together: the combination is semantically ambiguous".to_owned(),
+            },
+            serde_json::json!({"distinct": true, "group_by": plan.group_by}),
+        ));
+    }
+
     if let Some(ctes) = &plan.ctes {
         for cte in ctes {
             validate_plan_with_outer(&cte.query, schema, errors, None);
@@ -231,7 +245,12 @@ fn validate_subqueries_in_plan(
     }
     if let Some(joins) = &plan.joins {
         for join in joins {
-            validate_subqueries_in_predicate(&join.on, schema, errors, outer_scope);
+            // CROSS JOIN's ON condition is ignored by the compiler; don't
+            // validate subqueries inside it either (keeps validation and
+            // compilation consistent).
+            if join.join_type != JoinType::Cross {
+                validate_subqueries_in_predicate(&join.on, schema, errors, outer_scope);
+            }
         }
     }
 }
@@ -311,4 +330,148 @@ fn table_not_found_error(table: &str, schema: &SchemaSnapshot) -> VlorQLError {
                 .collect::<Vec<_>>(),
         }),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::schema::{
+        ColumnSchema, ComparisonOperator, DataType, FromClause, JoinClause, JoinType, Projection,
+        SchemaMetadata, TableSchema,
+    };
+
+    fn column(name: &str) -> ColumnSchema {
+        ColumnSchema {
+            name: name.to_owned(),
+            data_type: DataType::Int,
+            nullable: false,
+            description: None,
+            is_primary_key: false,
+            foreign_key: None,
+        }
+    }
+
+    fn two_table_schema() -> SchemaSnapshot {
+        SchemaSnapshot::new(
+            vec![
+                TableSchema {
+                    name: "users".to_owned(),
+                    columns: vec![column("id"), column("name")],
+                    description: None,
+                    primary_key: Some(vec!["id".to_owned()]),
+                },
+                TableSchema {
+                    name: "products".to_owned(),
+                    columns: vec![column("id"), column("name")],
+                    description: None,
+                    primary_key: Some(vec!["id".to_owned()]),
+                },
+            ],
+            SchemaMetadata::default(),
+        )
+    }
+
+    /// A CROSS JOIN whose `on` references a hallucinated column must still
+    /// pass schema validation: the compiler ignores the condition, so the
+    /// validator must not flag columns inside it.
+    #[test]
+    fn cross_join_with_bogus_on_condition_passes_validation() {
+        let schema = two_table_schema();
+        let plan = QueryPlan {
+            select: vec![
+                Projection::Column {
+                    table: Some("users".to_owned()),
+                    column: "name".to_owned(),
+                    alias: None,
+                },
+                Projection::Column {
+                    table: Some("products".to_owned()),
+                    column: "name".to_owned(),
+                    alias: None,
+                },
+            ],
+            distinct: false,
+            distinct_on: None,
+            from: FromClause {
+                table: "users".to_owned(),
+                alias: None,
+            },
+            r#where: None,
+            group_by: None,
+            having: None,
+            order_by: None,
+            limit: None,
+            offset: None,
+            joins: Some(vec![JoinClause {
+                join_type: JoinType::Cross,
+                right_table: FromClause {
+                    table: "products".to_owned(),
+                    alias: None,
+                },
+                // Hallucinated `users.product_id` — invalid, but must be ignored.
+                on: Predicate::Comparison {
+                    left: Expression::ColumnRef {
+                        table: Some("products".to_owned()),
+                        column: "id".to_owned(),
+                    },
+                    op: ComparisonOperator::Eq,
+                    right: Expression::ColumnRef {
+                        table: Some("users".to_owned()),
+                        column: "product_id".to_owned(),
+                    },
+                },
+            }]),
+            ctes: None,
+            set_operation: None,
+        };
+
+        assert!(validate_schema(&plan, &schema).is_ok());
+    }
+
+    /// A non-CROSS join's `on` is still validated: a hallucinated column fails.
+    #[test]
+    fn inner_join_with_bogus_on_condition_fails_validation() {
+        let schema = two_table_schema();
+        let plan = QueryPlan {
+            select: vec![Projection::Column {
+                table: Some("users".to_owned()),
+                column: "name".to_owned(),
+                alias: None,
+            }],
+            distinct: false,
+            distinct_on: None,
+            from: FromClause {
+                table: "users".to_owned(),
+                alias: None,
+            },
+            r#where: None,
+            group_by: None,
+            having: None,
+            order_by: None,
+            limit: None,
+            offset: None,
+            joins: Some(vec![JoinClause {
+                join_type: JoinType::Inner,
+                right_table: FromClause {
+                    table: "products".to_owned(),
+                    alias: None,
+                },
+                on: Predicate::Comparison {
+                    left: Expression::ColumnRef {
+                        table: Some("products".to_owned()),
+                        column: "id".to_owned(),
+                    },
+                    op: ComparisonOperator::Eq,
+                    right: Expression::ColumnRef {
+                        table: Some("users".to_owned()),
+                        column: "product_id".to_owned(),
+                    },
+                },
+            }]),
+            ctes: None,
+            set_operation: None,
+        };
+
+        assert!(validate_schema(&plan, &schema).is_err());
+    }
 }

@@ -56,6 +56,8 @@ pub struct DialectProfile {
     pub max_group_by_columns: Option<usize>,
     /// Whether `DISTINCT` is permitted inside function calls.
     pub allow_distinct: bool,
+    /// Whether `SELECT DISTINCT` (whole-query dedup) is allowed.
+    pub allow_select_distinct: bool,
     /// Whether `OFFSET n` is allowed.
     pub supports_offset: bool,
     /// Whether `FETCH FIRST n ROWS ONLY` is allowed.
@@ -82,6 +84,7 @@ impl Default for DialectProfile {
             denied_functions: Vec::new(),
             max_group_by_columns: None,
             allow_distinct: true,
+            allow_select_distinct: true,
             supports_offset: true,
             supports_fetch: true,
         }

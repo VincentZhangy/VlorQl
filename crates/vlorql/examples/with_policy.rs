@@ -125,7 +125,9 @@ fn allowed_plan() -> QueryPlan {
         offset: None,
         joins: None,
         ctes: None,
-    }
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,    }
 }
 
 /// A `SELECT email FROM users` plan — should be denied.
@@ -148,7 +150,9 @@ fn denied_plan() -> QueryPlan {
         offset: None,
         joins: None,
         ctes: None,
-    }
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,    }
 }
 
 /// Runs a single query scenario: builds a facade with the supplied mock

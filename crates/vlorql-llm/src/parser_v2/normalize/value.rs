@@ -74,6 +74,28 @@ fn normalize_impl(val: &mut Value) -> bool {
                     }
                 }
             }
+
+            // Fix: LLM sometimes emits `data_type: "null"` with a non-null value.
+            // Infer the correct data type from the `value` field.
+            if let Some(dt_val) = map.get("data_type") {
+                if dt_val.as_str() == Some("null") {
+                    if let Some(val_field) = map.get("value") {
+                        let inferred = match val_field {
+                            Value::Null => None,                    // correct already
+                            Value::Bool(_) => Some("boolean"),
+                            Value::Number(n) => {
+                                if n.is_f64() { Some("float") } else { Some("int") }
+                            }
+                            Value::String(_) => Some("string"),
+                            Value::Array(_) | Value::Object(_) => None,
+                        };
+                        if let Some(inferred_dt) = inferred {
+                            map.insert("data_type".to_owned(), Value::String(inferred_dt.to_owned()));
+                            changed = true;
+                        }
+                    }
+                }
+            }
             // Recurse into children.
             let keys: Vec<String> = map.keys().cloned().collect();
             for key in &keys {
@@ -217,6 +239,56 @@ mod tests {
         assert_eq!(
             val[1].get("data_type").and_then(|v| v.as_str()),
             Some("string")
+        );
+    }
+
+    #[test]
+    fn infers_string_type_from_null_data_type() {
+        let mut val = json!({"type": "literal", "value": "done", "data_type": "null"});
+        assert!(normalize(&mut val));
+        assert_eq!(
+            val.get("data_type").and_then(|v| v.as_str()),
+            Some("string")
+        );
+    }
+
+    #[test]
+    fn infers_int_type_from_null_data_type() {
+        let mut val = json!({"type": "literal", "value": 42, "data_type": "null"});
+        assert!(normalize(&mut val));
+        assert_eq!(
+            val.get("data_type").and_then(|v| v.as_str()),
+            Some("int")
+        );
+    }
+
+    #[test]
+    fn infers_float_type_from_null_data_type() {
+        let mut val = json!({"type": "literal", "value": 3.14, "data_type": "null"});
+        assert!(normalize(&mut val));
+        assert_eq!(
+            val.get("data_type").and_then(|v| v.as_str()),
+            Some("float")
+        );
+    }
+
+    #[test]
+    fn infers_boolean_type_from_null_data_type() {
+        let mut val = json!({"type": "literal", "value": true, "data_type": "null"});
+        assert!(normalize(&mut val));
+        assert_eq!(
+            val.get("data_type").and_then(|v| v.as_str()),
+            Some("boolean")
+        );
+    }
+
+    #[test]
+    fn keeps_null_data_type_when_value_is_null() {
+        let mut val = json!({"type": "literal", "value": null, "data_type": "null"});
+        assert!(!normalize(&mut val));
+        assert_eq!(
+            val.get("data_type").and_then(|v| v.as_str()),
+            Some("null")
         );
     }
 }

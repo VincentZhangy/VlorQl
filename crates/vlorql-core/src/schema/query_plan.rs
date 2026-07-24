@@ -77,8 +77,35 @@ pub struct OrderByTerm {
 pub struct CommonTableExpression {
     /// The CTE name exposed to the outer query.
     pub name: String,
+    /// Whether this CTE is recursive (`WITH RECURSIVE`).
+    #[serde(default)]
+    pub recursive: bool,
     /// The query that produces the CTE's rows.
     pub query: Box<QueryPlan>,
+}
+
+/// The type of set operation between two queries.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum SetOperation {
+    /// `UNION ALL` — concatenate results (no dedup).
+    UnionAll,
+    /// `UNION` — concatenate and deduplicate results.
+    Union,
+    /// `INTERSECT` — keep rows present in both results.
+    Intersect,
+    /// `EXCEPT` — keep rows present in the first result but not the second.
+    Except,
+}
+
+/// A set operation (UNION / INTERSECT / EXCEPT) that combines this query with another.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SetOperationClause {
+    /// The set operation type.
+    pub operation: SetOperation,
+    /// The right-hand side query plan.
+    pub right: Box<QueryPlan>,
 }
 
 /// A complete structured query plan.
@@ -119,6 +146,9 @@ pub struct CommonTableExpression {
 ///     offset: None,
 ///     joins: None,
 ///     ctes: None,
+///     distinct: false,
+///     distinct_on: None,
+///     set_operation: None,
 /// };
 /// assert_eq!(plan.select.len(), 1);
 /// assert!(plan.r#where.is_some());
@@ -128,6 +158,12 @@ pub struct CommonTableExpression {
 pub struct QueryPlan {
     /// The projection list.
     pub select: Vec<Projection>,
+    /// Whether to emit `SELECT DISTINCT` (de-duplicate rows across the entire result).
+    #[serde(default)]
+    pub distinct: bool,
+    /// PostgreSQL `SELECT DISTINCT ON (exprs)` — only effective when `distinct` is true.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub distinct_on: Option<Vec<Expression>>,
     /// The primary source table.
     pub from: FromClause,
     /// Optional `WHERE` predicate.
@@ -154,4 +190,9 @@ pub struct QueryPlan {
     /// Optional list of `WITH` CTEs.
     #[serde(default)]
     pub ctes: Option<Vec<CommonTableExpression>>,
+    /// Optional set operation combining this query with another (e.g. `UNION ALL`, `INTERSECT`).
+    /// When set, the current query is the left-hand side and the operation/right describe the
+    /// right-hand side.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub set_operation: Option<SetOperationClause>,
 }

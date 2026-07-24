@@ -135,6 +135,16 @@ pub fn parse_binary_op(s: &str) -> Result<BinaryOperator, BuildError> {
         "mul" => Ok(Mul),
         "div" => Ok(Div),
         "mod" => Ok(Mod),
+        "and" => Ok(And),
+        "or" => Ok(Or),
+        "eq" => Ok(Eq),
+        "neq" => Ok(Neq),
+        "gt" => Ok(Gt),
+        "lt" => Ok(Lt),
+        "gte" => Ok(Gte),
+        "lte" => Ok(Lte),
+        "like" => Ok(Like),
+        "ilike" => Ok(ILike),
         _ => Err(BuildError::new(
             "op",
             format!("unknown binary operator `{s}`"),
@@ -215,7 +225,20 @@ fn build_literal_expr(val: &Value) -> Result<Expression, BuildError> {
 /// Build a literal expression from a JSON object with `value` and `data_type`.
 fn build_literal_from_obj(obj: &serde_json::Map<String, Value>) -> Result<Expression, BuildError> {
     let value = obj.get("value").cloned().unwrap_or(Value::Null);
-    let data_type = match obj.get("data_type").and_then(|v| v.as_str()) {
+    let dt_str = obj.get("data_type").and_then(|v| v.as_str()).map(|s| s.to_owned());
+    let data_type = match dt_str.as_deref() {
+        Some("null") => {
+            // Small local LLMs (llama3.2, etc.) frequently set data_type to "null"
+            // while providing a non-null value.  Infer the correct type from the value.
+            match &value {
+                Value::Null => DataType::Null,
+                Value::Bool(_) => DataType::Boolean,
+                Value::Number(n) if n.is_f64() => DataType::Float,
+                Value::Number(_) => DataType::Int,
+                Value::String(_) => DataType::String,
+                _ => DataType::Null,
+            }
+        }
         Some(dt) => parse_data_type(dt)?,
         None => DataType::Null,
     };
@@ -261,6 +284,19 @@ pub fn build_expression(val: &Value) -> Result<Expression, BuildError> {
     };
 
     match type_str {
+        // `expr` is the `Projection` wrapper, only valid in `select`. LLMs
+        // frequently emit it in bare Expression positions (order_by, having,
+        // comparison operands, group_by). Unwrap the inner expression so the
+        // plan still builds instead of failing on an "unknown variant".
+        "expr" | "Expr" => {
+            let inner = obj
+                .get("expression")
+                .or_else(|| obj.get("expr"))
+                .ok_or_else(|| {
+                    BuildError::new("expression", "`expr` wrapper missing `expression` field")
+                })?;
+            build_expression(inner).map_err(|e| e.at("expression"))
+        }
         "column_ref" => {
             let column = req_str(obj, "column", "")?.to_owned();
             let table = opt_str(obj, "table").map(|s| s.to_owned());
@@ -316,6 +352,71 @@ pub fn build_expression(val: &Value) -> Result<Expression, BuildError> {
             let query = super::query_builder::build_plan_from_obj(sub)?;
             Ok(Expression::SubQuery {
                 query: Box::new(query),
+            })
+        }
+        "case" => {
+            // CASE WHEN expression
+            let operand = match obj.get("operand") {
+                Some(val) if !val.is_null() => {
+                    Some(Box::new(build_expression(val).map_err(|e| e.at("operand"))?))
+                }
+                _ => None,
+            };
+            let when_thens_arr = req_arr(
+                obj.get("when_thens")
+                    .ok_or_else(|| BuildError::new("", "missing `when_thens` field on case"))?,
+                "when_thens",
+            )?;
+            let mut when_thens = Vec::new();
+            for (i, item) in when_thens_arr.iter().enumerate() {
+                let item_obj = req_obj(item, &format!("when_thens[{i}]"))?;
+                let when = build_expression(
+                    item_obj
+                        .get("when")
+                        .ok_or_else(|| BuildError::new(&format!("when_thens[{i}]"), "missing `when` field"))?,
+                )
+                .map_err(|e| e.at(&format!("when_thens[{i}].when")))?;
+                let then = build_expression(
+                    item_obj
+                        .get("then")
+                        .ok_or_else(|| BuildError::new(&format!("when_thens[{i}]"), "missing `then` field"))?,
+                )
+                .map_err(|e| e.at(&format!("when_thens[{i}].then")))?;
+                when_thens.push(vlorql_core::schema::WhenThen { when, then });
+            }
+            let else_result = match obj.get("else_result") {
+                Some(val) if !val.is_null() => {
+                    Some(Box::new(build_expression(val).map_err(|e| e.at("else_result"))?))
+                }
+                _ => None,
+            };
+            Ok(Expression::Case {
+                operand,
+                when_thens,
+                else_result,
+            })
+        }
+        // `comparison` is a Predicate type, not an Expression.  LLMs often
+        // emit it inside CASE WHEN clauses.  Convert to BinaryOp here so
+        // the expression builder still succeeds even if normalization did
+        // not catch it (e.g. when plans come from serde directly).
+        "comparison" | "Comparison" => {
+            let left_val = obj
+                .get("left")
+                .ok_or_else(|| BuildError::new("", "missing `left` field on comparison"))?;
+            let left = build_expression(left_val).map_err(|e| e.at("left"))?;
+            let op_str = req_str(obj, "op", "")?;
+            // Map comparison operators to binary operators.
+            // Both share `eq`, `neq`, `gt`, `gte`, `lt`, `lte`.
+            let op = parse_binary_op(op_str)?;
+            let right_val = obj
+                .get("right")
+                .ok_or_else(|| BuildError::new("", "missing `right` field on comparison"))?;
+            let right = build_expression(right_val).map_err(|e| e.at("right"))?;
+            Ok(Expression::BinaryOp {
+                left: Box::new(left),
+                op,
+                right: Box::new(right),
             })
         }
         _ => {

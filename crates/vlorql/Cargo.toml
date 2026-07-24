@@ -3,6 +3,9 @@ name = "vlorql"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+documentation.workspace = true
+homepage.workspace = true
+repository.workspace = true
 description = "High-level SQL query optimization and LLM-powered natural language querying library"
 
 [package.metadata.husky.hooks]
@@ -12,8 +15,8 @@ pre-commit = "cargo fmt --all -- --check && cargo clippy --workspace --all-targe
 cargo-husky = "1"
 
 [dependencies]
-vlorql-core = { path = "../vlorql-core", version = "0.2.0" }
-vlorql-llm = { path = "../vlorql-llm", version = "0.2.0" }
+vlorql-core = { path = "../vlorql-core", version = "0.2.1" }
+vlorql-llm = { path = "../vlorql-llm", version = "0.2.1" }
 tracing.workspace = true
 serde_json.workspace = true
 tokio.workspace = true

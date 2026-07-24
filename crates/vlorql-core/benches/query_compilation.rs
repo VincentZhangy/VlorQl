@@ -15,10 +15,10 @@
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use serde_json::json;
 use std::sync::Arc;
-use vlorql_core::compile::QueryBuilder;
+use vlorql_core::compile::{DialectConfig, QueryBuilder};
 use vlorql_core::schema::{
     BinaryOperator, CommonTableExpression, ComparisonOperator, DataType, Expression, FromClause,
-    IdentifierQuoting, InTarget, JoinClause, JoinType, OrderByTerm, Predicate, Projection,
+    InTarget, JoinClause, JoinType, OrderByTerm, Predicate, Projection,
     QueryPlan, SqlDialect,
 };
 use vlorql_core::validate::ValidatedPlan;
@@ -83,7 +83,9 @@ fn leaf_cte() -> QueryPlan {
         offset: None,
         joins: None,
         ctes: None,
-    }
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,    }
 }
 
 /// Builds a CTE that joins `orders` and `customers`.
@@ -137,8 +139,12 @@ fn orders_with_customers_cte() -> QueryPlan {
         }]),
         ctes: Some(vec![CommonTableExpression {
             name: "paid_orders".to_owned(),
+            recursive: false,
             query: Box::new(leaf_cte()),
         }]),
+        distinct: false,
+        distinct_on: None,
+        set_operation: None,
     }
 }
 
@@ -277,10 +283,12 @@ fn build_complex_plan() -> ValidatedPlan {
         ctes: Some(vec![
             CommonTableExpression {
                 name: "regional_orders".to_owned(),
+                recursive: false,
                 query: Box::new(orders_with_customers_cte()),
             },
             CommonTableExpression {
                 name: "high_value".to_owned(),
+                recursive: false,
                 query: Box::new(QueryPlan {
                     select: vec![Projection::Column {
                         table: Some("orders".to_owned()),
@@ -303,10 +311,13 @@ fn build_complex_plan() -> ValidatedPlan {
                     offset: None,
                     joins: None,
                     ctes: None,
-                }),
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,                }),
             },
             CommonTableExpression {
                 name: "active_customers".to_owned(),
+                recursive: false,
                 query: Box::new(QueryPlan {
                     select: vec![Projection::Column {
                         table: Some("customers".to_owned()),
@@ -327,9 +338,15 @@ fn build_complex_plan() -> ValidatedPlan {
                     offset: None,
                     joins: None,
                     ctes: None,
+                    distinct: false,
+                    distinct_on: None,
+                    set_operation: None,
                 }),
             },
         ]),
+        distinct: false,
+        distinct_on: None,
+        set_operation: None,
     };
 
     ValidatedPlan(Arc::new(plan))
@@ -339,21 +356,19 @@ fn bench_query_build(c: &mut Criterion) {
     let plan = build_complex_plan();
     let mut group = c.benchmark_group("query_build");
 
-    for dialect in [SqlDialect::Postgres, SqlDialect::Sqlite] {
-        let label = match dialect {
-            SqlDialect::Postgres => "postgres",
-            SqlDialect::Sqlite => "sqlite",
-            SqlDialect::MySql => "mysql",
+    for name in ["postgres", "sqlite"] {
+        let config = match name {
+            "postgres" => DialectConfig::default_postgres(),
+            _ => DialectConfig::default_sqlite(),
         };
         group.bench_with_input(
-            BenchmarkId::from_parameter(label),
-            &dialect,
-            |bencher, &dialect| {
+            BenchmarkId::from_parameter(name),
+            &config,
+            |bencher, config| {
                 bencher.iter(|| {
                     let result = QueryBuilder::new(
                         criterion::black_box(&plan),
-                        dialect,
-                        IdentifierQuoting::DoubleQuote,
+                        config,
                     )
                     .build();
                     criterion::black_box(result.expect("complex plan should compile"))

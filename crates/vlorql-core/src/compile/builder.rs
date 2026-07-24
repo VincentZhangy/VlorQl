@@ -4,11 +4,13 @@
 /// "no limit" when only OFFSET is specified (LIMIT offset, <unlimited>).
 const MYSQL_UNLIMITED_LIMIT: u64 = 18446744073709551615;
 
+use super::dialect_config::DialectConfig;
 use super::types::Parameter;
 use crate::errors::{CompilationErrorKind, VlorQLError};
 use crate::schema::{
-    BinaryOperator, ComparisonOperator, DataType, Expression, FromClause, IdentifierQuoting,
-    InTarget, JoinType, Predicate, Projection, QueryPlan, SqlDialect,
+    BinaryOperator, ComparisonOperator, DataType, Expression, FromClause,
+    InTarget, JoinType, Predicate, Projection, QueryPlan, SetOperation, SetOperationClause,
+    SqlDialect, WindowFrame, WindowFrameBound, WindowFrameKind, WindowSpec,
 };
 use crate::validate::ValidatedPlan;
 use serde_json::{Value, json};
@@ -19,27 +21,42 @@ use std::fmt::Write;
 /// Builds SQL while preserving the exact textual order of bind parameters.
 pub struct QueryBuilder<'a> {
     plan: &'a ValidatedPlan,
+    config: &'a DialectConfig,
     dialect: SqlDialect,
     parameters: Vec<Parameter>,
-    quote_style: IdentifierQuoting,
     /// Stack of alias maps for each query level (outermost first).
     /// Each map resolves table names (and aliases) to effective aliases.
     alias_stack: Vec<HashMap<String, String>>,
+    /// Deduplication cache: (value_json_string, data_type) → parameter index (0-based).
+    /// Used so the SAME literal expression always produces the SAME placeholder,
+    /// which PostgreSQL requires for GROUP BY / ORDER BY matching.
+    param_cache: HashMap<(String, DataType), usize>,
+    /// When true, numeric literals are rendered with explicit CAST so that
+    /// PostgreSQL can infer their types (required in recursive CTE contexts
+    /// where parameterized literals are inferred as `text`).
+    in_cte: bool,
 }
 
 impl<'a> QueryBuilder<'a> {
-    /// Creates a builder for one validated plan and output dialect.
+    /// Creates a builder for one validated plan and dialect config.
     pub fn new(
         plan: &'a ValidatedPlan,
-        dialect: SqlDialect,
-        quote_style: IdentifierQuoting,
+        config: &'a DialectConfig,
     ) -> Self {
+        let dialect = match config.name.to_lowercase().as_str() {
+            "postgres" | "postgresql" => SqlDialect::Postgres,
+            "sqlite" => SqlDialect::Sqlite,
+            "mysql" | "my_sql" => SqlDialect::MySql,
+            _ => SqlDialect::Postgres,
+        };
         let mut builder = Self {
             plan,
+            config,
             dialect,
             parameters: Vec::new(),
-            quote_style,
             alias_stack: Vec::new(),
+            param_cache: HashMap::new(),
+            in_cte: false,
         };
         builder.push_alias_scope(plan.as_plan());
         builder
@@ -58,7 +75,8 @@ impl<'a> QueryBuilder<'a> {
 
     fn collect_aliases(from: &FromClause, map: &mut HashMap<String, String>) {
         let effective = from.alias.clone().unwrap_or_else(|| from.table.clone());
-        map.insert(from.table.clone(), effective.clone());
+        // 保留首次注册的表名→别名映射，避免自连接中后注册的 JOIN 覆盖 FROM 的映射
+        map.entry(from.table.clone()).or_insert_with(|| effective.clone());
         if let Some(ref alias) = from.alias {
             map.insert(alias.clone(), effective);
         }
@@ -97,7 +115,21 @@ impl<'a> QueryBuilder<'a> {
     ) -> Result<(), VlorQLError> {
         match expression {
             Expression::Literal { value, data_type } => {
-                buf.push_str(&self.add_parameter(value.clone(), *data_type));
+                let placeholder = self.add_parameter(value.clone(), *data_type);
+                // In CTE contexts, PostgreSQL cannot infer the type of
+                // parameterized literals — add explicit CAST so the type
+                // is known (e.g. `CAST($1 AS integer)`).
+                if self.in_cte && self.dialect == SqlDialect::Postgres {
+                    match data_type {
+                        DataType::Int => write!(buf, "CAST({placeholder} AS INTEGER)"),
+                        DataType::Float => write!(buf, "CAST({placeholder} AS DOUBLE PRECISION)"),
+                        DataType::Boolean => write!(buf, "CAST({placeholder} AS BOOLEAN)"),
+                        _ => write!(buf, "{placeholder}"),
+                    }
+                    .map_err(formatting_error)?;
+                } else {
+                    buf.push_str(&placeholder);
+                }
                 Ok(())
             }
             Expression::ColumnRef { table, column } => {
@@ -140,6 +172,51 @@ impl<'a> QueryBuilder<'a> {
                 buf.push('(');
                 self.build_query(query, buf)?;
                 buf.push(')');
+                Ok(())
+            }
+            Expression::Case {
+                operand,
+                when_thens,
+                else_result,
+            } => {
+                buf.push_str("CASE");
+                if let Some(op) = operand {
+                    buf.push(' ');
+                    self.render_expression_to(op, buf)?;
+                }
+                for wt in when_thens {
+                    buf.push_str(" WHEN ");
+                    self.render_expression_to(&wt.when, buf)?;
+                    buf.push_str(" THEN ");
+                    self.render_expression_to(&wt.then, buf)?;
+                }
+                if let Some(el) = else_result {
+                    buf.push_str(" ELSE ");
+                    self.render_expression_to(el, buf)?;
+                }
+                buf.push_str(" END");
+                Ok(())
+            }
+            Expression::WindowFunction {
+                name,
+                args,
+                distinct,
+                over,
+            } => {
+                let function = self.render_function_name(name)?;
+                buf.push_str(&function);
+                buf.push('(');
+                if *distinct {
+                    buf.push_str("DISTINCT ");
+                }
+                for (i, argument) in args.iter().enumerate() {
+                    if i > 0 {
+                        buf.push_str(", ");
+                    }
+                    self.render_expression_to(argument, buf)?;
+                }
+                buf.push(')');
+                self.render_window_spec(over, buf)?;
                 Ok(())
             }
         }
@@ -243,12 +320,23 @@ impl<'a> QueryBuilder<'a> {
     }
 
     /// Adds a parameter and returns the placeholder for the selected dialect.
+    /// Deduplicates parameters: the same (value, data_type) pair always produces
+    /// the same placeholder index, which PostgreSQL requires for GROUP BY matching.
     pub fn add_parameter(&mut self, value: Value, data_type: DataType) -> String {
-        self.parameters.push(Parameter { value, data_type });
-        match self.dialect {
-            SqlDialect::Postgres => format!("${}", self.parameters.len()),
-            SqlDialect::Sqlite | SqlDialect::MySql => "?".to_owned(),
+        let val_str = serde_json::to_string(&value).unwrap_or_default();
+        let key = (val_str, data_type);
+
+        if let Some(&idx) = self.param_cache.get(&key) {
+            if self.config.placeholder.contains("{index}") {
+                return self.config.placeholder_str(idx + 1);
+            }
+            return self.config.placeholder_str(0);
         }
+
+        let idx = self.parameters.len();
+        self.parameters.push(Parameter { value, data_type });
+        self.param_cache.insert(key, idx);
+        self.config.placeholder_str(idx + 1)
     }
 
     /// Returns the dialect selected for this builder.
@@ -264,9 +352,19 @@ impl<'a> QueryBuilder<'a> {
         self.build_where(plan, sql)?;
         self.build_group_by(plan, sql)?;
         self.build_having(plan, sql)?;
+        self.alias_stack.pop();
+
+        // Render set operation (UNION / INTERSECT / EXCEPT) AFTER the
+        // primary query but BEFORE ORDER BY / LIMIT / OFFSET, because
+        // PostgreSQL (and most dialects) require ORDER BY to appear
+        // after the set operation, not before it.
+        if let Some(set_op) = &plan.set_operation {
+            self.render_set_operation(set_op, sql)?;
+        }
+
         self.build_order_by(plan, sql)?;
         self.build_limit_offset(plan, sql)?;
-        self.alias_stack.pop();
+
         Ok(())
     }
 
@@ -275,14 +373,23 @@ impl<'a> QueryBuilder<'a> {
             return Ok(());
         };
 
-        sql.push_str("WITH ");
+        if ctes.iter().any(|cte| cte.recursive) {
+            sql.push_str("WITH RECURSIVE ");
+        } else {
+            sql.push_str("WITH ");
+        }
         for (index, cte) in ctes.iter().enumerate() {
             if index > 0 {
                 sql.push_str(", ");
             }
             let name = self.quote_identifier(&cte.name)?;
             write!(sql, "{name} AS (").map_err(formatting_error)?;
+            // Enable CTE mode so numeric literals get explicit type casts
+            // (PostgreSQL cannot infer parameter types in recursive CTEs).
+            let saved = self.in_cte;
+            self.in_cte = true;
             self.build_query(&cte.query, sql)?;
+            self.in_cte = saved;
             sql.push(')');
         }
         sql.push(' ');
@@ -298,6 +405,19 @@ impl<'a> QueryBuilder<'a> {
         }
 
         sql.push_str("SELECT ");
+        if plan.distinct {
+            sql.push_str("DISTINCT ");
+            if let Some(on) = &plan.distinct_on {
+                sql.push_str("ON (");
+                for (i, expr) in on.iter().enumerate() {
+                    if i > 0 {
+                        sql.push_str(", ");
+                    }
+                    self.render_expression_to(expr, sql)?;
+                }
+                sql.push_str(") ");
+            }
+        }
         for (index, projection) in plan.select.iter().enumerate() {
             if index > 0 {
                 sql.push_str(", ");
@@ -417,7 +537,8 @@ impl<'a> QueryBuilder<'a> {
             }
             (SqlDialect::MySql, None, Some(offset)) => {
                 let offset_ph = self.add_parameter(Value::from(offset), DataType::Int);
-                write!(sql, " LIMIT {offset_ph}, {MYSQL_UNLIMITED_LIMIT}").map_err(formatting_error)
+                write!(sql, " LIMIT {offset_ph}, {MYSQL_UNLIMITED_LIMIT}")
+                    .map_err(formatting_error)
             }
             (SqlDialect::Sqlite, None, Some(offset)) => {
                 let offset_ph = self.add_parameter(Value::from(offset), DataType::Int);
@@ -472,29 +593,12 @@ impl<'a> QueryBuilder<'a> {
             ));
         }
 
-        match self.effective_quote_style() {
-            IdentifierQuoting::Never => {
-                validate_unquoted_identifier(identifier)?;
-                Ok(identifier.to_owned())
-            }
-            IdentifierQuoting::DoubleQuote => {
-                Ok(format!("\"{}\"", identifier.replace('"', "\"\"")))
-            }
-            IdentifierQuoting::Backtick => Ok(format!("`{}`", identifier.replace('`', "``"))),
-            IdentifierQuoting::Always => Err(compilation_error(
-                "unresolved_quote_style",
-                json!({"identifier": identifier}),
-            )),
-        }
-    }
-
-    fn effective_quote_style(&self) -> IdentifierQuoting {
-        match self.quote_style {
-            IdentifierQuoting::Always => match self.dialect {
-                SqlDialect::MySql => IdentifierQuoting::Backtick,
-                SqlDialect::Postgres | SqlDialect::Sqlite => IdentifierQuoting::DoubleQuote,
-            },
-            quote_style => quote_style,
+        let style = self.config.identifier_quote.as_str();
+        if style == "never" {
+            validate_unquoted_identifier(identifier)?;
+            Ok(identifier.to_owned())
+        } else {
+            Ok(self.config.quote_identifier(identifier))
         }
     }
 
@@ -506,46 +610,187 @@ impl<'a> QueryBuilder<'a> {
             ));
         }
         for segment in function.split('.') {
-            validate_unquoted_identifier(segment)?;
+            // Function names follow identifier syntax but are not subject to
+            // reserved-keyword restrictions (e.g. EXISTS, COALESCE, NULLIF).
+            let mut chars = segment.chars();
+            let valid = chars.next().is_some_and(|c| c == '_' || c.is_ascii_alphabetic())
+                && chars.all(|c| c == '_' || c.is_ascii_alphanumeric());
+            if !valid {
+                return Err(compilation_error(
+                    "invalid_function_name",
+                    json!({"function": function}),
+                ));
+            }
         }
         Ok(Cow::Borrowed(function))
     }
 
-    fn render_binary_operator(&self, operator: BinaryOperator) -> &'static str {
-        match operator {
-            BinaryOperator::Add => "+",
-            BinaryOperator::Sub => "-",
-            BinaryOperator::Mul => "*",
-            BinaryOperator::Div => "/",
-            BinaryOperator::Mod => "%",
-            BinaryOperator::And => "AND",
-            BinaryOperator::Or => "OR",
-            BinaryOperator::Eq => "=",
-            BinaryOperator::Neq => "<>",
-            BinaryOperator::Gt => ">",
-            BinaryOperator::Lt => "<",
-            BinaryOperator::Gte => ">=",
-            BinaryOperator::Lte => "<=",
-            BinaryOperator::Like => "LIKE",
-            BinaryOperator::ILike if self.dialect == SqlDialect::Postgres => "ILIKE",
-            BinaryOperator::ILike => "LIKE",
+    fn render_window_spec(
+        &mut self,
+        spec: &WindowSpec,
+        buf: &mut String,
+    ) -> Result<(), VlorQLError> {
+        buf.push_str(" OVER (");
+        let mut clause_added = false;
+
+        if let Some(partition_by) = &spec.partition_by {
+            clause_added = true;
+            buf.push_str("PARTITION BY ");
+            for (i, expr) in partition_by.iter().enumerate() {
+                if i > 0 {
+                    buf.push_str(", ");
+                }
+                self.render_expression_to(expr, buf)?;
+            }
         }
+
+        if let Some(order_by) = &spec.order_by {
+            if clause_added {
+                buf.push(' ');
+            }
+            clause_added = true;
+            buf.push_str("ORDER BY ");
+            for (i, term) in order_by.iter().enumerate() {
+                if i > 0 {
+                    buf.push_str(", ");
+                }
+                self.render_expression_to(&term.expr, buf)?;
+                if term.descending {
+                    buf.push_str(" DESC");
+                } else {
+                    buf.push_str(" ASC");
+                }
+            }
+        }
+
+        if let Some(frame) = &spec.frame {
+            if clause_added {
+                buf.push(' ');
+            }
+            self.render_window_frame(frame, buf)?;
+        }
+
+        buf.push(')');
+        Ok(())
+    }
+
+    fn render_window_frame(
+        &mut self,
+        frame: &WindowFrame,
+        buf: &mut String,
+    ) -> Result<(), VlorQLError> {
+        match frame.kind {
+            WindowFrameKind::Rows => buf.push_str("ROWS"),
+            WindowFrameKind::Range => buf.push_str("RANGE"),
+            WindowFrameKind::Groups => buf.push_str("GROUPS"),
+        }
+        buf.push_str(" BETWEEN ");
+        self.render_window_frame_bound(&frame.start, buf)?;
+        buf.push_str(" AND ");
+        match &frame.end {
+            Some(end) => self.render_window_frame_bound(end, buf)?,
+            None => buf.push_str("CURRENT ROW"),
+        }
+        Ok(())
+    }
+
+    fn render_window_frame_bound(
+        &mut self,
+        bound: &WindowFrameBound,
+        buf: &mut String,
+    ) -> Result<(), VlorQLError> {
+        match bound {
+            WindowFrameBound::UnboundedPreceding => buf.push_str("UNBOUNDED PRECEDING"),
+            WindowFrameBound::Preceding(expr) => {
+                self.render_expression_to(expr, buf)?;
+                buf.push_str(" PRECEDING");
+            }
+            WindowFrameBound::CurrentRow => buf.push_str("CURRENT ROW"),
+            WindowFrameBound::Following(expr) => {
+                self.render_expression_to(expr, buf)?;
+                buf.push_str(" FOLLOWING");
+            }
+            WindowFrameBound::UnboundedFollowing => buf.push_str("UNBOUNDED FOLLOWING"),
+        }
+        Ok(())
+    }
+
+    fn render_binary_operator(&self, operator: BinaryOperator) -> Cow<'static, str> {
+        match operator {
+            BinaryOperator::Add => Cow::Borrowed("+"),
+            BinaryOperator::Sub => Cow::Borrowed("-"),
+            BinaryOperator::Mul => Cow::Borrowed("*"),
+            BinaryOperator::Div => Cow::Borrowed("/"),
+            BinaryOperator::Mod => Cow::Borrowed("%"),
+            BinaryOperator::And => Cow::Borrowed("AND"),
+            BinaryOperator::Or => Cow::Borrowed("OR"),
+            BinaryOperator::Eq => Cow::Borrowed("="),
+            BinaryOperator::Neq => Cow::Borrowed("<>"),
+            BinaryOperator::Gt => Cow::Borrowed(">"),
+            BinaryOperator::Lt => Cow::Borrowed("<"),
+            BinaryOperator::Gte => Cow::Borrowed(">="),
+            BinaryOperator::Lte => Cow::Borrowed("<="),
+            BinaryOperator::Like => Cow::Borrowed("LIKE"),
+            BinaryOperator::ILike => {
+                if self.dialect == SqlDialect::Postgres
+                    && !self.config.type_mappings.contains_key("ilike")
+                {
+                    Cow::Borrowed("ILIKE")
+                } else {
+                    Cow::Owned(
+                        self.config
+                            .type_mappings
+                            .get("ilike")
+                            .cloned()
+                            .unwrap_or_else(|| "LIKE".to_owned()),
+                    )
+                }
+            }
+        }
+    }
+
+    fn render_set_operation(
+        &mut self,
+        set_op: &SetOperationClause,
+        sql: &mut String,
+    ) -> Result<(), VlorQLError> {
+        let keyword = match set_op.operation {
+            SetOperation::UnionAll => " UNION ALL ",
+            SetOperation::Union => " UNION ",
+            SetOperation::Intersect => " INTERSECT ",
+            SetOperation::Except => " EXCEPT ",
+        };
+        sql.push_str(keyword);
+        self.build_query(&set_op.right, sql)
     }
 
     fn render_comparison_operator(
         &self,
         operator: ComparisonOperator,
-    ) -> Result<&'static str, VlorQLError> {
+    ) -> Result<Cow<'static, str>, VlorQLError> {
         match operator {
-            ComparisonOperator::Eq => Ok("="),
-            ComparisonOperator::Neq => Ok("<>"),
-            ComparisonOperator::Gt => Ok(">"),
-            ComparisonOperator::Lt => Ok("<"),
-            ComparisonOperator::Gte => Ok(">="),
-            ComparisonOperator::Lte => Ok("<="),
-            ComparisonOperator::Like => Ok("LIKE"),
-            ComparisonOperator::ILike if self.dialect == SqlDialect::Postgres => Ok("ILIKE"),
-            ComparisonOperator::ILike => Ok("LIKE"),
+            ComparisonOperator::Eq => Ok(Cow::Borrowed("=")),
+            ComparisonOperator::Neq => Ok(Cow::Borrowed("<>")),
+            ComparisonOperator::Gt => Ok(Cow::Borrowed(">")),
+            ComparisonOperator::Lt => Ok(Cow::Borrowed("<")),
+            ComparisonOperator::Gte => Ok(Cow::Borrowed(">=")),
+            ComparisonOperator::Lte => Ok(Cow::Borrowed("<=")),
+            ComparisonOperator::Like => Ok(Cow::Borrowed("LIKE")),
+            ComparisonOperator::ILike => {
+                if self.dialect == SqlDialect::Postgres
+                    && !self.config.type_mappings.contains_key("ilike")
+                {
+                    Ok(Cow::Borrowed("ILIKE"))
+                } else {
+                    Ok(Cow::Owned(
+                        self.config
+                            .type_mappings
+                            .get("ilike")
+                            .cloned()
+                            .unwrap_or_else(|| "LIKE".to_owned()),
+                    ))
+                }
+            }
             ComparisonOperator::In => Err(compilation_error(
                 "comparison_in_requires_in_predicate",
                 json!({"operator": operator}),
@@ -558,10 +803,12 @@ impl<'a> QueryBuilder<'a> {
     }
 
     fn render_join_type(&self, join_type: JoinType) -> Result<&'static str, VlorQLError> {
+        let is_mysql = self.dialect == SqlDialect::MySql
+            || self.config.name.to_lowercase().contains("mysql");
         match join_type {
-            JoinType::Full if self.dialect == SqlDialect::MySql => Err(compilation_error(
+            JoinType::Full if is_mysql => Err(compilation_error(
                 "unsupported_full_join",
-                json!({"dialect": "mysql", "join_type": "full"}),
+                json!({"dialect": self.config.name, "join_type": "full"}),
             )),
             JoinType::Inner => Ok("INNER JOIN"),
             JoinType::Left => Ok("LEFT JOIN"),

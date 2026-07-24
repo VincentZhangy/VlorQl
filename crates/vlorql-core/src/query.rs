@@ -1,4 +1,4 @@
-use crate::schema::{Expression, FromClause, InTarget, Predicate, Projection, QueryPlan};
+use crate::schema::{Expression, FromClause, InTarget, JoinType, Predicate, Projection, QueryPlan};
 use std::collections::HashSet;
 
 #[derive(Debug, Clone)]
@@ -117,7 +117,11 @@ pub(crate) fn collect_plan_references(plan: &QueryPlan) -> PlanReferences {
     }
     if let Some(joins) = &plan.joins {
         for join in joins {
-            collect_predicate_references(&join.on, &mut references.columns);
+            // CROSS JOIN has no ON condition in SQL; the compiler ignores it.
+            // Skip reference collection so hallucinated columns don't fail validation.
+            if join.join_type != JoinType::Cross {
+                collect_predicate_references(&join.on, &mut references.columns);
+            }
         }
     }
 
@@ -145,6 +149,39 @@ pub(crate) fn collect_expression_references(
         }
         Expression::Star => {}
         Expression::SubQuery { .. } => {}
+        Expression::Case {
+            operand,
+            when_thens,
+            else_result,
+        } => {
+            if let Some(op) = operand {
+                collect_expression_references(op, references);
+            }
+            for wt in when_thens {
+                collect_expression_references(&wt.when, references);
+                collect_expression_references(&wt.then, references);
+            }
+            if let Some(el) = else_result {
+                collect_expression_references(el, references);
+            }
+        }
+        Expression::WindowFunction {
+            args, over, ..
+        } => {
+            for argument in args {
+                collect_expression_references(argument, references);
+            }
+            if let Some(partition_by) = &over.partition_by {
+                for expr in partition_by {
+                    collect_expression_references(expr, references);
+                }
+            }
+            if let Some(order_by) = &over.order_by {
+                for term in order_by {
+                    collect_expression_references(&term.expr, references);
+                }
+            }
+        }
     }
 }
 

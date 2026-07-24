@@ -348,7 +348,9 @@ fn valid_plan_round_trips_through_serde() {
         offset: None,
         joins: None,
         ctes: None,
-    };
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,    };
     let serialized = serde_json::to_string(&plan).expect("plan should serialize");
     let restored: QueryPlan = serde_json::from_str(&serialized).expect("plan should deserialize");
     assert_eq!(restored, plan);

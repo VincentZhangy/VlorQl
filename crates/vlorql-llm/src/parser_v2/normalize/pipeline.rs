@@ -132,6 +132,54 @@ mod tests {
     }
 
     #[test]
+    fn pipeline_normalizes_case_when_expression() {
+        let mut val = json!({
+            "select": [
+                {"type": "column_ref", "table": "orders", "column": "id"},
+                {"type": "expr", "expression": {
+                    "function_call": {
+                        "name": "case",
+                        "args": [
+                            {"type": "comparison", "left": {"type": "column_ref", "column": "total", "table": "orders"}, "op": "=", "right": {"type": "literal", "value": 1500, "data_type": "float"}},
+                            {"type": "literal", "value": "high", "data_type": "string"},
+                            null
+                        ]
+                    },
+                    "alias": "category"
+                }, "alias": null}
+            ],
+            "from": {"table": "orders"},
+            "where": {
+                "type": "and",
+                "left": {"type": "is_null", "expr": {"type": "column_ref", "column": "user_id", "table": "users"}},
+                "right": {"type": "comparison", "left": {"type": "column_ref", "column": "id", "table": "orders"}, "op": "=", "right": {"type": "column_ref", "column": "id", "table": "users"}}
+            },
+            "joins": [{"join_type": "inner", "right_table": {"table": "users"}, "on": {"type": "comparison", "left": {"type": "column_ref", "column": "user_id", "table": "orders"}, "op": "=", "right": {"type": "column_ref", "column": "id", "table": "users"}}}],
+            "group_by": [{"type": "column_ref", "table": "orders", "column": "id"}]
+        });
+        assert!(normalize(&mut val));
+        let select = val.get("select").unwrap().as_array().unwrap();
+        let item2 = select[1].as_object().unwrap();
+        // select[1] must still be type: "expr" after full pipeline
+        assert_eq!(
+            item2.get("type").and_then(|t| t.as_str()),
+            Some("expr"),
+            "select[1] type should be 'expr', not {:?}",
+            item2.get("type")
+        );
+        // expression must be type: "case"
+        if let Some(expr) = item2.get("expression").and_then(|e| e.as_object()) {
+            assert_eq!(
+                expr.get("type").and_then(|t| t.as_str()),
+                Some("case"),
+                "expression type should be 'case'"
+            );
+        } else {
+            panic!("select[1] must have expression field as object");
+        }
+    }
+
+    #[test]
     fn pipeline_applies_all_stages() {
         let mut val = json!({
             "projection": [{"type": "star"}],

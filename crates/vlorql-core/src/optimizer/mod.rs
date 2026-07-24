@@ -234,6 +234,9 @@ mod tests {
             offset: None,
             joins: None,
             ctes: None,
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,
         };
 
         let folded = ConstantFolding.rewrite(&plan).unwrap();
@@ -271,6 +274,9 @@ mod tests {
             offset: None,
             joins: None,
             ctes: None,
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,
         };
 
         let folded = ConstantFolding.rewrite(&plan).unwrap();
@@ -309,6 +315,9 @@ mod tests {
             offset: None,
             joins: None,
             ctes: None,
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,
         };
 
         let folded = ConstantFolding.rewrite(&plan).unwrap();
@@ -328,6 +337,7 @@ mod tests {
     fn plan_with_cte(outer_where: Predicate) -> QueryPlan {
         let cte = CommonTableExpression {
             name: "recent".to_owned(),
+            recursive: false,
             query: Box::new(QueryPlan {
                 select: vec![
                     column_projection(Some("orders"), "id"),
@@ -346,7 +356,9 @@ mod tests {
                 offset: None,
                 joins: None,
                 ctes: None,
-            }),
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,            }),
         };
         QueryPlan {
             select: vec![column_projection(Some("recent"), "id")],
@@ -362,6 +374,9 @@ mod tests {
             offset: None,
             joins: None,
             ctes: Some(vec![cte]),
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,
         }
     }
 
@@ -419,6 +434,9 @@ mod tests {
             offset: None,
             joins: None,
             ctes: None,
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,
         };
 
         let rewritten = PredicatePushdown.rewrite(&plan).unwrap();
@@ -649,6 +667,9 @@ mod tests {
             offset: None,
             joins: None,
             ctes: None,
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,
         };
 
         let optimizer = QueryOptimizer::rewrites_only();
@@ -709,6 +730,9 @@ mod tests {
             offset: None,
             joins: None,
             ctes: None,
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,
         };
         let rewritten = optimizer.optimize_async(&plan).await.unwrap();
         // The pipeline may rewrite constants or reorder, but the FROM
@@ -819,6 +843,7 @@ mod tests {
         // `status`.
         let cte = CommonTableExpression {
             name: "recent".to_owned(),
+            recursive: false,
             query: Box::new(QueryPlan {
                 select: vec![
                     Projection::Column {
@@ -854,7 +879,9 @@ mod tests {
                 offset: None,
                 joins: None,
                 ctes: None,
-            }),
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,            }),
         };
 
         let plan = QueryPlan {
@@ -875,6 +902,9 @@ mod tests {
             offset: None,
             joins: None,
             ctes: Some(vec![cte]),
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,
         };
 
         let pruner = ColumnPruning::with_schema(schema);
@@ -929,6 +959,9 @@ mod tests {
             offset: None,
             joins: None,
             ctes: None,
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,
         };
         let pipeline = RewriterPipeline::new()
             .with(ConstantFolding)
@@ -969,6 +1002,9 @@ mod tests {
             offset: None,
             joins: None,
             ctes: None,
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,
         };
         let pipeline = RewriterPipeline::new().with(ConstantFolding);
         let result = pipeline.repeat_until_stable(&plan, 3).unwrap();
@@ -1000,6 +1036,9 @@ mod tests {
             offset: None,
             joins: None,
             ctes: None,
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,
         };
         let optimizer = QueryOptimizer::rewrites_only();
         let result = optimizer.optimize_repeat(&plan, 3).unwrap();
@@ -1031,6 +1070,9 @@ mod tests {
             offset: None,
             joins: None,
             ctes: None,
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,
         };
         let cte1_body = QueryPlan {
             select: vec![Projection::Star { table: None }],
@@ -1046,6 +1088,9 @@ mod tests {
             offset: None,
             joins: None,
             ctes: None,
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,
         };
         let plan = QueryPlan {
             select: vec![Projection::Star { table: None }],
@@ -1067,13 +1112,18 @@ mod tests {
             ctes: Some(vec![
                 CommonTableExpression {
                     name: "cte2".to_owned(),
-                    query: Box::new(cte2_body),
+                    recursive: false,
+                    query: Box::new(cte2_body)
                 },
                 CommonTableExpression {
                     name: "cte1".to_owned(),
-                    query: Box::new(cte1_body),
+                    recursive: false,
+                    query: Box::new(cte1_body)
                 },
             ]),
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,
         };
 
         let pipeline = RewriterPipeline::new().with(PredicatePushdown);
@@ -1138,6 +1188,9 @@ mod tests {
             offset: None,
             joins: None,
             ctes: None,
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,
         };
         let cte1_body = QueryPlan {
             select: vec![Projection::Star { table: None }],
@@ -1153,6 +1206,9 @@ mod tests {
             offset: None,
             joins: None,
             ctes: None,
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,
         };
         let plan = QueryPlan {
             select: vec![Projection::Star { table: None }],
@@ -1174,13 +1230,18 @@ mod tests {
             ctes: Some(vec![
                 CommonTableExpression {
                     name: "cte2".to_owned(),
-                    query: Box::new(cte2_body),
+                    recursive: false,
+                    query: Box::new(cte2_body)
                 },
                 CommonTableExpression {
                     name: "cte1".to_owned(),
-                    query: Box::new(cte1_body),
+                    recursive: false,
+                    query: Box::new(cte1_body)
                 },
             ]),
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,
         };
 
         let pipeline = RewriterPipeline::new().with(PredicatePushdown);

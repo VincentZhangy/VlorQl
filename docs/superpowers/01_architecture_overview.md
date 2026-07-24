@@ -1,0 +1,94 @@
+# VlorQl 项目架构总览
+
+## 1. 分层架构
+
+```text
+┌─────────────────────────────────────────────┐
+│              vlorql (Facade)                 │  ← 门面层
+│  VlorQl, StreamEvent, Builder, re-exports   │
+├─────────────────────────────────────────────┤
+│           vlorql-llm (LLM 层)               │  ← AI 接口层
+│  LlmClient trait · Anthropic/DeepSeek/...   │
+│  parser_v2 (recover→normalize→build→fix→    │
+│    validate→optimize)                       │
+│  parse (legacy)                             │
+├──────────────┬──────────────────────────────┤
+│  vlorql-core (核心)                         │
+│  ┌──────────┐┌──────────┐┌───────────────┐  │
+│  │ Schema   ││ Validate ││ Compile       │  │
+│  │ · types  ││ · schema ││ · builder     │  │
+│  │ · query  ││ · operand││ · postgres    │  │
+│  │ · plan   ││ · dialect││ · mysql       │  │
+│  │ · expr   ││ · pipe   ││ · sqlite      │  │
+│  └──────────┘└──────────┘└───────────────┘  │
+│  ┌──────────┐┌──────────┐┌───────────────┐  │
+│  │ Optimizer││ Policy   ││ PromptBuilder │  │
+│  │ · fold   ││ · engine ││               │  │
+│  │ · push   ││ · config ││               │  │
+│  │ · prune  ││          ││               │  │
+│  │ · join   ││          ││               │  │
+│  └──────────┘└──────────┘└───────────────┘  │
+│  ┌──────────┐┌──────────┐┌───────────────┐  │
+│  │ Cache    ││ Function ││ Observability │  │
+│  │ · schema ││ · reg    ││ · metrics     │  │
+│  │ · compile││ · builtin││ · tracing     │  │
+│  │ · prompt ││          ││               │  │
+│  └──────────┘└──────────┘└───────────────┘  │
+│  ┌──────────┐                                │
+│  │ Errors   │                                │
+│  │ · kinds  │                                │
+│  └──────────┘                                │
+└─────────────────────────────────────────────┘
+```
+
+## 2. 核心数据流
+
+```text
+用户问题 (自然语言)
+    │
+    ▼
+[PromptBuilder] ──→ 系统提示词 (Schema + 方言 + 策略)
+    │
+    ▼
+[LlmClient] ──→ 生成 QueryPlan (JSON)
+    │
+    ▼
+[parser_v2::pipeline]
+    │ 1. recover: 提取 JSON
+    │ 2. normalize: 标准化字段、结构、操作符
+    │ 3. build: JSON → QueryPlan AST
+    │ 4. fix: 自动修复默认值
+    │ 5. validate: 语义校验
+    │ 6. optimize: 常量折叠/谓词下推/列裁剪
+    │
+    ▼
+[ValidationPipeline] (vlorql-core)
+    │ 1. Schema 校验
+    │ 2. Policy 校验
+    │ 3. Operand 类型校验
+    │ 4. Dialect 方言校验
+    │
+    ├── 失败 → 错误反馈 → LLM 重试 (最多 N 次)
+    │
+    ▼
+[QueryOptimizer] (可选)
+    │ 常量折叠 / 谓词下推 / 列裁剪 / 连接重排
+    │
+    ▼
+[QueryBuilder] + [SqlCompiler]
+    │ 方言感知 SQL 生成 + 参数化绑定
+    │
+    ▼
+[CompiledQuery] { sql, parameters }
+    │
+    ▼
+[PostgreSQL / MySQL / SQLite] (执行)
+```
+
+## 3. 设计原则
+
+1. **Plan-First**: LLM 只输出 QueryPlan (结构化 JSON)，不做 SQL
+2. **Validation-as-Gate**: 每个阶段都有严格验证，失败可重试
+3. **Multi-Model**: 同一套 Prompt + 流水线适配不同 LLM 提供商
+4. **Safety-by-Design**: 策略引擎 + 类型检查 + 方言约束
+5. **Observability**: 内置 OpenTelemetry + Prometheus 指标

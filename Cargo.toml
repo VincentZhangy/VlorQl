@@ -8,10 +8,13 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.2.0"
+version = "0.2.1"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 description = "VlorQl — natural language to SQL query engine"
+documentation = "https://docs.rs/vlorql"
+homepage = "https://github.com/VincentZhangy/VlorQl"
+repository = "https://github.com/VincentZhangy/VlorQl"
 
 [workspace.dependencies]
 thiserror = "1.0"
@@ -26,12 +29,13 @@ derive_builder = "0.12"
 anyhow = "1.0"
 async-trait = "0.1"
 chrono = { version = "0.4", features = ["serde"] }
+regex = "1.0"
+toml = "0.8"
 serde_yaml = "0.9"
 mockall = "0.12"
 rstest = "0.18"
 mockito = "1.7"
 clap = { version = "4.0", features = ["derive", "env"] }
-toml = "0.8"
 futures = "0.3"
 tokio-stream = "0.1"
 futures-util = "0.3"

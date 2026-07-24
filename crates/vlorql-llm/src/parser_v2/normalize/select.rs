@@ -10,6 +10,16 @@
 /// Fields that are valid projection types in QueryPlan.
 const VALID_PROJECTION_TYPES: &[&str] = &["column_ref", "expr", "star"];
 
+/// Expression-like types that the LLM may emit directly in `select`
+/// instead of wrapping them in an `expr` projection.
+/// When detected, these are auto-converted to `{"type": "expr", "expression": {...}}`.
+const EXPRESSION_LIKE_TYPES: &[&str] = &[
+    "function_call", "FunctionCall",
+    "binary_op", "BinaryOp",
+    "literal", "Literal",
+    "subquery", "SubQuery",
+];
+
 /// Inject a basic `[{"type": "star"}]` select when `select` is missing
 /// but `from` exists.
 ///
@@ -56,7 +66,7 @@ pub fn inject_missing_type(val: &mut serde_json::Value) -> bool {
 
 /// Remove items from `select` that have invalid or missing `type` tags.
 ///
-/// Returns `true` if any item was removed.
+/// Returns `true` if any item was removed or converted.
 #[must_use]
 pub fn remove_invalid(val: &mut serde_json::Value) -> bool {
     let Some(obj) = val.as_object_mut() else {
@@ -65,6 +75,32 @@ pub fn remove_invalid(val: &mut serde_json::Value) -> bool {
     let Some(arr) = obj.get_mut("select").and_then(|v| v.as_array_mut()) else {
         return false;
     };
+    let mut changed = false;
+
+    // First pass: convert expression-like items (function_call, binary_op, etc.)
+    // to `{"type": "expr", "expression": {...}}` wrapper.
+    for item in arr.iter_mut() {
+        if let Some(item_obj) = item.as_object_mut() {
+            if let Some(type_str) = item_obj.get("type").and_then(|t| t.as_str()) {
+                if EXPRESSION_LIKE_TYPES.contains(&type_str) {
+                    // Collect alias before moving expression.
+                    let alias = item_obj.remove("alias").filter(|v| !v.is_null());
+                    // Wrap the entire item as expression.
+                    let expression = serde_json::Value::Object(std::mem::take(item_obj));
+                    let mut wrapper = serde_json::Map::new();
+                    wrapper.insert("type".to_owned(), serde_json::Value::String("expr".to_owned()));
+                    wrapper.insert("expression".to_owned(), expression);
+                    if let Some(alias_val) = alias {
+                        wrapper.insert("alias".to_owned(), alias_val);
+                    }
+                    *item = serde_json::Value::Object(wrapper);
+                    changed = true;
+                }
+            }
+        }
+    }
+
+    // Second pass: remove items that still have invalid types.
     let before = arr.len();
     arr.retain(|v| {
         v.as_object()
@@ -76,9 +112,9 @@ pub fn remove_invalid(val: &mut serde_json::Value) -> bool {
         if arr.is_empty() {
             obj.remove("select");
         }
-        return true;
+        changed = true;
     }
-    false
+    changed
 }
 
 /// Normalize a single projection item (string → object).
@@ -86,9 +122,18 @@ pub fn remove_invalid(val: &mut serde_json::Value) -> bool {
 /// If the projection is a plain string like `"id"`, convert it to
 /// `{"type": "column_ref", "column": "id"}`.
 /// If the string is `"*"`, convert it to `{"type": "star"}`.
+/// Strings containing JSON corruption artifacts (quotes, colons, etc.)
+/// are converted to `null` so the caller can remove them.
 #[must_use]
 pub fn normalize_projection_item(item: &mut serde_json::Value) -> bool {
     if let Some(s) = item.as_str() {
+        // Detect JSON corruption artifacts: strings from LLM output that
+        // contain quotes, colons, or `alias:` patterns are clearly not
+        // valid column names.  Set to null so the caller drops them.
+        if s.contains('\'') || s.contains('\"') || s.contains(':') || s.contains("alias") {
+            *item = serde_json::Value::Null;
+            return true;
+        }
         if s == "*" {
             *item = serde_json::json!({"type": "star"});
         } else {

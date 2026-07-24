@@ -27,11 +27,11 @@ use std::sync::Arc;
 
 use serde_json::json;
 use vlorql::{SchemaSnapshot, SqlDialect, VlorQl};
-use vlorql_core::compile::{CompiledQuery, QueryBuilder, SqlCompiler};
+use vlorql_core::compile::{CompiledQuery, DialectConfig, QueryBuilder, SqlCompiler};
 use vlorql_core::errors::VlorQLError;
 use vlorql_core::policy::PolicyConfig;
 use vlorql_core::schema::{
-    ColumnSchema, ComparisonOperator, DataType, Expression, FromClause, IdentifierQuoting,
+    ColumnSchema, ComparisonOperator, DataType, Expression, FromClause,
     Predicate, Projection, QueryPlan, SchemaMetadata, TableSchema,
 };
 use vlorql_core::validate::ValidatedPlan;
@@ -47,13 +47,13 @@ struct DuckDbCompiler;
 
 impl SqlCompiler for DuckDbCompiler {
     fn compile(&self, plan: &ValidatedPlan) -> Result<CompiledQuery, VlorQLError> {
-        // 1. Defer the heavy lifting to QueryBuilder. We pick
-        //    `IdentifierQuoting::Never` so identifiers stay bare; DuckDB
-        //    parses both quoted and unquoted identifiers, so this is safe.
-        //    We use `SqlDialect::Sqlite` because the builder uses it to
-        //    switch between `?` (SQLite/MySQL) and `$N` (Postgres) placeholders.
-        let (sql, parameters) =
-            QueryBuilder::new(plan, SqlDialect::Sqlite, IdentifierQuoting::Never).build()?;
+        // 1. Defer the heavy lifting to QueryBuilder. We create a
+        //    SQLite-style DialectConfig with `never` quoting (no quotes)
+        //    so identifiers stay bare; DuckDB parses both quoted and
+        //    unquoted identifiers, so this is safe.
+        let mut config = DialectConfig::default_sqlite();
+        config.identifier_quote = "never".to_owned();
+        let (sql, parameters) = QueryBuilder::new(plan, &config).build()?;
 
         // 2. Apply DuckDB-specific post-processing. Here we just flip
         //    `LIMIT n OFFSET m` to `OFFSET m LIMIT n`. A real implementation
@@ -183,7 +183,9 @@ fn sample_plan() -> QueryPlan {
         offset: Some(100),
         joins: None,
         ctes: None,
-    }
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,    }
 }
 
 #[tokio::main]

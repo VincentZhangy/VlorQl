@@ -96,7 +96,9 @@ pub fn base_plan() -> QueryPlan {
         offset: None,
         joins: None,
         ctes: None,
-    }
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,    }
 }
 
 /// A permissive policy: every table is reachable, every column is

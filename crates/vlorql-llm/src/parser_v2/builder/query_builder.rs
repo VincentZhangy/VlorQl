@@ -106,6 +106,8 @@ pub fn build_plan_from_obj(obj: &serde_json::Map<String, Value>) -> Result<Query
 
     Ok(QueryPlan {
         select,
+        distinct: false,
+        distinct_on: None,
         from,
         r#where,
         group_by,
@@ -115,6 +117,7 @@ pub fn build_plan_from_obj(obj: &serde_json::Map<String, Value>) -> Result<Query
         offset,
         joins,
         ctes,
+        set_operation: None,
     })
 }
 
@@ -143,7 +146,7 @@ fn build_cte(val: &Value) -> Result<CommonTableExpression, BuildError> {
         "query",
     )?;
     let query = Box::new(build_plan_from_obj(query_obj)?);
-    Ok(CommonTableExpression { name, query })
+    Ok(CommonTableExpression { name, query, recursive: false })
 }
 
 /// Build a [`QueryPlan`] from a canonical JSON string.

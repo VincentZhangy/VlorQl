@@ -59,7 +59,7 @@ impl CompileCacheKey {
     ///     from: FromClause { table: "users".to_owned(), alias: None },
     ///     r#where: None, group_by: None, having: None,
     ///     order_by: None, limit: None, offset: None,
-    ///     joins: None, ctes: None,
+    ///     joins: None, ctes: None, distinct: false, distinct_on: None, set_operation: None,
     /// };
     /// let validated = ValidatedPlan(Arc::new(plan));
     /// let profile = DialectProfile::default();
@@ -102,6 +102,9 @@ mod tests {
             offset: None,
             joins: None,
             ctes: None,
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,
         }))
     }
 
@@ -140,6 +143,9 @@ mod tests {
             offset: None,
             joins: None,
             ctes: None,
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,
         }));
 
         let key_a = CompileCacheKey::new(&plan_a, &profile);

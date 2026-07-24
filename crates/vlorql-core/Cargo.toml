@@ -3,6 +3,9 @@ name = "vlorql-core"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+documentation.workspace = true
+homepage.workspace = true
+repository.workspace = true
 description = "A high-performance SQL query optimizer with constant folding, predicate pushdown, column pruning, and cost-based join reordering"
 
 [dependencies]
@@ -16,6 +19,8 @@ derive_builder.workspace = true
 async-trait.workspace = true
 chrono.workspace = true
 serde_yaml.workspace = true
+regex.workspace = true
+toml.workspace = true
 xxhash-rust = { version = "0.8", features = ["xxh3"] }
 moka = { version = "0.12", features = ["future"] }
 opentelemetry.workspace = true

@@ -11,6 +11,7 @@ use crate::parser_v2::fix::fixer;
 use crate::parser_v2::normalize::pipeline as normalize_pipeline;
 use crate::parser_v2::optimize::optimize as optimize_plan;
 use crate::parser_v2::recover::extract_json_content;
+use crate::parser_v2::recover::bracket::repair_truncated_json;
 use crate::parser_v2::validate::validator;
 use vlorql_core::schema::QueryPlan;
 
@@ -68,9 +69,13 @@ pub fn parse_query_plan(raw: &str) -> Result<QueryPlan, ParseError> {
     // Stage 1: Recover — extract JSON from raw text.
     let json_str = extract_json_content(raw);
 
+    // Stage 1b: Repair — if JSON is truncated (missing closing braces),
+    // append the required closing characters so serde can parse it.
+    let json_str = repair_truncated_json(json_str);
+
     // Stage 2: Normalize — canonicalize the JSON.
     let mut value: serde_json::Value =
-        serde_json::from_str(json_str).map_err(|e| ParseError::InvalidJson(e.to_string()))?;
+        serde_json::from_str(&json_str).map_err(|e| ParseError::InvalidJson(e.to_string()))?;
     let _ = normalize_pipeline::normalize(&mut value);
 
     // Stage 3: Build — canonical JSON → QueryPlan AST.
@@ -86,7 +91,7 @@ pub fn parse_query_plan(raw: &str) -> Result<QueryPlan, ParseError> {
         return Err(ParseError::ValidationErrors(messages));
     }
 
-    // Stage 6: Optimize — AST optimization.
+    // Stage 6: Optimize — AST optimization.  
     let _ = optimize_plan(&mut plan);
 
     Ok(plan)
@@ -97,8 +102,9 @@ pub fn parse_query_plan(raw: &str) -> Result<QueryPlan, ParseError> {
 /// Useful when you want to see the plan even if it has minor issues.
 pub fn parse_query_plan_lenient(raw: &str) -> Result<QueryPlan, ParseError> {
     let json_str = extract_json_content(raw);
+    let json_str = repair_truncated_json(json_str);
     let mut value: serde_json::Value =
-        serde_json::from_str(json_str).map_err(|e| ParseError::InvalidJson(e.to_string()))?;
+        serde_json::from_str(&json_str).map_err(|e| ParseError::InvalidJson(e.to_string()))?;
     let _ = normalize_pipeline::normalize(&mut value);
     let mut plan =
         query_builder::build_plan(&value).map_err(|e| ParseError::BuildError(e.to_string()))?;

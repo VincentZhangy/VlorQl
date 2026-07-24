@@ -17,7 +17,7 @@
 
 use crate::schema::{
     CommonTableExpression, Expression, InTarget, JoinClause, OrderByTerm, Predicate, Projection,
-    QueryPlan,
+    QueryPlan, SetOperationClause,
 };
 
 // ---------------------------------------------------------------------------
@@ -172,6 +172,8 @@ pub fn default_fold_plan<F: ExpressionFold + ?Sized>(
             .iter()
             .map(|p| folder.fold_projection(p))
             .collect(),
+        distinct: plan.distinct,
+        distinct_on: plan.distinct_on.clone(),
         from: plan.from.clone(),
         r#where: plan.r#where.as_ref().map(|p| folder.fold_predicate(p)),
         group_by: plan
@@ -204,9 +206,14 @@ pub fn default_fold_plan<F: ExpressionFold + ?Sized>(
             ctes.iter()
                 .map(|cte| CommonTableExpression {
                     name: cte.name.clone(),
+                    recursive: cte.recursive,
                     query: Box::new(folder.fold_plan(&cte.query)),
                 })
                 .collect()
+        }),
+        set_operation: plan.set_operation.as_ref().map(|set_op| SetOperationClause {
+            operation: set_op.operation,
+            right: Box::new(folder.fold_plan(&set_op.right)),
         }),
     }
 }
@@ -256,7 +263,40 @@ pub fn default_visit_expression<F: ExpressionVisit + ?Sized>(
             }
         }
         Expression::SubQuery { query } => visitor.visit_plan(query, ctx),
+        Expression::Case {
+            operand,
+            when_thens,
+            else_result,
+        } => {
+            if let Some(op) = operand {
+                visitor.visit_expression(op, ctx);
+            }
+            for wt in when_thens {
+                visitor.visit_expression(&wt.when, ctx);
+                visitor.visit_expression(&wt.then, ctx);
+            }
+            if let Some(el) = else_result {
+                visitor.visit_expression(el, ctx);
+            }
+        }
         Expression::ColumnRef { .. } | Expression::Literal { .. } | Expression::Star => {}
+        Expression::WindowFunction {
+            args, over, ..
+        } => {
+            for arg in args {
+                visitor.visit_expression(arg, ctx);
+            }
+            if let Some(partition_by) = &over.partition_by {
+                for expr in partition_by {
+                    visitor.visit_expression(expr, ctx);
+                }
+            }
+            if let Some(order_by) = &over.order_by {
+                for term in order_by {
+                    visitor.visit_expression(&term.expr, ctx);
+                }
+            }
+        }
     }
 }
 

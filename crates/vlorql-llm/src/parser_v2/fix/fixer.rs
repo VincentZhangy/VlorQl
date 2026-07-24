@@ -12,7 +12,7 @@
 //! that the validator can focus on real errors.  When in doubt, it
 //! does nothing and lets the validator report the issue.
 
-use vlorql_core::schema::{Expression, JoinClause, Projection, QueryPlan};
+use vlorql_core::schema::{Expression, InTarget, JoinClause, Predicate, Projection, QueryPlan};
 
 /// Run all auto-fix rules on a [`QueryPlan`] recursively
 /// (including CTE subqueries).
@@ -27,6 +27,12 @@ pub fn fix_plan(plan: &mut QueryPlan) -> bool {
     changed |= fix_missing_group_by(plan);
     // fix_missing_aliases must run last because it adds new aliases.
     changed |= fix_missing_aliases(plan);
+    // Replace ORDER BY alias references with the original SELECT expressions.
+    changed |= fix_order_by_aliases(plan);
+    // Replace WHERE/Having column references that match SELECT aliases.
+    changed |= fix_where_alias_refs(plan);
+    // Move aggregate conditions from WHERE to HAVING.
+    changed |= fix_where_aggregates(plan);
     // Recursively fix CTE subqueries.
     if let Some(ref mut ctes) = plan.ctes {
         for cte in ctes.iter_mut() {
@@ -307,12 +313,293 @@ fn fix_join_alias(join: &mut JoinClause, counter: &mut u32, used: &mut Vec<Strin
     }
 }
 
+/// Move aggregate conditions from WHERE to HAVING.
+///
+/// LLMs frequently put aggregate filter conditions (e.g. `COUNT(*) > 5`) in
+/// the WHERE clause instead of HAVING.  This is invalid SQL because aggregate
+/// functions cannot appear in WHERE.  This function detects such conditions
+/// and moves them to HAVING.
+///
+/// When WHERE contains any expression with an aggregate function, the entire
+/// WHERE predicate is promoted to HAVING (since WHERE cannot contain aggregates,
+/// this is safe — the LLM intended these as HAVING conditions).
+#[must_use]
+fn fix_where_aggregates(plan: &mut QueryPlan) -> bool {
+    let Some(ref where_pred) = plan.r#where else {
+        return false;
+    };
+
+    // Check if WHERE contains any aggregate function call.
+    if !contains_aggregate(where_pred) {
+        return false;
+    }
+
+    // Move the entire WHERE to HAVING.
+    // If HAVING already exists, AND the two together.
+    let new_having = if let Some(ref having_pred) = plan.having {
+        Predicate::And {
+            left: Box::new(where_pred.clone()),
+            right: Box::new(having_pred.clone()),
+        }
+    } else {
+        where_pred.clone()
+    };
+
+    plan.having = Some(new_having);
+    plan.r#where = None;
+    true
+}
+
+/// Recursively check if a predicate tree contains any aggregate function call.
+fn contains_aggregate(pred: &Predicate) -> bool {
+    match pred {
+        Predicate::Comparison { left, right, .. } => {
+            is_aggregate_expr(left) || is_aggregate_expr(right)
+        }
+        Predicate::Between { expr, low, high } => {
+            is_aggregate_expr(expr) || is_aggregate_expr(low) || is_aggregate_expr(high)
+        }
+        Predicate::In { expr, target, .. } => {
+            if is_aggregate_expr(expr) {
+                return true;
+            }
+            match target {
+                InTarget::Values(values) => values.iter().any(|v| is_aggregate_expr(v)),
+                InTarget::SubQuery(_) => false,
+            }
+        }
+        Predicate::Like { expr, .. } => {
+            is_aggregate_expr(expr)
+        }
+        Predicate::IsNull { expr } => is_aggregate_expr(expr),
+        Predicate::And { left, right } => contains_aggregate(left) || contains_aggregate(right),
+        Predicate::Or { left, right } => contains_aggregate(left) || contains_aggregate(right),
+        Predicate::Not { child } => contains_aggregate(child),
+        Predicate::Exists { .. } => false,
+    }
+}
+
+/// Replace ORDER BY expressions that reference SELECT aliases with the
+/// original SELECT expression.
+///
+/// LLMs frequently emit order_by terms that reference an alias from the
+/// SELECT list (e.g. `ORDER BY total_amount DESC`), but in the canonical
+/// JSON the ORDER BY `expr` must be the actual expression (not an alias).
+/// This function builds an alias → expression map from the SELECT list
+/// and replaces any ORDER BY `column_ref` that resolves to an alias with
+/// the original SELECT expression.
+#[must_use]
+fn fix_order_by_aliases(plan: &mut QueryPlan) -> bool {
+    // Build alias map FIRST (immutable borrow of plan) before accessing order_by.
+    let alias_map: Vec<(String, Expression)> = build_alias_map(plan);
+    if alias_map.is_empty() {
+        return false;
+    }
+
+    let Some(ref mut order_by) = plan.order_by else {
+        return false;
+    };
+    if order_by.is_empty() {
+        return false;
+    }
+
+    let mut changed = false;
+    for term in order_by.iter_mut() {
+        // Try to find any alias reference in the ORDER BY expression tree.
+        if let Some((_, original_expr)) = find_alias_match(&term.expr, &alias_map) {
+            term.expr = original_expr.clone();
+            changed = true;
+        }
+    }
+
+    changed
+}
+
+/// Build a map of alias → original expression from SELECT projections.
+fn build_alias_map(plan: &QueryPlan) -> Vec<(String, Expression)> {
+    let mut alias_map = Vec::new();
+    for proj in &plan.select {
+        match proj {
+            Projection::Column { column, alias: Some(a), .. } => {
+                alias_map.push((a.clone(), Expression::ColumnRef {
+                    table: None,
+                    column: column.clone(),
+                }));
+            }
+            Projection::Expr { expression, alias: Some(a), .. } => {
+                alias_map.push((a.clone(), expression.clone()));
+            }
+            _ => {}
+        }
+    }
+    alias_map
+}
+
+/// Search an expression tree for any ColumnRef that matches a SELECT alias.
+/// Returns the (alias_name, original_expression) pair on match.
+///
+/// This is used by `fix_order_by_aliases` to replace ORDER BY expressions
+/// that reference aliases (either directly or inside function wrappers like
+/// `sum(total_amount)` or `desc(total_amount)`).  When a match is found,
+/// the caller replaces the ENTIRE ORDER BY term expression, avoiding
+/// double-wrapping like `sum(sum(orders.total))`.
+fn find_alias_match<'a>(
+    expr: &Expression,
+    alias_map: &'a [(String, Expression)],
+) -> Option<&'a (String, Expression)> {
+    match expr {
+        Expression::ColumnRef { column, .. } => {
+            alias_map.iter().find(|(alias, _)| alias == column)
+        }
+        Expression::FunctionCall { args, .. } => {
+            // Check if any arg has a direct alias match.
+            for arg in args {
+                if let Some(match_entry) = find_alias_match(arg, alias_map) {
+                    return Some(match_entry);
+                }
+            }
+            None
+        }
+        Expression::BinaryOp { left, right, .. } => {
+            find_alias_match(left, alias_map)
+                .or_else(|| find_alias_match(right, alias_map))
+        }
+        _ => None,
+    }
+}
+
 /// Convenience: create a fix pipeline function that returns a new
 /// [`QueryPlan`] with all fixes applied.
 #[must_use]
 pub fn apply_fixes(mut plan: QueryPlan) -> QueryPlan {
     let _ = fix_plan(&mut plan);
     plan
+}
+
+/// Replace column references in WHERE/Having predicates that match a SELECT
+/// alias with the original expression from the alias.
+///
+/// Small LLMs frequently reference SELECT aliases (e.g. `orders.total_amount`)
+/// in WHERE/ORDER BY clauses as if they were real columns.  This function
+/// detects such references and replaces them with the alias's source expression.
+#[must_use]
+fn fix_where_alias_refs(plan: &mut QueryPlan) -> bool {
+    let alias_map = build_alias_map(plan);
+    if alias_map.is_empty() || (plan.r#where.is_none() && plan.having.is_none()) {
+        return false;
+    }
+
+    let mut changed = false;
+
+    if let Some(ref mut predicate) = plan.r#where {
+        changed |= replace_alias_in_predicate(predicate, &alias_map);
+    }
+    if let Some(ref mut predicate) = plan.having {
+        changed |= replace_alias_in_predicate(predicate, &alias_map);
+    }
+
+    changed
+}
+
+/// Recursively walk a predicate tree and replace ColumnRef expressions
+/// whose column name matches a SELECT alias with the alias's expression.
+fn replace_alias_in_predicate(
+    predicate: &mut Predicate,
+    alias_map: &[(String, Expression)],
+) -> bool {
+    let mut changed = false;
+    match predicate {
+        Predicate::And { left, right }
+        | Predicate::Or { left, right } => {
+            changed |= replace_alias_in_predicate(left, alias_map);
+            changed |= replace_alias_in_predicate(right, alias_map);
+        }
+        Predicate::Not { child } => {
+            changed |= replace_alias_in_predicate(child, alias_map);
+        }
+        Predicate::Comparison { left, right, .. } => {
+            changed |= replace_alias_in_expression(left, alias_map);
+            changed |= replace_alias_in_expression(right, alias_map);
+        }
+        Predicate::Between { expr, low, high } => {
+            changed |= replace_alias_in_expression(expr, alias_map);
+            changed |= replace_alias_in_expression(low, alias_map);
+            changed |= replace_alias_in_expression(high, alias_map);
+        }
+        Predicate::In { expr, target } => {
+            changed |= replace_alias_in_expression(expr, alias_map);
+            if let InTarget::Values(items) = target {
+                for item in items.iter_mut() {
+                    changed |= replace_alias_in_expression(item, alias_map);
+                }
+            }
+        }
+        Predicate::Like { expr, .. } => {
+            changed |= replace_alias_in_expression(expr, alias_map);
+        }
+        Predicate::IsNull { expr } => {
+            changed |= replace_alias_in_expression(expr, alias_map);
+        }
+        Predicate::Exists { query } => {
+            changed |= fix_where_alias_refs(query);
+        }
+    }
+    changed
+}
+
+/// Recursively walk an expression tree and replace ColumnRef nodes whose
+/// column name matches a SELECT alias with the alias's source expression.
+fn replace_alias_in_expression(
+    expr: &mut Expression,
+    alias_map: &[(String, Expression)],
+) -> bool {
+    match expr {
+        Expression::ColumnRef { column, .. } => {
+            if let Some((_, replacement)) = alias_map.iter().find(|(alias, _)| alias == column) {
+                *expr = replacement.clone();
+                true
+            } else {
+                false
+            }
+        }
+        Expression::FunctionCall { args, .. } => {
+            let mut changed = false;
+            for arg in args.iter_mut() {
+                changed |= replace_alias_in_expression(arg, alias_map);
+            }
+            changed
+        }
+        Expression::BinaryOp { left, right, .. } => {
+            let mut changed = false;
+            changed |= replace_alias_in_expression(left, alias_map);
+            changed |= replace_alias_in_expression(right, alias_map);
+            changed
+        }
+        Expression::Case { operand, when_thens, else_result, .. } => {
+            let mut changed = false;
+            if let Some(op) = operand {
+                changed |= replace_alias_in_expression(op, alias_map);
+            }
+            for wt in when_thens.iter_mut() {
+                changed |= replace_alias_in_expression(&mut wt.when, alias_map);
+                changed |= replace_alias_in_expression(&mut wt.then, alias_map);
+            }
+            if let Some(el) = else_result {
+                changed |= replace_alias_in_expression(el, alias_map);
+            }
+            changed
+        }
+        Expression::WindowFunction { args, .. } => {
+            let mut changed = false;
+            for arg in args.iter_mut() {
+                changed |= replace_alias_in_expression(arg, alias_map);
+            }
+            changed
+        }
+        Expression::SubQuery { query } => fix_where_alias_refs(query),
+        Expression::Literal { .. } => false,
+        Expression::Star => false,
+    }
 }
 
 #[cfg(test)]
@@ -335,6 +622,9 @@ mod tests {
             offset: None,
             joins: None,
             ctes: None,
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,
         }
     }
 
@@ -491,6 +781,7 @@ mod tests {
         let mut plan = base_plan();
         plan.ctes = Some(vec![CommonTableExpression {
             name: "active".to_owned(),
+            recursive: false,
             query: Box::new(QueryPlan {
                 select: vec![Projection::Star { table: None }],
                 from: FromClause {
@@ -505,7 +796,9 @@ mod tests {
                 offset: None,
                 joins: None,
                 ctes: None,
-            }),
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,            }),
         }]);
         assert!(fix_plan(&mut plan));
         // CTE subquery should also be fixed.
