@@ -16,6 +16,8 @@ derive_builder.workspace = true
 async-trait.workspace = true
 chrono.workspace = true
 serde_yaml.workspace = true
+regex.workspace = true
+toml.workspace = true
 xxhash-rust = { version = "0.8", features = ["xxh3"] }
 moka = { version = "0.12", features = ["future"] }
 opentelemetry.workspace = true

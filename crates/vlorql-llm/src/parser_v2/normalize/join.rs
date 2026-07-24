@@ -347,6 +347,46 @@ pub fn infer_missing_on(val: &mut serde_json::Value) -> bool {
     changed
 }
 
+/// Fix empty `on` objects inside JOIN clauses.
+///
+/// Weak LLMs sometimes emit `"on": {}` (empty object) instead of a proper
+/// predicate.  The builder rejects `{}` because it has no `type` discriminator.
+///
+/// Replace `"on": {}` with a trivially-true `1 = 1` predicate so the builder
+/// can proceed (CROSS JOIN ignores the ON clause in SQL anyway).
+#[must_use]
+fn fix_empty_join_on(val: &mut serde_json::Value) -> bool {
+    let Some(obj) = val.as_object_mut() else {
+        return false;
+    };
+    let Some(joins) = obj.get_mut("joins").and_then(|v| v.as_array_mut()) else {
+        return false;
+    };
+
+    let mut changed = false;
+    for join in joins.iter_mut() {
+        let Some(join_obj) = join.as_object_mut() else {
+            continue;
+        };
+        let Some(on_val) = join_obj.get("on") else {
+            continue;
+        };
+        if on_val.as_object().map_or(false, |o| o.is_empty()) {
+            join_obj.insert(
+                "on".to_owned(),
+                serde_json::json!({
+                    "type": "comparison",
+                    "left": {"type": "literal", "value": 1, "data_type": "int"},
+                    "op": "eq",
+                    "right": {"type": "literal", "value": 1, "data_type": "int"}
+                }),
+            );
+            changed = true;
+        }
+    }
+    changed
+}
+
 /// Crude singularization: strips trailing `s` (or `_items` → `_item`).
 /// Not linguistically perfect, but good enough for FK column naming.
 fn singularize(s: &str) -> &str {
@@ -388,6 +428,9 @@ pub fn normalize(val: &mut serde_json::Value) -> bool {
 
     // 6. Infer missing `on` from right_table.
     changed |= infer_missing_on(val);
+
+    // 7. Fix empty `on` objects (LLM sometimes emits `"on": {}`).
+    changed |= fix_empty_join_on(val);
 
     changed
 }

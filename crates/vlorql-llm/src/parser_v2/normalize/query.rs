@@ -4,9 +4,15 @@
 //! - Strips unknown top-level fields that serde would reject
 //! - Wraps top-level `descending` + `expr` into `order_by`
 
-/// Fields that are valid on a QueryPlan.
+/// Fields that are valid on a QueryPlan (used for stripping and lifting).
 const PLAN_FIELDS: &[&str] = &[
     "select", "from", "where", "group_by", "having", "order_by", "limit", "offset", "joins", "ctes",
+];
+
+/// Fields that belong at the QueryPlan top level but the LLM sometimes
+/// nests inside `where`.
+const PLAN_LEVEL_FIELDS: &[&str] = &[
+    "joins", "group_by", "having", "order_by", "limit", "offset", "ctes",
 ];
 
 /// Strip unknown top-level fields that `QueryPlan` rejects.
@@ -82,147 +88,122 @@ pub fn normalize_limit_offset(val: &mut serde_json::Value) -> bool {
     changed
 }
 
-/// Full query-level structure normalization.
+/// Lift plan-level fields (joins, group_by, having, order_by, limit, offset, ctes)
+/// out of a nested `where` object back to the top level.
 ///
-/// 1. Wrap top-level `descending` + `expr` into `order_by` (must run
-///    before `strip_unknown_fields` so these fields are preserved).
-/// 2. Strip unknown top-level fields.
-/// 3. Normalize string limit/offset to numbers.
-/// 4. Auto-join tables referenced in `select` but missing from `from`/`joins`.
-#[must_use]
-pub fn normalize(val: &mut serde_json::Value) -> bool {
-    let mut changed = false;
-    // Wrap first: expr + descending → order_by, before they get stripped.
-    changed |= wrap_descending_expr(val);
-    // Then strip remaining unknown fields.
-    changed |= strip_unknown_fields(val);
-    // Normalize string limit/offset to numbers.
-    changed |= normalize_limit_offset(val);
-    // Auto-join tables referenced in select but missing from from/joins.
-    changed |= auto_join_missing_tables(val);
-    changed
-}
-
-/// Collect table names referenced in `select` items.
-fn select_tables(val: &serde_json::Value) -> Vec<String> {
-    let Some(obj) = val.as_object() else {
-        return vec![];
-    };
-    let Some(select) = obj.get("select").and_then(|v| v.as_array()) else {
-        return vec![];
-    };
-    let mut tables: Vec<String> = Vec::new();
-    for item in select {
-        if let Some(item_obj) = item.as_object() {
-            if let Some(table) = item_obj.get("table").and_then(|v| v.as_str()) {
-                if !tables.iter().any(|t| t == table) {
-                    tables.push(table.to_owned());
-                }
-            }
-        }
-    }
-    tables
-}
-
-/// Collect table names already referenced in `from` and `joins`.
-fn existing_tables(val: &serde_json::Value) -> Vec<String> {
-    let Some(obj) = val.as_object() else {
-        return vec![];
-    };
-    let mut tables: Vec<String> = Vec::new();
-    // FROM table
-    if let Some(from) = obj.get("from").and_then(|v| v.as_object()) {
-        if let Some(table) = from.get("table").and_then(|v| v.as_str()) {
-            tables.push(table.to_owned());
-        }
-    }
-    // JOIN tables
-    if let Some(joins) = obj.get("joins").and_then(|v| v.as_array()) {
-        for join in joins {
-            if let Some(join_obj) = join.as_object() {
-                if let Some(rt) = join_obj.get("right_table").and_then(|v| v.as_object()) {
-                    if let Some(table) = rt.get("table").and_then(|v| v.as_str()) {
-                        if !tables.iter().any(|t| t == table) {
-                            tables.push(table.to_owned());
-                        }
-                    }
-                }
-            }
-        }
-    }
-    tables
-}
-
-/// Crude singularization for FK column naming.
-fn singularize(s: &str) -> &str {
-    if s.ends_with("_items") {
-        &s[..s.len() - 1]
-    } else if s.ends_with('s') && s.len() > 1 {
-        &s[..s.len() - 1]
-    } else {
-        s
-    }
-}
-
-/// When a table is referenced in `select` but missing from `from`/`joins`,
-/// auto-add an inner JOIN with an inferred ON clause.
+/// Weak LLMs sometimes put everything inside `where`:
+///   `{"where": {"type": "left", "child": ..., "joins": [...], "limit": 10, ...}}`
+/// instead of keeping them as top-level siblings.
 ///
-/// Heuristic: the FK column is `<singular_missing>_id` in the `from` table
-/// (e.g. `SELECT users.name FROM orders` → `JOIN users ON users.id = orders.user_id`).
+/// Returns `true` if any field was lifted.
 #[must_use]
-fn auto_join_missing_tables(val: &mut serde_json::Value) -> bool {
-    // Collect all info upfront while we have an immutable borrow.
-    let (from_table, missing): (Option<String>, Vec<String>) = {
+fn lift_nested_plan_fields(val: &mut serde_json::Value) -> bool {
+    // Collect fields to lift first, with their values.
+    let (lifted, type_left) = {
         let Some(obj) = val.as_object() else {
             return false;
         };
-        let select_tables = select_tables(val);
-        let existing = existing_tables(val);
-        let from_table = obj
-            .get("from")
-            .and_then(|f| f.as_object())
-            .and_then(|f| f.get("table"))
-            .and_then(|t| t.as_str())
-            .map(|s| s.to_owned());
-        let missing: Vec<String> = select_tables
-            .into_iter()
-            .filter(|t| !existing.iter().any(|e| e == t))
+        let Some(where_obj) = obj.get("where").and_then(|v| v.as_object()) else {
+            return false;
+        };
+
+        let lifted: Vec<(String, serde_json::Value)> = PLAN_LEVEL_FIELDS
+            .iter()
+            .filter_map(|field| {
+                if !obj.contains_key(*field) {
+                    where_obj.get(*field).map(|v| (field.to_string(), v.clone()))
+                } else {
+                    None
+                }
+            })
             .collect();
-        (from_table, missing)
+
+        let type_left = where_obj
+            .get("type")
+            .and_then(|t| t.as_str())
+            == Some("left")
+            && where_obj.contains_key("child");
+
+        (lifted, type_left)
     };
 
-    if missing.is_empty() {
+    if lifted.is_empty() && !type_left {
         return false;
     }
 
     let Some(obj) = val.as_object_mut() else {
         return false;
     };
-    let mut changed = false;
 
-    for table in &missing {
-        let fk_col = format!("{}_{}", singularize(table), "id");
-        let join = serde_json::json!({
-            "join_type": "inner",
-            "right_table": {"table": table},
-            "on": {
-                "type": "comparison",
-                "left": {"type": "column_ref", "table": table, "column": "id"},
-                "op": "eq",
-                "right": {
-                    "type": "column_ref",
-                    "table": from_table.as_deref().unwrap_or(""),
-                    "column": fk_col
-                }
-            }
-        });
-        if let Some(joins) = obj.get_mut("joins").and_then(|v| v.as_array_mut()) {
-            joins.push(join);
-        } else {
-            obj.insert("joins".to_owned(), serde_json::json!([join]));
+    let mut changed = false;
+    for (field, value) in lifted {
+        obj.insert(field.clone(), value);
+        // Remove the lifted field from `where`
+        if let Some(where_obj) = obj.get_mut("where").and_then(|v| v.as_object_mut()) {
+            where_obj.remove(&field);
         }
         changed = true;
     }
+
+    // Fix `"type": "left"` → `"type": "not"` inside `where`.
+    if type_left {
+        if let Some(where_obj) = obj.get_mut("where").and_then(|v| v.as_object_mut()) {
+            where_obj.insert(
+                "type".to_owned(),
+                serde_json::Value::String("not".to_owned()),
+            );
+            changed = true;
+        }
+    }
+
+    changed
+}
+
+/// Remove null entries from array fields (order_by, group_by, having).
+///
+/// Weak LLMs sometimes emit `"order_by": [null]` or `"group_by": [null]`
+/// which the builder rejects because it expects objects.
+///
+/// Returns `true` if any null entries were removed.
+#[must_use]
+fn sanitize_null_array_entries(val: &mut serde_json::Value) -> bool {
+    let Some(obj) = val.as_object_mut() else {
+        return false;
+    };
+    let mut changed = false;
+    for field in &["order_by", "group_by", "having"] {
+        if let Some(arr) = obj.get_mut(*field).and_then(|v| v.as_array_mut()) {
+            let before = arr.len();
+            arr.retain(|v| !v.is_null());
+            if arr.len() != before {
+                changed = true;
+            }
+        }
+    }
+    changed
+}
+
+/// Full query-level structure normalization.
+///
+/// 1. Wrap top-level `descending` + `expr` into `order_by` (must run
+///    before `strip_unknown_fields` so these fields are preserved).
+/// 2. Lift nested plan fields from `where` back to top level.
+/// 3. Strip unknown top-level fields.
+/// 4. Remove null entries from array fields.
+/// 5. Normalize string limit/offset to numbers.
+#[must_use]
+pub fn normalize(val: &mut serde_json::Value) -> bool {
+    let mut changed = false;
+    // Wrap first: expr + descending → order_by, before they get stripped.
+    changed |= wrap_descending_expr(val);
+    // Lift plan fields from within `where` before stripping.
+    changed |= lift_nested_plan_fields(val);
+    // Then strip remaining unknown fields.
+    changed |= strip_unknown_fields(val);
+    // Remove null entries from array fields.
+    changed |= sanitize_null_array_entries(val);
+    // Normalize string limit/offset to numbers.
+    changed |= normalize_limit_offset(val);
     changed
 }
 

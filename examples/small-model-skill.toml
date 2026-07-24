@@ -1,0 +1,15 @@
+name = "small-model"
+description = "Simplifies output schema for small / local LLMs"
+instructions = [
+  "Keep queries simple: max 2 joins, no subqueries in WHERE.",
+  "Always use table aliases (first letter of table name).",
+  "Prefer LEFT JOIN over NOT IN / NOT EXISTS.",
+  "GROUP BY must include every non-aggregated column in SELECT.",
+]
+simplify_schema = true
+forbid_features = ["set_operation", "window_functions", "ctes", "distinct_on"]
+disable_output_fields = ["set_operation", "ctes", "distinct_on"]
+
+[[examples]]
+question = "Show user names"
+plan = { select = [{ type = "column_ref", table = "users", column = "name", alias = null }], from = { table = "users", alias = null } }

@@ -2,6 +2,7 @@
 
 use crate::cache::{PromptCache, PromptCacheKey, hash_policy};
 use crate::policy::{PolicyConfig, TablePolicy};
+use crate::prompt::PromptSkill;
 use crate::schema::{
     ColumnSchema, DataType, DialectProfile, JoinType, SchemaSnapshot, SqlDialect, TableSchema,
 };
@@ -50,6 +51,9 @@ pub struct PromptBuilder {
     /// Pre-computed hash of the policy configuration, used in cache keys.
     policy_hash: u64,
     include_examples: bool,
+    /// Optional prompt skill that injects custom instructions, schema
+    /// simplification, and few-shot examples.
+    skill: Option<PromptSkill>,
     /// Reverse foreign-key index: maps foreign_table → list of local tables
     /// that reference it. Built once in [`Self::new`] to avoid O(n²) traversal
     /// in [`Self::expand_foreign_key_neighbors`].
@@ -66,8 +70,16 @@ impl PromptBuilder {
             policy_hash: hash_policy(&policy),
             policy,
             include_examples: true,
+            skill: None,
             reverse_fk_index,
         }
+    }
+
+    /// Attach a prompt skill to inject custom instructions and examples.
+    #[must_use]
+    pub fn with_skill(mut self, skill: PromptSkill) -> Self {
+        self.skill = Some(skill);
+        self
     }
 
     /// Enables or disables the optional example section.
@@ -101,12 +113,24 @@ impl PromptBuilder {
              \n",
         );
         self.push_schema_description(&mut prompt, relevant_tables);
+        if let Some(ref skill) = self.skill {
+            self.push_skill_instructions(&mut prompt, skill);
+        }
         self.push_dialect_constraints(&mut prompt);
         self.push_planning_rules(&mut prompt);
         self.push_output_schema(&mut prompt);
         self.push_type_guidance(&mut prompt);
         if self.include_examples {
-            self.push_example(&mut prompt, relevant_tables);
+            // Use skill examples if available, fall back to built-in.
+            if let Some(ref skill) = self.skill {
+                if !skill.examples.is_empty() {
+                    self.push_skill_examples(&mut prompt, skill);
+                } else {
+                    self.push_example(&mut prompt, relevant_tables);
+                }
+            } else {
+                self.push_example(&mut prompt, relevant_tables);
+            }
         }
 
         prompt
@@ -304,22 +328,31 @@ impl PromptBuilder {
             }
             prompt.push('\n');
         }
+        prompt.push_str("Remember: referencing `table.column` in SELECT without joining `table` first is invalid.\n\n");
+    }
+
+    /// Returns true if a feature should be forbidden by the active skill.
+    fn is_forbidden_by_skill(&self, feature: &str) -> bool {
+        self.skill
+            .as_ref()
+            .is_some_and(|s| s.forbid_features.iter().any(|f| f == feature))
     }
 
     fn push_dialect_constraints(&self, prompt: &mut String) {
         let dialect_name = sql_dialect_name(self.dialect.dialect);
 
         let feature_flags: Vec<String> = [
-            ("CTE", self.dialect.supports_cte),
-            ("Window", self.dialect.supports_window_functions),
-            ("JSON", self.dialect.supports_json_operations),
-            ("DISTINCT", self.dialect.allow_distinct),
-            ("OFFSET", self.dialect.supports_offset),
-            ("FETCH", self.dialect.supports_fetch),
+            ("ctes", self.dialect.supports_cte),
+            ("window_functions", self.dialect.supports_window_functions),
+            ("json_operations", self.dialect.supports_json_operations),
+            ("distinct", self.dialect.allow_distinct),
+            ("offset", self.dialect.supports_offset),
+            ("fetch", self.dialect.supports_fetch),
         ]
         .iter()
         .map(|(name, enabled)| {
-            if *enabled {
+            let enabled = *enabled && !self.is_forbidden_by_skill(name);
+            if enabled {
                 format!("+{name}")
             } else {
                 format!("-{name}")
@@ -367,6 +400,35 @@ impl PromptBuilder {
     }
 
     /// Planning heuristics that keep plans simple and JSON-safe for small models.
+    /// Injects skill-level instructions as a block of additional guidance.
+    fn push_skill_instructions(&self, prompt: &mut String, skill: &PromptSkill) {
+        if skill.instructions.is_empty() {
+            return;
+        }
+        prompt.push_str("## Skill Instructions\n");
+        for instruction in &skill.instructions {
+            let _ = writeln!(prompt, "- {instruction}");
+        }
+        prompt.push('\n');
+    }
+
+    /// Pushes skill-provided examples (question + plan pairs).
+    fn push_skill_examples(&self, prompt: &mut String, skill: &PromptSkill) {
+        prompt.push_str("## Examples\n");
+        for example in &skill.examples {
+            let plan_str = serde_json::to_string(&example.plan).unwrap_or_default();
+            let _ = writeln!(
+                prompt,
+                "Q: {}\nA: {plan_str}\n",
+                example.question
+            );
+        }
+        let _ = writeln!(
+            prompt,
+            "The real response must obey the current schema and dialect.\n",
+        );
+    }
+
     fn push_planning_rules(&self, prompt: &mut String) {
         prompt.push_str(
             "## Planning Rules\n\
@@ -377,6 +439,7 @@ impl PromptBuilder {
              5. Only use GROUP BY when the question asks for \"each / every / per\". For those, always put the aggregate alias in HAVING, not WHERE.\n\
              6. \"all combinations / every pairing / cartesian product\" questions: use CROSS JOIN with no `on` condition.\n\
              7. Output valid JSON only — no markdown fences, no trailing backticks, no comments, no raw SQL.\n\
+             8. Use EXACT column names from the Schema section above. Never invent, guess, or rename columns. If the Schema lists `products.price`, use `products.price` — NOT `products.unit_price` or any other name.\n\
              \n",
         );
     }
@@ -501,48 +564,18 @@ impl PromptBuilder {
             "## JSON Type Reminder\n\
              Every tagged object must include a `\"type\"` field matching the JSON Schema above.\n\
              \n\
-             ### Common Mistakes — WRONG vs RIGHT\n\
+             ### ANTI-PATTERNS — NEVER write these\n\
              \n\
-             1. AGGREGATE IN SELECT — Must use `expr` wrapper:\n\
-             WRONG: {{\"type\":\"function_call\",\"name\":\"sum\",\"args\":[...]}}\n\
-             RIGHT: {{\"type\":\"expr\",\"expression\":{{\"type\":\"function_call\",\"name\":\"sum\",\"args\":[...]}},\"alias\":\"total\"}}\n\
-             \n\
-             2. ORDER BY DESCENDING — Use boolean flag, not `desc()` function:\n\
-             WRONG: {{\"expr\":{{\"type\":\"function_call\",\"name\":\"desc\",\"args\":[{{\"type\":\"column_ref\",\"column\":\"total\"}}]}},\"descending\":false}}\n\
-             RIGHT: {{\"expr\":{{\"type\":\"column_ref\",\"column\":\"total\"}},\"descending\":true}}\n\
-             \n\
-             3. AGGREGATE FILTER — Use HAVING, not WHERE:\n\
-             WRONG: {{\"where\":{{\"type\":\"comparison\",\"left\":{{\"type\":\"function_call\",\"name\":\"count\",...}},\"op\":\"gt\",\"right\":{{\"type\":\"literal\",\"value\":2}}}}}}\n\
-             RIGHT: {{\"having\":{{\"type\":\"comparison\",\"left\":{{\"type\":\"function_call\",\"name\":\"count\",...}},\"op\":\"gt\",\"right\":{{\"type\":\"literal\",\"value\":2}}}}}}\n\
-             \n\
-             4. ORDER BY ALIAS — Use raw expression, never alias:\n\
-             WRONG: {{\"expr\":{{\"type\":\"column_ref\",\"column\":\"total_amount\"}},\"descending\":true}}\n\
-             RIGHT: {{\"expr\":{{\"type\":\"function_call\",\"name\":\"sum\",\"args\":[{{\"type\":\"column_ref\",\"column\":\"total\",\"table\":\"orders\"}}]}},\"descending\":true}}\n\
-             \n\
-             5. TOP-LEVEL FIELDS — group_by, having, order_by, limit, offset go at the TOP level:\n\
-             WRONG: {{\"where\":{{\"type\":\"and\",\"left\":{{\"type\":\"comparison\"}},\"right\":{{\"type\":\"comparison\"}},\"group_by\":[...],\"having\":{{...}}}}}}\n\
-             RIGHT: {{\"where\":{{\"type\":\"and\",\"left\":{{...}},\"right\":{{...}}}},\"group_by\":[...],\"having\":{{...}}}}\n\
+             1. NEVER nest aggregate functions: `SUM(SUM(x))` → write `SUM(x)` once.\n\
+             2. NEVER use `SUM` on a plain column like `orders.total` that already contains the value — use the column directly.\n\
+             3. NEVER put `GROUP BY literal null` — it is invalid. GROUP BY must list actual column references.\n\
+             4. NEVER embed a SQL function in a column name string. `EXTRACT(MONTH FROM created_at)` is not a column — use `function_call` with `\"name\":\"extract\"` and proper `args`.\n\
              \n\
              ### Quick Reference\n\
+             - `\"type\":\"expr\"` wraps computed expressions inside `select` only. In `where`/`having`/`order_by`/`group_by`, use the inner expression type directly.\n\
+             - Aggregates like `sum`/`count` go in HAVING, not WHERE.\n\
              - `data_type` only belongs inside `literal` objects.\n\
-             - Inside `select` array: each item is {{type, column/expression, alias?}} — use `\"type\":\"column_ref\"` for columns, `\"type\":\"expr\"` for computed expressions.\n\
-             - `\"type\": \"expr\"` is ONLY valid in `select`. In all other positions (order_by[].expr, group_by, where, having, on), use the inner expression type directly: `{{\"type\":\"function_call\",...}}`, `{{\"type\":\"binary_op\",...}}`, etc.\n\
-             - WHERE and HAVING are separate top-level fields. Aggregate conditions go in HAVING; row-level conditions go in WHERE.\n\
-             \n\
-             ### Valid Expression Types\n\
-             `{{\"type\":\"column_ref\",\"table\":?,\"column\":\"name\"}}` — column reference\n\
-             `{{\"type\":\"literal\",\"value\":...,\"data_type\":\"...\"}}` — literal value\n\
-             `{{\"type\":\"function_call\",\"name\":\"sum\",\"args\":[...]}}` — function call\n\
-             `{{\"type\":\"binary_op\",\"left\":{{...}},\"op\":\"add|sub|mul|div\",\"right\":{{...}}}}` — arithmetic\n\
-             \n\
-             ### Valid Predicate Types\n\
-             `{{\"type\":\"comparison\",\"left\":{{...}},\"op\":\"eq|neq|gt|gte|lt|lte\",\"right\":{{...}}}}`\n\
-             `{{\"type\":\"and|or\",\"left\":{{...}},\"right\":{{...}}}}`\n\
-             `{{\"type\":\"not\",\"child\":{{...}}}}`\n\
-             `{{\"type\":\"between\",\"expr\":{{...}},\"low\":{{...}},\"high\":{{...}}}}`\n\
-             `{{\"type\":\"is_null\",\"expr\":{{...}}}}`\n\
-             \n\
-             Output JSON only — no markdown fences.\n\
+             - Output ONLY valid JSON — no markdown fences.\n\
              \n",
         );
     }

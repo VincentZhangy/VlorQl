@@ -2810,7 +2810,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .with_schema(Arc::clone(&schema))
         .with_dialect_name("postgres")
         .with_policy(PolicyConfig::default())
-        .with_max_retries(1);
+        .with_max_retries(2);
     if let Some(client) = llm_client {
         builder = builder.with_llm_client(client);
     }
@@ -2838,38 +2838,15 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
 
     let mut all_compiled = Vec::with_capacity(count);
-    let preset_plans = build_all_plans();
     if is_llm_mode {
         for (i, question) in QUESTIONS.iter().enumerate() {
             println!("[{}/{}] 查询: \"{}\"", i + 1, count, question);
-            match vlorql.query(question).await {
-                Ok(compiled) => {
-                    println!("[OK]\n");
-                    all_compiled.push(compiled);
-                }
-                Err(e) => {
-                    eprintln!("[WARN] LLM 生成失败，使用预设 Plan 回退: {e}");
-                    // 回退到预设 Plan
-                    if let Some(plan) = preset_plans.get(i) {
-                        match vlorql.compile_only(&ValidatedPlan(Arc::new(plan.clone()))) {
-                            Ok(compiled) => {
-                                eprintln!("[OK] 预设 Plan 编译成功\n");
-                                all_compiled.push(compiled);
-                            }
-                            Err(e2) => {
-                                eprintln!("[ERROR] 预设 Plan 编译也失败: {e2}");
-                                return Err(e2.into());
-                            }
-                        }
-                    } else {
-                        eprintln!("[ERROR] 没有预设 Plan 可用于查询 {}", i + 1);
-                        return Err(e.into());
-                    }
-                }
-            }
+            let compiled = vlorql.query(question).await?;
+            println!("[OK]\n");
+            all_compiled.push(compiled);
         }
     } else {
-        for plan in preset_plans {
+        for plan in build_all_plans() {
             let validated = ValidatedPlan(Arc::new(plan));
             let compiled = vlorql.compile_only(&validated)?;
             all_compiled.push(compiled);

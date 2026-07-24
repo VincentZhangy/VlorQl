@@ -50,6 +50,7 @@ pub fn build_projection(val: &Value) -> Result<Projection, BuildError> {
         // already, but this handles edge cases where normalization missed one.
         "function_call" | "FunctionCall"
         | "binary_op" | "BinaryOp"
+        | "case" | "Case"
         | "literal" | "Literal"
         | "subquery" | "SubQuery" => {
             let expression = build_expression(val)

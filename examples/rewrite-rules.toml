@@ -1,0 +1,11 @@
+[[rules]]
+name = "strip-final-semicolons"
+pattern = ";\\s*$"
+replacement = ""
+description = "Remove trailing semicolons from generated SQL"
+
+[[rules]]
+name = "pg-math-precision"
+pattern = "(?i)\\bINTEGER\\s*:\\s*(\\d+)\\s*/\\s*(\\d+)"
+replacement = "NUMERIC($1) / NUMERIC($2)"
+description = "Cast integer division to numeric for PostgreSQL precision"

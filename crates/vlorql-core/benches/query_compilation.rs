@@ -15,10 +15,10 @@
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use serde_json::json;
 use std::sync::Arc;
-use vlorql_core::compile::QueryBuilder;
+use vlorql_core::compile::{DialectConfig, QueryBuilder};
 use vlorql_core::schema::{
     BinaryOperator, CommonTableExpression, ComparisonOperator, DataType, Expression, FromClause,
-    IdentifierQuoting, InTarget, JoinClause, JoinType, OrderByTerm, Predicate, Projection,
+    InTarget, JoinClause, JoinType, OrderByTerm, Predicate, Projection,
     QueryPlan, SqlDialect,
 };
 use vlorql_core::validate::ValidatedPlan;
@@ -356,21 +356,19 @@ fn bench_query_build(c: &mut Criterion) {
     let plan = build_complex_plan();
     let mut group = c.benchmark_group("query_build");
 
-    for dialect in [SqlDialect::Postgres, SqlDialect::Sqlite] {
-        let label = match dialect {
-            SqlDialect::Postgres => "postgres",
-            SqlDialect::Sqlite => "sqlite",
-            SqlDialect::MySql => "mysql",
+    for name in ["postgres", "sqlite"] {
+        let config = match name {
+            "postgres" => DialectConfig::default_postgres(),
+            _ => DialectConfig::default_sqlite(),
         };
         group.bench_with_input(
-            BenchmarkId::from_parameter(label),
-            &dialect,
-            |bencher, &dialect| {
+            BenchmarkId::from_parameter(name),
+            &config,
+            |bencher, config| {
                 bencher.iter(|| {
                     let result = QueryBuilder::new(
                         criterion::black_box(&plan),
-                        dialect,
-                        IdentifierQuoting::DoubleQuote,
+                        config,
                     )
                     .build();
                     criterion::black_box(result.expect("complex plan should compile"))

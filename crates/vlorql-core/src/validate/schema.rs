@@ -30,6 +30,18 @@ fn validate_plan_with_outer(
     errors: &mut Vec<VlorQLError>,
     outer_scope: Option<&QueryScope>,
 ) {
+    // DISTINCT + GROUP BY simultaneously is semantically ambiguous:
+    // it is unclear whether DISTINCT is applied before or after
+    // aggregation.  Reject this combination to force clarity.
+    if plan.distinct && plan.group_by.is_some() && plan.group_by.as_ref().is_some_and(|g| !g.is_empty()) {
+        errors.push(VlorQLError::validation(
+            crate::errors::ValidationErrorKind::AggregationMismatch {
+                message: "DISTINCT and GROUP BY cannot be used together: the combination is semantically ambiguous".to_owned(),
+            },
+            serde_json::json!({"distinct": true, "group_by": plan.group_by}),
+        ));
+    }
+
     if let Some(ctes) = &plan.ctes {
         for cte in ctes {
             validate_plan_with_outer(&cte.query, schema, errors, None);

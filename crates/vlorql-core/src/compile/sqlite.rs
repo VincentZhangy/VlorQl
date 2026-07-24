@@ -1,18 +1,15 @@
-//! SQLite compiler implementation.
-
-use super::{CompiledQuery, QueryBuilder, SqlCompiler};
+use super::{CompiledQuery, DialectConfig, QueryBuilder, SqlCompiler};
 use crate::errors::VlorQLError;
-use crate::schema::{IdentifierQuoting, SqlDialect};
+use crate::schema::SqlDialect;
 use crate::validate::ValidatedPlan;
 
-/// Compiles plans using SQLite quoting and positional `?` placeholders.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct SQLiteCompiler;
 
 impl SqlCompiler for SQLiteCompiler {
     fn compile(&self, plan: &ValidatedPlan) -> Result<CompiledQuery, VlorQLError> {
-        let (sql, parameters) =
-            QueryBuilder::new(plan, SqlDialect::Sqlite, IdentifierQuoting::DoubleQuote).build()?;
+        let config = DialectConfig::default_sqlite();
+        let (sql, parameters) = QueryBuilder::new(plan, &config).build()?;
         Ok(CompiledQuery {
             sql,
             parameters,

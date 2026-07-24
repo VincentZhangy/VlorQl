@@ -31,6 +31,17 @@ pub fn normalize_item(item: &mut serde_json::Value) -> bool {
 
     let mut changed = false;
 
+    // Case 0.5: `{"type": "expr", "expression": {...}, "alias": "...", "descending": true}`
+    // LLM sometimes uses the select-projection `expr` wrapper inside order_by.
+    // Extract `expression` → `expr` and drop the wrapper fields.
+    if obj.get("type").and_then(|t| t.as_str()) == Some("expr") && obj.contains_key("expression") {
+        if let Some(inner) = obj.remove("expression") {
+            obj.insert("expr".to_owned(), inner);
+            changed = true;
+        }
+        obj.remove("type");
+    }
+
     // Case 1: `{"column": "name", "descending": true}` — bare column field.
     // Wrap it into `{"expr": {"type": "column_ref", "column": "..."}, "descending": ...}`.
     if !obj.contains_key("expr") {

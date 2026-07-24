@@ -524,8 +524,11 @@ fn validate_compatible_types(
 ) {
     if !types_compatible(left, right) {
         errors.push(type_mismatch_error(
-            data_type_name(left),
-            data_type_name(right),
+            // Clear "side A vs side B" format so the LLM retry feedback
+            // correctly identifies which side of the comparison has the
+            // wrong type, instead of assuming one side is "correct".
+            format!("{} (left)", data_type_name(left)),
+            format!("{} (right)", data_type_name(right)),
             expression,
             json!({"left": left, "right": right}),
         ));

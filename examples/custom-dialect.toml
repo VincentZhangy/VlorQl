@@ -1,0 +1,25 @@
+name = "custom-postgres"
+identifier_quote = "\""
+placeholder = "\"$%d\""
+limit_offset = "LIMIT %d OFFSET %d"
+supports_cte = true
+supports_window_functions = true
+supports_json_operations = true
+supports_offset = true
+supports_fetch = true
+allow_distinct = true
+allow_select_distinct = true
+max_joins = 20
+allowed_join_types = ["inner", "left", "right", "full", "cross"]
+denied_functions = ["pg_sleep", "pg_read_file", "lo_import"]
+max_group_by_columns = 10
+
+[type_mappings]
+"Int" = "BIGINT"
+"Boolean" = "BOOL"
+"String" = "TEXT"
+
+[function_name_mappings]
+"count" = "COUNT"
+"sum" = "SUM"
+"now" = "now"

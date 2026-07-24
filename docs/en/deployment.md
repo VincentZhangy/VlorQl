@@ -277,6 +277,30 @@ caller with the operator's original `details` payload.
 | `max_tokens`                        | `LlmConfig`                     | Cap the LLM's output length.                                                          |
 | `max_retries`                       | `LlmConfig` + `VlorQl` builder  | Cap the retry budget.                                                                  |
 
+### 3.1.5 TOML/YAML dialect configs
+
+When you need a custom dialect that does not match PostgreSQL, SQLite,
+or MySQL exactly, use `DialectConfig::from_toml` or `DialectConfig::from_yaml`
+to load the configuration from a file.  The file defines identifier
+quoting, placeholder syntax, pagination templates, type mappings,
+and feature flags.  Example at `examples/custom-dialect.toml`.
+
+```rust
+use vlorql_core::compile::{ConfigCompiler, DialectConfig};
+use std::sync::Arc;
+
+let config = DialectConfig::from_toml("path/to/dialect.toml")?;
+let compiler = ConfigCompiler(Arc::new(config));
+```
+
+Rewrite rules can be loaded the same way:
+
+```rust
+use vlorql_core::compile::RewriteEngine;
+
+let engine = RewriteEngine::load_toml("examples/rewrite-rules.toml")?;
+```
+
 ### 3.2 Prompt size
 
 The [`PromptBuilder`] renders the schema, policy, dialect, JSON

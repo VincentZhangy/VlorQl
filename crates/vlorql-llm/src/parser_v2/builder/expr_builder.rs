@@ -344,6 +344,48 @@ pub fn build_expression(val: &Value) -> Result<Expression, BuildError> {
                 query: Box::new(query),
             })
         }
+        "case" => {
+            // CASE WHEN expression
+            let operand = match obj.get("operand") {
+                Some(val) if !val.is_null() => {
+                    Some(Box::new(build_expression(val).map_err(|e| e.at("operand"))?))
+                }
+                _ => None,
+            };
+            let when_thens_arr = req_arr(
+                obj.get("when_thens")
+                    .ok_or_else(|| BuildError::new("", "missing `when_thens` field on case"))?,
+                "when_thens",
+            )?;
+            let mut when_thens = Vec::new();
+            for (i, item) in when_thens_arr.iter().enumerate() {
+                let item_obj = req_obj(item, &format!("when_thens[{i}]"))?;
+                let when = build_expression(
+                    item_obj
+                        .get("when")
+                        .ok_or_else(|| BuildError::new(&format!("when_thens[{i}]"), "missing `when` field"))?,
+                )
+                .map_err(|e| e.at(&format!("when_thens[{i}].when")))?;
+                let then = build_expression(
+                    item_obj
+                        .get("then")
+                        .ok_or_else(|| BuildError::new(&format!("when_thens[{i}]"), "missing `then` field"))?,
+                )
+                .map_err(|e| e.at(&format!("when_thens[{i}].then")))?;
+                when_thens.push(vlorql_core::schema::WhenThen { when, then });
+            }
+            let else_result = match obj.get("else_result") {
+                Some(val) if !val.is_null() => {
+                    Some(Box::new(build_expression(val).map_err(|e| e.at("else_result"))?))
+                }
+                _ => None,
+            };
+            Ok(Expression::Case {
+                operand,
+                when_thens,
+                else_result,
+            })
+        }
         _ => {
             // Fallback: if type_str is a known aggregate function name,
             // treat it as a FunctionCall.  The LLM sometimes emits

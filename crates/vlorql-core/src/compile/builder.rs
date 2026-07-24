@@ -4,10 +4,11 @@
 /// "no limit" when only OFFSET is specified (LIMIT offset, <unlimited>).
 const MYSQL_UNLIMITED_LIMIT: u64 = 18446744073709551615;
 
+use super::dialect_config::DialectConfig;
 use super::types::Parameter;
 use crate::errors::{CompilationErrorKind, VlorQLError};
 use crate::schema::{
-    BinaryOperator, ComparisonOperator, DataType, Expression, FromClause, IdentifierQuoting,
+    BinaryOperator, ComparisonOperator, DataType, Expression, FromClause,
     InTarget, JoinType, Predicate, Projection, QueryPlan, SetOperation, SetOperationClause,
     SqlDialect, WindowFrame, WindowFrameBound, WindowFrameKind, WindowSpec,
 };
@@ -20,9 +21,9 @@ use std::fmt::Write;
 /// Builds SQL while preserving the exact textual order of bind parameters.
 pub struct QueryBuilder<'a> {
     plan: &'a ValidatedPlan,
+    config: &'a DialectConfig,
     dialect: SqlDialect,
     parameters: Vec<Parameter>,
-    quote_style: IdentifierQuoting,
     /// Stack of alias maps for each query level (outermost first).
     /// Each map resolves table names (and aliases) to effective aliases.
     alias_stack: Vec<HashMap<String, String>>,
@@ -30,22 +31,32 @@ pub struct QueryBuilder<'a> {
     /// Used so the SAME literal expression always produces the SAME placeholder,
     /// which PostgreSQL requires for GROUP BY / ORDER BY matching.
     param_cache: HashMap<(String, DataType), usize>,
+    /// When true, numeric literals are rendered with explicit CAST so that
+    /// PostgreSQL can infer their types (required in recursive CTE contexts
+    /// where parameterized literals are inferred as `text`).
+    in_cte: bool,
 }
 
 impl<'a> QueryBuilder<'a> {
-    /// Creates a builder for one validated plan and output dialect.
+    /// Creates a builder for one validated plan and dialect config.
     pub fn new(
         plan: &'a ValidatedPlan,
-        dialect: SqlDialect,
-        quote_style: IdentifierQuoting,
+        config: &'a DialectConfig,
     ) -> Self {
+        let dialect = match config.name.to_lowercase().as_str() {
+            "postgres" | "postgresql" => SqlDialect::Postgres,
+            "sqlite" => SqlDialect::Sqlite,
+            "mysql" | "my_sql" => SqlDialect::MySql,
+            _ => SqlDialect::Postgres,
+        };
         let mut builder = Self {
             plan,
+            config,
             dialect,
             parameters: Vec::new(),
-            quote_style,
             alias_stack: Vec::new(),
             param_cache: HashMap::new(),
+            in_cte: false,
         };
         builder.push_alias_scope(plan.as_plan());
         builder
@@ -104,28 +115,21 @@ impl<'a> QueryBuilder<'a> {
     ) -> Result<(), VlorQLError> {
         match expression {
             Expression::Literal { value, data_type } => {
-                // Inline small integer/float literals directly in the SQL so
-                // PostgreSQL can infer column types (especially in recursive CTEs
-                // where parameterized literals are inferred as `text`).
-                if *data_type == DataType::Int {
-                    if let Some(n) = value.as_i64() {
-                        write!(buf, "{n}").map_err(formatting_error)?;
-                        return Ok(());
+                let placeholder = self.add_parameter(value.clone(), *data_type);
+                // In CTE contexts, PostgreSQL cannot infer the type of
+                // parameterized literals — add explicit CAST so the type
+                // is known (e.g. `CAST($1 AS integer)`).
+                if self.in_cte && self.dialect == SqlDialect::Postgres {
+                    match data_type {
+                        DataType::Int => write!(buf, "CAST({placeholder} AS INTEGER)"),
+                        DataType::Float => write!(buf, "CAST({placeholder} AS DOUBLE PRECISION)"),
+                        DataType::Boolean => write!(buf, "CAST({placeholder} AS BOOLEAN)"),
+                        _ => write!(buf, "{placeholder}"),
                     }
+                    .map_err(formatting_error)?;
+                } else {
+                    buf.push_str(&placeholder);
                 }
-                if *data_type == DataType::Float {
-                    if let Some(f) = value.as_f64() {
-                        write!(buf, "{f}").map_err(formatting_error)?;
-                        return Ok(());
-                    }
-                }
-                if *data_type == DataType::Boolean {
-                    if let Some(b) = value.as_bool() {
-                        write!(buf, "{b}").map_err(formatting_error)?;
-                        return Ok(());
-                    }
-                }
-                buf.push_str(&self.add_parameter(value.clone(), *data_type));
                 Ok(())
             }
             Expression::ColumnRef { table, column } => {
@@ -319,24 +323,20 @@ impl<'a> QueryBuilder<'a> {
     /// Deduplicates parameters: the same (value, data_type) pair always produces
     /// the same placeholder index, which PostgreSQL requires for GROUP BY matching.
     pub fn add_parameter(&mut self, value: Value, data_type: DataType) -> String {
-        // Build a cache key from the serialized value + data_type string.
         let val_str = serde_json::to_string(&value).unwrap_or_default();
         let key = (val_str, data_type);
 
-        // Check the dedup cache first.
         if let Some(&idx) = self.param_cache.get(&key) {
-            // PostgreSQL placeholders are 1-based.
-            return format!("${}", idx + 1);
+            if self.config.placeholder.contains("{index}") {
+                return self.config.placeholder_str(idx + 1);
+            }
+            return self.config.placeholder_str(0);
         }
 
-        // New parameter: push and cache.
         let idx = self.parameters.len();
         self.parameters.push(Parameter { value, data_type });
         self.param_cache.insert(key, idx);
-        match self.dialect {
-            SqlDialect::Postgres => format!("${}", idx + 1),
-            SqlDialect::Sqlite | SqlDialect::MySql => "?".to_owned(),
-        }
+        self.config.placeholder_str(idx + 1)
     }
 
     /// Returns the dialect selected for this builder.
@@ -352,14 +352,18 @@ impl<'a> QueryBuilder<'a> {
         self.build_where(plan, sql)?;
         self.build_group_by(plan, sql)?;
         self.build_having(plan, sql)?;
-        self.build_order_by(plan, sql)?;
-        self.build_limit_offset(plan, sql)?;
         self.alias_stack.pop();
 
-        // Render set operation (UNION / INTERSECT / EXCEPT) after the primary query.
+        // Render set operation (UNION / INTERSECT / EXCEPT) AFTER the
+        // primary query but BEFORE ORDER BY / LIMIT / OFFSET, because
+        // PostgreSQL (and most dialects) require ORDER BY to appear
+        // after the set operation, not before it.
         if let Some(set_op) = &plan.set_operation {
             self.render_set_operation(set_op, sql)?;
         }
+
+        self.build_order_by(plan, sql)?;
+        self.build_limit_offset(plan, sql)?;
 
         Ok(())
     }
@@ -380,7 +384,12 @@ impl<'a> QueryBuilder<'a> {
             }
             let name = self.quote_identifier(&cte.name)?;
             write!(sql, "{name} AS (").map_err(formatting_error)?;
+            // Enable CTE mode so numeric literals get explicit type casts
+            // (PostgreSQL cannot infer parameter types in recursive CTEs).
+            let saved = self.in_cte;
+            self.in_cte = true;
             self.build_query(&cte.query, sql)?;
+            self.in_cte = saved;
             sql.push(')');
         }
         sql.push(' ');
@@ -528,7 +537,8 @@ impl<'a> QueryBuilder<'a> {
             }
             (SqlDialect::MySql, None, Some(offset)) => {
                 let offset_ph = self.add_parameter(Value::from(offset), DataType::Int);
-                write!(sql, " LIMIT {offset_ph}, {MYSQL_UNLIMITED_LIMIT}").map_err(formatting_error)
+                write!(sql, " LIMIT {offset_ph}, {MYSQL_UNLIMITED_LIMIT}")
+                    .map_err(formatting_error)
             }
             (SqlDialect::Sqlite, None, Some(offset)) => {
                 let offset_ph = self.add_parameter(Value::from(offset), DataType::Int);
@@ -583,29 +593,12 @@ impl<'a> QueryBuilder<'a> {
             ));
         }
 
-        match self.effective_quote_style() {
-            IdentifierQuoting::Never => {
-                validate_unquoted_identifier(identifier)?;
-                Ok(identifier.to_owned())
-            }
-            IdentifierQuoting::DoubleQuote => {
-                Ok(format!("\"{}\"", identifier.replace('"', "\"\"")))
-            }
-            IdentifierQuoting::Backtick => Ok(format!("`{}`", identifier.replace('`', "``"))),
-            IdentifierQuoting::Always => Err(compilation_error(
-                "unresolved_quote_style",
-                json!({"identifier": identifier}),
-            )),
-        }
-    }
-
-    fn effective_quote_style(&self) -> IdentifierQuoting {
-        match self.quote_style {
-            IdentifierQuoting::Always => match self.dialect {
-                SqlDialect::MySql => IdentifierQuoting::Backtick,
-                SqlDialect::Postgres | SqlDialect::Sqlite => IdentifierQuoting::DoubleQuote,
-            },
-            quote_style => quote_style,
+        let style = self.config.identifier_quote.as_str();
+        if style == "never" {
+            validate_unquoted_identifier(identifier)?;
+            Ok(identifier.to_owned())
+        } else {
+            Ok(self.config.quote_identifier(identifier))
         }
     }
 
@@ -722,24 +715,37 @@ impl<'a> QueryBuilder<'a> {
         Ok(())
     }
 
-    fn render_binary_operator(&self, operator: BinaryOperator) -> &'static str {
+    fn render_binary_operator(&self, operator: BinaryOperator) -> Cow<'static, str> {
         match operator {
-            BinaryOperator::Add => "+",
-            BinaryOperator::Sub => "-",
-            BinaryOperator::Mul => "*",
-            BinaryOperator::Div => "/",
-            BinaryOperator::Mod => "%",
-            BinaryOperator::And => "AND",
-            BinaryOperator::Or => "OR",
-            BinaryOperator::Eq => "=",
-            BinaryOperator::Neq => "<>",
-            BinaryOperator::Gt => ">",
-            BinaryOperator::Lt => "<",
-            BinaryOperator::Gte => ">=",
-            BinaryOperator::Lte => "<=",
-            BinaryOperator::Like => "LIKE",
-            BinaryOperator::ILike if self.dialect == SqlDialect::Postgres => "ILIKE",
-            BinaryOperator::ILike => "LIKE",
+            BinaryOperator::Add => Cow::Borrowed("+"),
+            BinaryOperator::Sub => Cow::Borrowed("-"),
+            BinaryOperator::Mul => Cow::Borrowed("*"),
+            BinaryOperator::Div => Cow::Borrowed("/"),
+            BinaryOperator::Mod => Cow::Borrowed("%"),
+            BinaryOperator::And => Cow::Borrowed("AND"),
+            BinaryOperator::Or => Cow::Borrowed("OR"),
+            BinaryOperator::Eq => Cow::Borrowed("="),
+            BinaryOperator::Neq => Cow::Borrowed("<>"),
+            BinaryOperator::Gt => Cow::Borrowed(">"),
+            BinaryOperator::Lt => Cow::Borrowed("<"),
+            BinaryOperator::Gte => Cow::Borrowed(">="),
+            BinaryOperator::Lte => Cow::Borrowed("<="),
+            BinaryOperator::Like => Cow::Borrowed("LIKE"),
+            BinaryOperator::ILike => {
+                if self.dialect == SqlDialect::Postgres
+                    && !self.config.type_mappings.contains_key("ilike")
+                {
+                    Cow::Borrowed("ILIKE")
+                } else {
+                    Cow::Owned(
+                        self.config
+                            .type_mappings
+                            .get("ilike")
+                            .cloned()
+                            .unwrap_or_else(|| "LIKE".to_owned()),
+                    )
+                }
+            }
         }
     }
 
@@ -761,17 +767,30 @@ impl<'a> QueryBuilder<'a> {
     fn render_comparison_operator(
         &self,
         operator: ComparisonOperator,
-    ) -> Result<&'static str, VlorQLError> {
+    ) -> Result<Cow<'static, str>, VlorQLError> {
         match operator {
-            ComparisonOperator::Eq => Ok("="),
-            ComparisonOperator::Neq => Ok("<>"),
-            ComparisonOperator::Gt => Ok(">"),
-            ComparisonOperator::Lt => Ok("<"),
-            ComparisonOperator::Gte => Ok(">="),
-            ComparisonOperator::Lte => Ok("<="),
-            ComparisonOperator::Like => Ok("LIKE"),
-            ComparisonOperator::ILike if self.dialect == SqlDialect::Postgres => Ok("ILIKE"),
-            ComparisonOperator::ILike => Ok("LIKE"),
+            ComparisonOperator::Eq => Ok(Cow::Borrowed("=")),
+            ComparisonOperator::Neq => Ok(Cow::Borrowed("<>")),
+            ComparisonOperator::Gt => Ok(Cow::Borrowed(">")),
+            ComparisonOperator::Lt => Ok(Cow::Borrowed("<")),
+            ComparisonOperator::Gte => Ok(Cow::Borrowed(">=")),
+            ComparisonOperator::Lte => Ok(Cow::Borrowed("<=")),
+            ComparisonOperator::Like => Ok(Cow::Borrowed("LIKE")),
+            ComparisonOperator::ILike => {
+                if self.dialect == SqlDialect::Postgres
+                    && !self.config.type_mappings.contains_key("ilike")
+                {
+                    Ok(Cow::Borrowed("ILIKE"))
+                } else {
+                    Ok(Cow::Owned(
+                        self.config
+                            .type_mappings
+                            .get("ilike")
+                            .cloned()
+                            .unwrap_or_else(|| "LIKE".to_owned()),
+                    ))
+                }
+            }
             ComparisonOperator::In => Err(compilation_error(
                 "comparison_in_requires_in_predicate",
                 json!({"operator": operator}),
@@ -784,10 +803,12 @@ impl<'a> QueryBuilder<'a> {
     }
 
     fn render_join_type(&self, join_type: JoinType) -> Result<&'static str, VlorQLError> {
+        let is_mysql = self.dialect == SqlDialect::MySql
+            || self.config.name.to_lowercase().contains("mysql");
         match join_type {
-            JoinType::Full if self.dialect == SqlDialect::MySql => Err(compilation_error(
+            JoinType::Full if is_mysql => Err(compilation_error(
                 "unsupported_full_join",
-                json!({"dialect": "mysql", "join_type": "full"}),
+                json!({"dialect": self.config.name, "join_type": "full"}),
             )),
             JoinType::Inner => Ok("INNER JOIN"),
             JoinType::Left => Ok("LEFT JOIN"),

@@ -225,8 +225,7 @@ fn unsafe_identifier_is_rejected_before_sql_is_built() {
     // `IdentifierQuoting::Never` (unquoted) which exercises the
     // strict validator; with `DoubleQuote` quoting the double quote
     // would be safely escaped to `""`.
-    use vlorql_core::compile::QueryBuilder;
-    use vlorql_core::schema::IdentifierQuoting;
+    use vlorql_core::compile::{DialectConfig, QueryBuilder};
 
     let mut plan = base_plan();
     plan.from = FromClause {
@@ -234,13 +233,14 @@ fn unsafe_identifier_is_rejected_before_sql_is_built() {
         alias: None,
     };
     let validated = ValidatedPlan(Arc::new(plan));
-    let error = QueryBuilder::new(
-        &validated,
-        vlorql_core::schema::SqlDialect::Postgres,
-        IdentifierQuoting::Never,
-    )
-    .build()
-    .expect_err("unsafe identifier must be rejected in unquoted mode");
+    let config = DialectConfig {
+        name: "postgres".to_owned(),
+        identifier_quote: "never".to_owned(),
+        ..DialectConfig::default_postgres()
+    };
+    let error = QueryBuilder::new(&validated, &config)
+        .build()
+        .expect_err("unsafe identifier must be rejected in unquoted mode");
     assert_eq!(error.error_code(), "C001");
     assert!(error.to_string().contains("invalid_unquoted_identifier"));
 }
@@ -252,8 +252,7 @@ fn double_quoted_identifier_escapes_dangerous_characters() {
     // out of the identifier. The compiled SQL is still safe even when
     // the table name contains characters that would otherwise be
     // syntactically significant.
-    use vlorql_core::compile::QueryBuilder;
-    use vlorql_core::schema::IdentifierQuoting;
+    use vlorql_core::compile::{DialectConfig, QueryBuilder};
 
     let mut plan = base_plan();
     plan.from = FromClause {
@@ -261,13 +260,10 @@ fn double_quoted_identifier_escapes_dangerous_characters() {
         alias: None,
     };
     let validated = ValidatedPlan(Arc::new(plan));
-    let (sql, _params) = QueryBuilder::new(
-        &validated,
-        vlorql_core::schema::SqlDialect::Postgres,
-        IdentifierQuoting::DoubleQuote,
-    )
-    .build()
-    .expect("double-quote mode must safely escape the identifier");
+    let config = DialectConfig::default_postgres();
+    let (sql, _params) = QueryBuilder::new(&validated, &config)
+        .build()
+        .expect("double-quote mode must safely escape the identifier");
     // The whole name, including the dangerous characters, must be
     // wrapped in double quotes with embedded quotes doubled.
     assert!(sql.contains("\"users\"\"; DROP TABLE x; --\""));

@@ -29,6 +29,8 @@ pub fn fix_plan(plan: &mut QueryPlan) -> bool {
     changed |= fix_missing_aliases(plan);
     // Replace ORDER BY alias references with the original SELECT expressions.
     changed |= fix_order_by_aliases(plan);
+    // Replace WHERE/Having column references that match SELECT aliases.
+    changed |= fix_where_alias_refs(plan);
     // Move aggregate conditions from WHERE to HAVING.
     changed |= fix_where_aggregates(plan);
     // Recursively fix CTE subqueries.
@@ -472,6 +474,132 @@ fn find_alias_match<'a>(
 pub fn apply_fixes(mut plan: QueryPlan) -> QueryPlan {
     let _ = fix_plan(&mut plan);
     plan
+}
+
+/// Replace column references in WHERE/Having predicates that match a SELECT
+/// alias with the original expression from the alias.
+///
+/// Small LLMs frequently reference SELECT aliases (e.g. `orders.total_amount`)
+/// in WHERE/ORDER BY clauses as if they were real columns.  This function
+/// detects such references and replaces them with the alias's source expression.
+#[must_use]
+fn fix_where_alias_refs(plan: &mut QueryPlan) -> bool {
+    let alias_map = build_alias_map(plan);
+    if alias_map.is_empty() || (plan.r#where.is_none() && plan.having.is_none()) {
+        return false;
+    }
+
+    let mut changed = false;
+
+    if let Some(ref mut predicate) = plan.r#where {
+        changed |= replace_alias_in_predicate(predicate, &alias_map);
+    }
+    if let Some(ref mut predicate) = plan.having {
+        changed |= replace_alias_in_predicate(predicate, &alias_map);
+    }
+
+    changed
+}
+
+/// Recursively walk a predicate tree and replace ColumnRef expressions
+/// whose column name matches a SELECT alias with the alias's expression.
+fn replace_alias_in_predicate(
+    predicate: &mut Predicate,
+    alias_map: &[(String, Expression)],
+) -> bool {
+    let mut changed = false;
+    match predicate {
+        Predicate::And { left, right }
+        | Predicate::Or { left, right } => {
+            changed |= replace_alias_in_predicate(left, alias_map);
+            changed |= replace_alias_in_predicate(right, alias_map);
+        }
+        Predicate::Not { child } => {
+            changed |= replace_alias_in_predicate(child, alias_map);
+        }
+        Predicate::Comparison { left, right, .. } => {
+            changed |= replace_alias_in_expression(left, alias_map);
+            changed |= replace_alias_in_expression(right, alias_map);
+        }
+        Predicate::Between { expr, low, high } => {
+            changed |= replace_alias_in_expression(expr, alias_map);
+            changed |= replace_alias_in_expression(low, alias_map);
+            changed |= replace_alias_in_expression(high, alias_map);
+        }
+        Predicate::In { expr, target } => {
+            changed |= replace_alias_in_expression(expr, alias_map);
+            if let InTarget::Values(items) = target {
+                for item in items.iter_mut() {
+                    changed |= replace_alias_in_expression(item, alias_map);
+                }
+            }
+        }
+        Predicate::Like { expr, .. } => {
+            changed |= replace_alias_in_expression(expr, alias_map);
+        }
+        Predicate::IsNull { expr } => {
+            changed |= replace_alias_in_expression(expr, alias_map);
+        }
+        Predicate::Exists { query } => {
+            changed |= fix_where_alias_refs(query);
+        }
+    }
+    changed
+}
+
+/// Recursively walk an expression tree and replace ColumnRef nodes whose
+/// column name matches a SELECT alias with the alias's source expression.
+fn replace_alias_in_expression(
+    expr: &mut Expression,
+    alias_map: &[(String, Expression)],
+) -> bool {
+    match expr {
+        Expression::ColumnRef { column, .. } => {
+            if let Some((_, replacement)) = alias_map.iter().find(|(alias, _)| alias == column) {
+                *expr = replacement.clone();
+                true
+            } else {
+                false
+            }
+        }
+        Expression::FunctionCall { args, .. } => {
+            let mut changed = false;
+            for arg in args.iter_mut() {
+                changed |= replace_alias_in_expression(arg, alias_map);
+            }
+            changed
+        }
+        Expression::BinaryOp { left, right, .. } => {
+            let mut changed = false;
+            changed |= replace_alias_in_expression(left, alias_map);
+            changed |= replace_alias_in_expression(right, alias_map);
+            changed
+        }
+        Expression::Case { operand, when_thens, else_result, .. } => {
+            let mut changed = false;
+            if let Some(op) = operand {
+                changed |= replace_alias_in_expression(op, alias_map);
+            }
+            for wt in when_thens.iter_mut() {
+                changed |= replace_alias_in_expression(&mut wt.when, alias_map);
+                changed |= replace_alias_in_expression(&mut wt.then, alias_map);
+            }
+            if let Some(el) = else_result {
+                changed |= replace_alias_in_expression(el, alias_map);
+            }
+            changed
+        }
+        Expression::WindowFunction { args, .. } => {
+            let mut changed = false;
+            for arg in args.iter_mut() {
+                changed |= replace_alias_in_expression(arg, alias_map);
+            }
+            changed
+        }
+        Expression::SubQuery { query } => fix_where_alias_refs(query),
+        Expression::Literal { .. } => false,
+        Expression::Star => false,
+    }
 }
 
 #[cfg(test)]

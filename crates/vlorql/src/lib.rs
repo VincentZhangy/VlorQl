@@ -22,7 +22,7 @@ use tokio::sync::mpsc;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::Instrument;
 use vlorql_core::compile::{SqlCompiler, get_compiler};
-use vlorql_core::errors::{ConfigErrorKind, LlmErrorKind, ValidationErrorKind, VlorQLError};
+use vlorql_core::errors::{ConfigErrorKind, LlmErrorKind, SchemaErrorKind, ValidationErrorKind, VlorQLError};
 use vlorql_core::observability::{TelemetryGuard, VlorqMetrics, init_telemetry};
 use vlorql_core::optimizer::QueryOptimizer;
 use vlorql_core::policy::{PolicyConfig, PolicyEngine};
@@ -32,7 +32,8 @@ use vlorql_core::statistics::StatisticsProvider;
 use vlorql_core::validate::ValidationPipeline;
 
 pub use vlorql_core::cache::{CompileCache, PromptCache, SchemaCache};
-pub use vlorql_core::compile::{CompiledQuery, Parameter};
+pub use vlorql_core::compile::{CompiledQuery, DialectConfig, DialectRegistry, Parameter, RewriteEngine, RewriteRule};
+pub use vlorql_core::prompt::{ExamplePair, PromptSkill};
 pub use vlorql_core::errors::{ErrorResponse, ValidationErrors};
 pub use vlorql_core::optimizer::QueryOptimizer as QueryOptimizerCore;
 pub use vlorql_core::schema::{DialectProfile, SchemaSnapshot, SqlDialect};
@@ -125,6 +126,7 @@ pub struct VlorQl {
     dialect: DialectProfile,
     policy: PolicyConfig,
     compiler: Arc<dyn SqlCompiler>,
+    rewrite_engine: Option<RewriteEngine>,
     llm_client: Option<Arc<dyn LlmClient>>,
     max_retries: usize,
     optimizer: Option<QueryOptimizer>,
@@ -143,6 +145,7 @@ impl std::fmt::Debug for VlorQl {
             .field("dialect", &self.dialect)
             .field("policy", &self.policy)
             .field("compiler_dialect", &self.compiler.dialect())
+            .field("has_rewrite_engine", &self.rewrite_engine.is_some())
             .field("has_llm_client", &self.llm_client.is_some())
             .field("has_optimizer", &self.optimizer.is_some())
             .field("has_schema_cache", &self.schema_cache.is_some())
@@ -395,7 +398,12 @@ impl VlorQl {
             dialect = ?self.compiler.dialect(),
         );
         let _enter = span.enter();
-        let result = self.compiler.compile(plan)?;
+        let mut result = self.compiler.compile(plan)?;
+        // Apply post-compilation rewrite rules.
+        if let Some(ref engine) = self.rewrite_engine {
+            let dialect_str = format!("{:?}", self.dialect.dialect).to_lowercase();
+            result.sql = engine.apply(&result.sql, &dialect_str)?;
+        }
         tracing::debug!("Compiled SQL length: {} chars", result.sql.len());
         Ok(result)
     }
@@ -520,6 +528,7 @@ pub struct VlorQlBuilder {
     dialect_name: Option<String>,
     policy: PolicyConfig,
     compiler: Option<Box<dyn SqlCompiler>>,
+    rewrite_engine: Option<RewriteEngine>,
     llm_client: Option<Box<dyn LlmClient>>,
     llm_config: Option<LlmConfig>,
     max_retries: usize,
@@ -540,6 +549,7 @@ impl Default for VlorQlBuilder {
             dialect_name: None,
             policy: PolicyConfig::default(),
             compiler: None,
+            rewrite_engine: None,
             llm_client: None,
             llm_config: None,
             max_retries: DEFAULT_MAX_RETRIES,
@@ -601,6 +611,13 @@ impl VlorQlBuilder {
         C: SqlCompiler + 'static,
     {
         self.compiler = Some(Box::new(compiler));
+        self
+    }
+
+    /// Supplies a [`RewriteEngine`] for post-compilation SQL rewrites.
+    #[must_use]
+    pub fn with_rewrite_engine(mut self, engine: RewriteEngine) -> Self {
+        self.rewrite_engine = Some(engine);
         self
     }
 
@@ -735,6 +752,7 @@ impl VlorQlBuilder {
             dialect,
             policy: self.policy,
             compiler: Arc::from(compiler),
+            rewrite_engine: self.rewrite_engine,
             llm_client,
             max_retries: self.max_retries,
             optimizer,
@@ -784,19 +802,64 @@ fn parse_dialect_name(name: &str) -> Result<DialectProfile, VlorQLError> {
 }
 
 fn format_retry_question_str(question: &str, error: &VlorQLError) -> String {
-    let response = error.to_error_response();
-    let feedback = serde_json::to_string(&response).unwrap_or_else(|_| error.to_string());
+    let feedback = error.to_string();
     let hint = match error {
         VlorQLError::Llm {
             kind: vlorql_core::errors::LlmErrorKind::ParseError { .. },
             ..
+        } => " TIP: If the previous query used NOT EXISTS with a subquery, replace it with LEFT JOIN + IS NULL — it is simpler and avoids JSON nesting issues.".to_owned(),
+        VlorQLError::Schema {
+            kind: SchemaErrorKind::ColumnNotFound { table, column },
+            ..
         } => {
-            " TIP: If the previous query used NOT EXISTS with a subquery, replace it with LEFT JOIN + IS NULL — it is simpler and avoids JSON nesting issues."
+            let available = error
+                .details()
+                .get("available_columns")
+                .and_then(|v| v.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| v.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                })
+                .unwrap_or_default();
+            if available.is_empty() {
+                format!(" TIP: Column `{column}` does not exist on table `{table}`. Use only the exact column names listed in the Schema section.")
+            } else {
+                format!(
+                    " TIP: Column `{column}` does not exist on table `{table}`. Available columns: `{available}`. Use only exact column names from the Schema."
+                )
+            }
         }
-        _ => "",
+        VlorQLError::Validation {
+            kind: ValidationErrorKind::MultipleErrors { .. },
+            ..
+        } => {
+            // Try to extract available_columns from the first error in the list.
+            let tip = error
+                .details()
+                .get("errors")
+                .and_then(|v| v.as_array())
+                .and_then(|errs| errs.first())
+                .and_then(|first| {
+                    let col = first.get("column").and_then(|v| v.as_str())?;
+                    let table = first.get("table").and_then(|v| v.as_str())?;
+                    let available = first
+                        .get("available_columns")
+                        .and_then(|v| v.as_array())?;
+                    let cols: Vec<&str> = available.iter().filter_map(|v| v.as_str()).collect();
+                    Some(format!(
+                        " TIP: Column `{table}.{col}` does not exist. Available columns in `{table}`: `{}`. Use only exact column names from the Schema.",
+                        cols.join(", ")
+                    ))
+                })
+                .unwrap_or_default();
+            tip
+        }
+        _ => "".to_owned(),
     };
     format!(
-        "{question}\n\nThe previous QueryPlan failed validation. Correct it and return only a new JSON QueryPlan. Structured feedback:\n{feedback}{hint}"
+        "{question}\n\nThe previous QueryPlan failed validation. Correct it and return only a new JSON QueryPlan. Feedback:\n{feedback}{hint}"
     )
 }
 
@@ -804,14 +867,42 @@ fn format_retry_question(original_question: &str, errors: &ValidationErrors) -> 
     let feedback = errors
         .as_slice()
         .iter()
-        .map(|error| {
-            let response = error.to_error_response();
-            serde_json::to_string(&response).unwrap_or_else(|_| error.to_string())
-        })
+        .map(|error| error.to_string())
         .collect::<Vec<_>>()
-        .join("\n");
+        .join("; ");
+    let hints: Vec<String> = errors.as_slice().iter().filter_map(|error| {
+        match error {
+            VlorQLError::Schema {
+                kind: SchemaErrorKind::ColumnNotFound { table, column },
+                ..
+            } => {
+                let available = error
+                    .details()
+                    .get("available_columns")
+                    .and_then(|v| v.as_array())
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|v| v.as_str())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    })
+                    .unwrap_or_default();
+                if available.is_empty() {
+                    Some(format!("TIP: Column `{column}` does not exist on table `{table}`. Use exact column names from the Schema."))
+                } else {
+                    Some(format!("TIP: Column `{column}` does not exist on table `{table}`. Available: `{available}`."))
+                }
+            }
+            _ => None,
+        }
+    }).collect();
+    let hints_str = if hints.is_empty() {
+        String::new()
+    } else {
+        format!("\n{}", hints.join("\n"))
+    };
     format!(
-        "{original_question}\n\nThe previous QueryPlan failed validation. Correct it and return only a new JSON QueryPlan. Structured feedback:\n{feedback}"
+        "{original_question}\n\nThe previous QueryPlan failed validation. Correct it and return only a new JSON QueryPlan. Feedback:\n{feedback}{hints_str}"
     )
 }
 

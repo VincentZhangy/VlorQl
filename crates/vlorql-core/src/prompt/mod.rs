@@ -1,8 +1,13 @@
 //! LLM system-prompt construction with minimized authorized context.
+//!
+//! This module also includes a [`PromptSkill`] system for injecting
+//! custom instructions, schema simplification, and few-shot examples.
 
 pub mod builder;
+pub mod skill;
 
 pub use builder::PromptBuilder;
+pub use skill::{ExamplePair, PromptSkill};
 
 #[cfg(test)]
 mod tests {
