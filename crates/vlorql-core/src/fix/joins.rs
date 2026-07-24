@@ -278,6 +278,16 @@ fn find_join_for(
 /// whose table is missing from the query scope, and inserts the correct
 /// INNER JOIN using actual schema FK metadata.
 pub fn fix_missing_joins(plan: &mut QueryPlan, schema: &SchemaSnapshot) -> bool {
+    // Step 0: Remove joins whose right_table does not exist in the schema.
+    // LLMs sometimes hallucinate table names (e.g. "departments").
+    if let Some(ref mut joins) = plan.joins {
+        joins.retain(|join| schema.get_table(&join.right_table.table).is_some());
+        if joins.is_empty() {
+            plan.joins = None;
+        }
+        // Don't return early here — still need to add missing joins below.
+    }
+
     // Collect all referenced tables.
     let mut referenced: HashSet<String> = HashSet::new();
     for proj in &plan.select {

@@ -9,7 +9,7 @@
 //! triggers a join to the corrected table.
 
 use crate::schema::{
-    FromClause, JoinClause, JoinType, Predicate, Projection, QueryPlan, SchemaSnapshot,
+    Predicate, Projection, QueryPlan, SchemaSnapshot,
     expressions::Expression,
 };
 
