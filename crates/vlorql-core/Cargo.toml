@@ -3,6 +3,9 @@ name = "vlorql-core"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+documentation.workspace = true
+homepage.workspace = true
+repository.workspace = true
 description = "A high-performance SQL query optimizer with constant folding, predicate pushdown, column pruning, and cost-based join reordering"
 
 [dependencies]

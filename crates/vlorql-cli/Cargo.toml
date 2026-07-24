@@ -3,6 +3,9 @@ name = "vlorql-cli"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+documentation.workspace = true
+homepage.workspace = true
+repository.workspace = true
 description = "CLI tool for VlorQl SQL query optimization and natural language querying"
 
 [dependencies]

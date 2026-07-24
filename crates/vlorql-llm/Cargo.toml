@@ -3,6 +3,9 @@ name = "vlorql-llm"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+documentation.workspace = true
+homepage.workspace = true
+repository.workspace = true
 description = "Multi-provider LLM client for SQL query generation supporting Anthropic, DeepSeek, Zhipu, and local models"
 
 [dependencies]

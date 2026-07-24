@@ -3,6 +3,9 @@ name = "vlorql"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+documentation.workspace = true
+homepage.workspace = true
+repository.workspace = true
 description = "High-level SQL query optimization and LLM-powered natural language querying library"
 
 [package.metadata.husky.hooks]
