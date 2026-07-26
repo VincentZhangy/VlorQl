@@ -49,6 +49,11 @@ pub use vlorql_llm::{
 
 const DEFAULT_MAX_RETRIES: usize = 2;
 
+/// Maximum number of validation errors surfaced in a single retry
+/// feedback message. Smaller models degrade when flooded with every
+/// error at once, so the feedback is capped and the remainder summarised.
+const MAX_RETRY_FEEDBACK_ERRORS: usize = 3;
+
 /// One item in the high-level stream emitted by [`VlorQl::query_stream`].
 ///
 /// The facade first emits [`StreamEvent::TextChunk`] values as the LLM
@@ -875,14 +880,16 @@ fn format_retry_question_str(question: &str, error: &VlorQLError) -> String {
 }
 
 fn format_retry_question(original_question: &str, errors: &ValidationErrors) -> String {
-    let feedback = errors
-        .as_slice()
+    let all = errors.as_slice();
+    let shown = all.len().min(MAX_RETRY_FEEDBACK_ERRORS);
+    let feedback = all[..shown]
         .iter()
         .map(|error| error.to_string())
         .collect::<Vec<_>>()
         .join("; ");
-    let hints: Vec<String> = errors.as_slice().iter().filter_map(|error| {
-        match error {
+    let hints: Vec<String> = all[..shown]
+        .iter()
+        .filter_map(|error| match error {
             VlorQLError::Schema {
                 kind: SchemaErrorKind::ColumnNotFound { table, column },
                 ..
@@ -905,15 +912,21 @@ fn format_retry_question(original_question: &str, errors: &ValidationErrors) -> 
                 }
             }
             _ => None,
-        }
-    }).collect();
+        })
+        .collect();
     let hints_str = if hints.is_empty() {
         String::new()
     } else {
         format!("\n{}", hints.join("\n"))
     };
+    let omitted = all.len().saturating_sub(shown);
+    let omitted_str = if omitted > 0 {
+        format!("\n(… and {omitted} more errors omitted)")
+    } else {
+        String::new()
+    };
     format!(
-        "{original_question}\n\nThe previous QueryPlan failed validation. Correct it and return only a new JSON QueryPlan. Feedback:\n{feedback}{hints_str}"
+        "{original_question}\n\nThe previous QueryPlan failed validation. Correct it and return only a new JSON QueryPlan. Feedback:\n{feedback}{hints_str}{omitted_str}"
     )
 }
 
@@ -1056,6 +1069,29 @@ mod tests {
         SchemaMetadata, TableSchema,
     };
     use vlorql_llm::MockLlmClient;
+
+    #[test]
+    fn retry_feedback_is_truncated_when_many_errors() {
+        let errs: Vec<VlorQLError> = (0..5)
+            .map(|i| {
+                VlorQLError::schema(
+                    SchemaErrorKind::ColumnNotFound {
+                        table: "t".to_owned(),
+                        column: format!("c{i}"),
+                    },
+                    serde_json::json!({"table": "t", "column": format!("c{i}")}),
+                )
+            })
+            .collect();
+        let errors = ValidationErrors(errs);
+        let q = format_retry_question("q", &errors);
+        assert!(
+            q.contains("c0") && q.contains("c1") && q.contains("c2"),
+            "first 3: {q}"
+        );
+        assert!(!q.contains("c4"), "not the 5th: {q}");
+        assert!(q.contains("2 more"), "omitted count: {q}");
+    }
 
     fn schema() -> Arc<SchemaSnapshot> {
         Arc::new(SchemaSnapshot::new(
