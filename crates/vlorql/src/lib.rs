@@ -304,7 +304,7 @@ impl VlorQl {
                             return Err(validation_errors_to_error(errors));
                         }
 
-                        llm_question = format_retry_question(question, &errors);
+                        llm_question = format_retry_question(question, &errors, attempt);
                     }
                 }
             }
@@ -879,9 +879,16 @@ fn format_retry_question_str(question: &str, error: &VlorQLError) -> String {
     )
 }
 
-fn format_retry_question(original_question: &str, errors: &ValidationErrors) -> String {
+fn format_retry_question(
+    original_question: &str,
+    errors: &ValidationErrors,
+    attempt: usize,
+) -> String {
+    // Tiered detail: the first retry gets a terse summary, later retries surface
+    // more, capped by MAX_RETRY_FEEDBACK_ERRORS.
+    let tier_cap = (1 + attempt).min(MAX_RETRY_FEEDBACK_ERRORS);
     let all = errors.as_slice();
-    let shown = all.len().min(MAX_RETRY_FEEDBACK_ERRORS);
+    let shown = all.len().min(tier_cap);
     let feedback = all[..shown]
         .iter()
         .map(|error| error.to_string())
@@ -1084,13 +1091,35 @@ mod tests {
             })
             .collect();
         let errors = ValidationErrors(errs);
-        let q = format_retry_question("q", &errors);
+        let q = format_retry_question("q", &errors, 2);
         assert!(
             q.contains("c0") && q.contains("c1") && q.contains("c2"),
             "first 3: {q}"
         );
         assert!(!q.contains("c4"), "not the 5th: {q}");
         assert!(q.contains("2 more"), "omitted count: {q}");
+    }
+
+    #[test]
+    fn retry_feedback_is_tiered_by_attempt() {
+        let errs: Vec<VlorQLError> = (0..5)
+            .map(|i| {
+                VlorQLError::schema(
+                    SchemaErrorKind::ColumnNotFound {
+                        table: "t".to_owned(),
+                        column: format!("c{i}"),
+                    },
+                    serde_json::json!({"table": "t", "column": format!("c{i}")}),
+                )
+            })
+            .collect();
+        let errors = ValidationErrors(errs);
+        let first = format_retry_question("q", &errors, 0);
+        let later = format_retry_question("q", &errors, 2);
+        assert!(
+            first.matches("does not exist").count() < later.matches("does not exist").count(),
+            "attempt 0 terser than attempt 2:\nfirst={first}\nlater={later}"
+        );
     }
 
     fn schema() -> Arc<SchemaSnapshot> {
