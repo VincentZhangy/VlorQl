@@ -29,23 +29,21 @@ fn dedup_expr(expr: &mut Expression) -> bool {
                 changed |= dedup_expr(arg);
             }
             // Then check if the single argument is the same aggregate → unwrap.
-            if args.len() == 1 {
-                if let Expression::FunctionCall {
+            if args.len() == 1
+                && let Expression::FunctionCall {
                     name: inner_name,
                     args: inner_args,
                     ..
                 } = &args[0]
+                && inner_name.eq_ignore_ascii_case(name)
+            {
+                // Unwrap: replace outer with inner's argument.
+                // e.g. SUM(SUM(x)) → the inner SUM's arg (x)
+                if let Some(inner_arg) = inner_args.first()
+                    && let Some(unwrapped) = take_single_arg(inner_arg)
                 {
-                    if inner_name.eq_ignore_ascii_case(name) {
-                        // Unwrap: replace outer with inner's argument.
-                        // e.g. SUM(SUM(x)) → the inner SUM's arg (x)
-                        if let Some(inner_arg) = inner_args.first() {
-                            if let Some(unwrapped) = take_single_arg(inner_arg) {
-                                *expr = unwrapped;
-                                return true;
-                            }
-                        }
-                    }
+                    *expr = unwrapped;
+                    return true;
                 }
             }
             changed
@@ -58,9 +56,7 @@ fn dedup_expr(expr: &mut Expression) -> bool {
             }
             changed
         }
-        Expression::BinaryOp { left, right, .. } => {
-            dedup_expr(left) | dedup_expr(right)
-        }
+        Expression::BinaryOp { left, right, .. } => dedup_expr(left) | dedup_expr(right),
         Expression::Case {
             operand,
             when_thens,

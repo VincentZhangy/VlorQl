@@ -22,7 +22,9 @@ use tokio::sync::mpsc;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::Instrument;
 use vlorql_core::compile::{SqlCompiler, get_compiler};
-use vlorql_core::errors::{ConfigErrorKind, LlmErrorKind, SchemaErrorKind, ValidationErrorKind, VlorQLError};
+use vlorql_core::errors::{
+    ConfigErrorKind, LlmErrorKind, SchemaErrorKind, ValidationErrorKind, VlorQLError,
+};
 use vlorql_core::observability::{TelemetryGuard, VlorqMetrics, init_telemetry};
 use vlorql_core::optimizer::QueryOptimizer;
 use vlorql_core::policy::{PolicyConfig, PolicyEngine};
@@ -32,10 +34,12 @@ use vlorql_core::statistics::StatisticsProvider;
 use vlorql_core::validate::ValidationPipeline;
 
 pub use vlorql_core::cache::{CompileCache, PromptCache, SchemaCache};
-pub use vlorql_core::compile::{CompiledQuery, DialectConfig, DialectRegistry, Parameter, RewriteEngine, RewriteRule};
-pub use vlorql_core::prompt::{ExamplePair, PromptSkill};
+pub use vlorql_core::compile::{
+    CompiledQuery, DialectConfig, DialectRegistry, Parameter, RewriteEngine, RewriteRule,
+};
 pub use vlorql_core::errors::{ErrorResponse, ValidationErrors};
 pub use vlorql_core::optimizer::QueryOptimizer as QueryOptimizerCore;
+pub use vlorql_core::prompt::{ExamplePair, PromptSkill};
 pub use vlorql_core::schema::{DialectProfile, SchemaSnapshot, SqlDialect};
 pub use vlorql_core::validate::{OptimizedPlan, ValidatedPlan};
 pub use vlorql_llm::{
@@ -836,7 +840,7 @@ fn format_retry_question_str(question: &str, error: &VlorQLError) -> String {
             ..
         } => {
             // Try to extract available_columns from the first error in the list.
-            let tip = error
+            error
                 .details()
                 .get("errors")
                 .and_then(|v| v.as_array())
@@ -853,8 +857,7 @@ fn format_retry_question_str(question: &str, error: &VlorQLError) -> String {
                         cols.join(", ")
                     ))
                 })
-                .unwrap_or_default();
-            tip
+                .unwrap_or_default()
         }
         _ => "".to_owned(),
     };

@@ -179,9 +179,7 @@ impl<'a> OperandValidator<'a> {
                 // CASE type = common type of all THEN and ELSE branches
                 let then_types: Vec<DataType> = when_thens
                     .iter()
-                    .filter_map(|wt| {
-                        self.validate_expression_inner(&wt.then, scope, errors)
-                    })
+                    .filter_map(|wt| self.validate_expression_inner(&wt.then, scope, errors))
                     .collect();
                 let else_type = else_result
                     .as_ref()
@@ -213,10 +211,10 @@ impl<'a> OperandValidator<'a> {
                     if let Some(start) = frame_bound_expr(&frame.start) {
                         self.validate_expression_inner(start, scope, errors);
                     }
-                    if let Some(end) = &frame.end {
-                        if let Some(expr) = frame_bound_expr(end) {
-                            self.validate_expression_inner(expr, scope, errors);
-                        }
+                    if let Some(end) = &frame.end
+                        && let Some(expr) = frame_bound_expr(end)
+                    {
+                        self.validate_expression_inner(expr, scope, errors);
                     }
                 }
                 Some(self.validate_function(name, &argument_types, errors))

@@ -165,9 +165,7 @@ pub(crate) fn collect_expression_references(
                 collect_expression_references(el, references);
             }
         }
-        Expression::WindowFunction {
-            args, over, ..
-        } => {
+        Expression::WindowFunction { args, over, .. } => {
             for argument in args {
                 collect_expression_references(argument, references);
             }

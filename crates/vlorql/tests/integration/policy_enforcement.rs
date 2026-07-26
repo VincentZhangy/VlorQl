@@ -42,9 +42,10 @@ async fn denied_table_surfaces_policy_error() {
         offset: None,
         joins: None,
         ctes: None,
-            distinct: false,
-            distinct_on: None,
-            set_operation: None,    };
+        distinct: false,
+        distinct_on: None,
+        set_operation: None,
+    };
 
     let facade = facade_with(base_plan(), strict_policy(), "sqlite");
     let errors = facade
@@ -92,9 +93,10 @@ async fn query_does_not_compile_when_plan_targets_denied_table() {
         offset: None,
         joins: None,
         ctes: None,
-            distinct: false,
-            distinct_on: None,
-            set_operation: None,    };
+        distinct: false,
+        distinct_on: None,
+        set_operation: None,
+    };
 
     let facade = VlorQl::builder()
         .with_schema(snapshot())

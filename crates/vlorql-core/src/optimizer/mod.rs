@@ -356,9 +356,10 @@ mod tests {
                 offset: None,
                 joins: None,
                 ctes: None,
-            distinct: false,
-            distinct_on: None,
-            set_operation: None,            }),
+                distinct: false,
+                distinct_on: None,
+                set_operation: None,
+            }),
         };
         QueryPlan {
             select: vec![column_projection(Some("recent"), "id")],
@@ -879,9 +880,10 @@ mod tests {
                 offset: None,
                 joins: None,
                 ctes: None,
-            distinct: false,
-            distinct_on: None,
-            set_operation: None,            }),
+                distinct: false,
+                distinct_on: None,
+                set_operation: None,
+            }),
         };
 
         let plan = QueryPlan {
@@ -1113,12 +1115,12 @@ mod tests {
                 CommonTableExpression {
                     name: "cte2".to_owned(),
                     recursive: false,
-                    query: Box::new(cte2_body)
+                    query: Box::new(cte2_body),
                 },
                 CommonTableExpression {
                     name: "cte1".to_owned(),
                     recursive: false,
-                    query: Box::new(cte1_body)
+                    query: Box::new(cte1_body),
                 },
             ]),
             distinct: false,
@@ -1231,12 +1233,12 @@ mod tests {
                 CommonTableExpression {
                     name: "cte2".to_owned(),
                     recursive: false,
-                    query: Box::new(cte2_body)
+                    query: Box::new(cte2_body),
                 },
                 CommonTableExpression {
                     name: "cte1".to_owned(),
                     recursive: false,
-                    query: Box::new(cte1_body)
+                    query: Box::new(cte1_body),
                 },
             ]),
             distinct: false,

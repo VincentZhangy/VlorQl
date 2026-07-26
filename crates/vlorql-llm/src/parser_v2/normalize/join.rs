@@ -33,10 +33,11 @@ pub fn extract_plan_level_fields(val: &mut serde_json::Value) -> Vec<(String, se
     for join in joins {
         if let Some(join_obj) = join.as_object() {
             for &field in PLAN_LEVEL_FIELDS {
-                if let Some(field_val) = join_obj.get(field) {
-                    if !field_val.is_null() && !common::is_empty_array(field_val) {
-                        extracted.push((field.to_owned(), field_val.clone()));
-                    }
+                if let Some(field_val) = join_obj.get(field)
+                    && !field_val.is_null()
+                    && !common::is_empty_array(field_val)
+                {
+                    extracted.push((field.to_owned(), field_val.clone()));
                 }
             }
         }
@@ -88,11 +89,11 @@ pub fn string_right_table_to_object(val: &mut serde_json::Value) -> bool {
     };
     let mut changed = false;
     for join in joins.iter_mut() {
-        if let Some(join_obj) = join.as_object_mut() {
-            if let Some(rt) = join_obj.get("right_table").and_then(|v| v.as_str()) {
-                join_obj.insert("right_table".to_owned(), serde_json::json!({"table": rt}));
-                changed = true;
-            }
+        if let Some(join_obj) = join.as_object_mut()
+            && let Some(rt) = join_obj.get("right_table").and_then(|v| v.as_str())
+        {
+            join_obj.insert("right_table".to_owned(), serde_json::json!({"table": rt}));
+            changed = true;
         }
     }
     changed
@@ -126,24 +127,25 @@ pub fn infer_missing_right_table(val: &mut serde_json::Value) -> bool {
         let Some(join_obj) = join.as_object_mut() else {
             continue;
         };
-        if !join_obj.contains_key("right_table") && join_obj.contains_key("on") {
-            if let Some(on_obj) = join_obj.get("on").and_then(|v| v.as_object()) {
-                // Try to infer from ON.right (column_ref → table), with fallback to FROM table.
-                let table = on_obj
-                    .get("right")
-                    .and_then(|r| r.as_object())
-                    .and_then(|r| r.get("table"))
-                    .and_then(|t| t.as_str())
-                    .map(|s| s.to_owned())
-                    .or_else(|| from_table.clone());
+        if !join_obj.contains_key("right_table")
+            && join_obj.contains_key("on")
+            && let Some(on_obj) = join_obj.get("on").and_then(|v| v.as_object())
+        {
+            // Try to infer from ON.right (column_ref → table), with fallback to FROM table.
+            let table = on_obj
+                .get("right")
+                .and_then(|r| r.as_object())
+                .and_then(|r| r.get("table"))
+                .and_then(|t| t.as_str())
+                .map(|s| s.to_owned())
+                .or_else(|| from_table.clone());
 
-                if let Some(table) = table {
-                    join_obj.insert(
-                        "right_table".to_owned(),
-                        serde_json::json!({"table": table}),
-                    );
-                    changed = true;
-                }
+            if let Some(table) = table {
+                join_obj.insert(
+                    "right_table".to_owned(),
+                    serde_json::json!({"table": table}),
+                );
+                changed = true;
             }
         }
     }
@@ -229,13 +231,13 @@ pub fn repair_bare_join_on(val: &mut serde_json::Value) -> bool {
 
             // Add type tag to left expression.
             let mut left = left_expr;
-            if let Some(left_obj) = left.as_object_mut() {
-                if !left_obj.contains_key("type") {
-                    left_obj.insert(
-                        "type".to_owned(),
-                        serde_json::Value::String("column_ref".to_owned()),
-                    );
-                }
+            if let Some(left_obj) = left.as_object_mut()
+                && !left_obj.contains_key("type")
+            {
+                left_obj.insert(
+                    "type".to_owned(),
+                    serde_json::Value::String("column_ref".to_owned()),
+                );
             }
 
             repairs.push((i, left, right_table));
@@ -243,23 +245,23 @@ pub fn repair_bare_join_on(val: &mut serde_json::Value) -> bool {
     }
     // Apply repairs.
     for (i, left, right_table) in repairs {
-        if let Some(join) = joins.get_mut(i) {
-            if let Some(join_obj) = join.as_object_mut() {
-                join_obj.insert(
-                    "on".to_owned(),
-                    serde_json::json!({
-                        "type": "comparison",
-                        "left": left,
-                        "op": "eq",
-                        "right": {
-                            "type": "column_ref",
-                            "table": right_table,
-                            "column": "id"
-                        }
-                    }),
-                );
-                changed = true;
-            }
+        if let Some(join) = joins.get_mut(i)
+            && let Some(join_obj) = join.as_object_mut()
+        {
+            join_obj.insert(
+                "on".to_owned(),
+                serde_json::json!({
+                    "type": "comparison",
+                    "left": left,
+                    "op": "eq",
+                    "right": {
+                        "type": "column_ref",
+                        "table": right_table,
+                        "column": "id"
+                    }
+                }),
+            );
+            changed = true;
         }
     }
     changed
@@ -371,7 +373,7 @@ fn fix_empty_join_on(val: &mut serde_json::Value) -> bool {
         let Some(on_val) = join_obj.get("on") else {
             continue;
         };
-        if on_val.as_object().map_or(false, |o| o.is_empty()) {
+        if on_val.as_object().is_some_and(|o| o.is_empty()) {
             join_obj.insert(
                 "on".to_owned(),
                 serde_json::json!({
@@ -390,10 +392,10 @@ fn fix_empty_join_on(val: &mut serde_json::Value) -> bool {
 /// Crude singularization: strips trailing `s` (or `_items` → `_item`).
 /// Not linguistically perfect, but good enough for FK column naming.
 fn singularize(s: &str) -> &str {
-    if s.ends_with("_items") {
-        &s[..s.len() - 1] // order_items → order_item
-    } else if s.ends_with('s') && s.len() > 1 {
-        &s[..s.len() - 1] // products → product, users → user
+    // Stripping the trailing `s` covers both the general plural case
+    // (products → product, users → user) and `_items` → `_item`.
+    if s.ends_with('s') && s.len() > 1 {
+        &s[..s.len() - 1]
     } else {
         s // already singular or irregular
     }

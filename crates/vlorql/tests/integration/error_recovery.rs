@@ -249,9 +249,10 @@ async fn policy_violations_short_circuit_retry_loop() {
         offset: None,
         joins: None,
         ctes: None,
-            distinct: false,
-            distinct_on: None,
-            set_operation: None,    };
+        distinct: false,
+        distinct_on: None,
+        set_operation: None,
+    };
 
     let policy = PolicyConfig {
         table_policies: HashMap::from([(

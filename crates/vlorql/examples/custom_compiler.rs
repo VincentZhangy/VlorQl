@@ -31,8 +31,8 @@ use vlorql_core::compile::{CompiledQuery, DialectConfig, QueryBuilder, SqlCompil
 use vlorql_core::errors::VlorQLError;
 use vlorql_core::policy::PolicyConfig;
 use vlorql_core::schema::{
-    ColumnSchema, ComparisonOperator, DataType, Expression, FromClause,
-    Predicate, Projection, QueryPlan, SchemaMetadata, TableSchema,
+    ColumnSchema, ComparisonOperator, DataType, Expression, FromClause, Predicate, Projection,
+    QueryPlan, SchemaMetadata, TableSchema,
 };
 use vlorql_core::validate::ValidatedPlan;
 
@@ -183,9 +183,10 @@ fn sample_plan() -> QueryPlan {
         offset: Some(100),
         joins: None,
         ctes: None,
-            distinct: false,
-            distinct_on: None,
-            set_operation: None,    }
+        distinct: false,
+        distinct_on: None,
+        set_operation: None,
+    }
 }
 
 #[tokio::main]

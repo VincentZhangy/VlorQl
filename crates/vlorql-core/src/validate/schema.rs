@@ -33,7 +33,10 @@ fn validate_plan_with_outer(
     // DISTINCT + GROUP BY simultaneously is semantically ambiguous:
     // it is unclear whether DISTINCT is applied before or after
     // aggregation.  Reject this combination to force clarity.
-    if plan.distinct && plan.group_by.is_some() && plan.group_by.as_ref().is_some_and(|g| !g.is_empty()) {
+    if plan.distinct
+        && plan.group_by.is_some()
+        && plan.group_by.as_ref().is_some_and(|g| !g.is_empty())
+    {
         errors.push(VlorQLError::validation(
             crate::errors::ValidationErrorKind::AggregationMismatch {
                 message: "DISTINCT and GROUP BY cannot be used together: the combination is semantically ambiguous".to_owned(),

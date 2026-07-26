@@ -160,14 +160,14 @@ impl BoundDialectValidator<'_> {
                 }
                 Projection::Expr { expression, .. } => {
                     match expression {
-                        Expression::ColumnRef { table, column } => {
-                            if !is_column_in_group_by(group_by, table, column) {
-                                errors.push(self.group_by_error(format!(
+                        Expression::ColumnRef { table, column }
+                            if !is_column_in_group_by(group_by, table, column) =>
+                        {
+                            errors.push(self.group_by_error(format!(
                                     "column `{}.{}` must appear in GROUP BY or be wrapped in an aggregate function",
                                     table.as_deref().unwrap_or("?"),
                                     column,
                                 )));
-                            }
                         }
                         Expression::Star => {
                             errors.push(
@@ -368,11 +368,7 @@ impl BoundDialectValidator<'_> {
         )
     }
 
-    fn validate_window_frame_bounds(
-        &self,
-        frame: &WindowFrame,
-        errors: &mut Vec<VlorQLError>,
-    ) {
+    fn validate_window_frame_bounds(&self, frame: &WindowFrame, errors: &mut Vec<VlorQLError>) {
         // Validate frame boundary expressions (PRECEDING / FOLLOWING values).
         Self::validate_frame_bound(&frame.start, errors);
         if let Some(end) = &frame.end {

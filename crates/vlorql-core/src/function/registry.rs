@@ -104,7 +104,7 @@ mod tests {
     use crate::function::builder::FunctionDefBuilder;
 
     fn setup() {
-        let _ = init_registry(vec![
+        init_registry(vec![
             FunctionDefBuilder::new("sum")
                 .kind(FunctionKind::Aggregate)
                 .min_args(1)

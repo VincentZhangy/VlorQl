@@ -49,9 +49,10 @@ fn base_plan() -> QueryPlan {
         offset: None,
         joins: None,
         ctes: None,
-            distinct: false,
-            distinct_on: None,
-            set_operation: None,    }
+        distinct: false,
+        distinct_on: None,
+        set_operation: None,
+    }
 }
 
 fn restricted_profile() -> DialectProfile {
@@ -94,10 +95,10 @@ fn assert_validation_error(
 fn cte_is_rejected_when_profile_disables_it() {
     let mut plan = base_plan();
     plan.ctes = Some(vec![vlorql_core::schema::CommonTableExpression {
-                name: "active_users".to_owned(),
-                recursive: false,
-                query: Box::new(base_plan()),
-            }]);
+        name: "active_users".to_owned(),
+        recursive: false,
+        query: Box::new(base_plan()),
+    }]);
     let errors = DialectValidator::validate(&plan, &restricted_profile())
         .expect_err("CTE should be rejected");
     assert_validation_error(
@@ -277,10 +278,10 @@ fn offset_inside_a_cte_is_rejected() {
     cte_inner.offset = Some(5);
     let mut plan = base_plan();
     plan.ctes = Some(vec![vlorql_core::schema::CommonTableExpression {
-                name: "paged".to_owned(),
-                recursive: false,
-                query: Box::new(cte_inner),
-            }]);
+        name: "paged".to_owned(),
+        recursive: false,
+        query: Box::new(cte_inner),
+    }]);
     // For this test we still need a CTE-enabled profile, otherwise the
     // CTE itself is rejected and we never reach the offset check.
     let mut profile = restricted_profile();
@@ -504,9 +505,10 @@ fn plan_that_respects_every_constraint_passes_validation() {
         offset: None,
         joins: None,
         ctes: None,
-            distinct: false,
-            distinct_on: None,
-            set_operation: None,    };
+        distinct: false,
+        distinct_on: None,
+        set_operation: None,
+    };
     DialectValidator::validate(&plan, &restricted_profile())
         .expect("a trivial plan should respect the strict profile");
 }

@@ -73,17 +73,13 @@ fn normalize_impl(val: &mut Value, field: &str) -> bool {
     match val {
         Value::Object(map) => {
             // Normalize the `op` field if present.
-            if let Some(op_val) = map.get_mut(field) {
-                if let Some(s) = op_val.as_str() {
-                    if let Some(canonical) =
-                        resolve_comparison_op(s).or_else(|| resolve_binary_op(s))
-                    {
-                        if canonical != s {
-                            *op_val = Value::String(canonical.to_owned());
-                            changed = true;
-                        }
-                    }
-                }
+            if let Some(op_val) = map.get_mut(field)
+                && let Some(s) = op_val.as_str()
+                && let Some(canonical) = resolve_comparison_op(s).or_else(|| resolve_binary_op(s))
+                && canonical != s
+            {
+                *op_val = Value::String(canonical.to_owned());
+                changed = true;
             }
             // Recurse into children.
             for (_key, v) in map.iter_mut() {

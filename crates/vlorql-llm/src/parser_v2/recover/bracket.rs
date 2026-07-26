@@ -107,7 +107,7 @@ pub fn is_balanced_object(text: &str) -> bool {
     if !text.starts_with('{') {
         return false;
     }
-    find_outermost_json_obj(text).map_or(false, |found| found.len() == text.len())
+    find_outermost_json_obj(text).is_some_and(|found| found.len() == text.len())
 }
 
 /// Attempt to repair a truncated JSON string by appending missing
@@ -158,14 +158,20 @@ pub fn repair_truncated_json(json: &str) -> std::borrow::Cow<'_, str> {
     escaped = false;
     for ch in trimmed.chars() {
         if in_string {
-            if escaped { escaped = false; }
-            else if ch == '\\' { escaped = true; }
-            else if ch == '"' { in_string = false; }
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                in_string = false;
+            }
         } else {
             match ch {
                 '{' => stack.push('}'),
                 '[' => stack.push(']'),
-                '}' | ']' => { stack.pop(); }
+                '}' | ']' => {
+                    stack.pop();
+                }
                 '"' => in_string = true,
                 _ => {}
             }

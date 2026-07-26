@@ -70,10 +70,11 @@ pub fn extract_top_level_fields(val: &mut serde_json::Value) -> bool {
 
     let mut extracted: Vec<(String, serde_json::Value)> = Vec::new();
     for &field in TOP_LEVEL_FIELDS {
-        if let Some(field_val) = where_obj.remove(field) {
-            if !field_val.is_null() && !common::is_empty_array(&field_val) {
-                extracted.push((field.to_owned(), field_val));
-            }
+        if let Some(field_val) = where_obj.remove(field)
+            && !field_val.is_null()
+            && !common::is_empty_array(&field_val)
+        {
+            extracted.push((field.to_owned(), field_val));
         }
     }
 
@@ -86,11 +87,11 @@ pub fn extract_top_level_fields(val: &mut serde_json::Value) -> bool {
     }
 
     // If `where` is now empty, remove it.
-    if let Some(w) = obj.get("where") {
-        if w.as_object().map_or(false, |o| o.is_empty()) {
-            obj.remove("where");
-            changed = true;
-        }
+    if let Some(w) = obj.get("where")
+        && w.as_object().is_some_and(|o| o.is_empty())
+    {
+        obj.remove("where");
+        changed = true;
     }
 
     changed

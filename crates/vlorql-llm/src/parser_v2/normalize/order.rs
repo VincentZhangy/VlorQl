@@ -44,38 +44,33 @@ pub fn normalize_item(item: &mut serde_json::Value) -> bool {
 
     // Case 1: `{"column": "name", "descending": true}` — bare column field.
     // Wrap it into `{"expr": {"type": "column_ref", "column": "..."}, "descending": ...}`.
-    if !obj.contains_key("expr") {
-        if let Some(column_val) = obj.remove("column") {
-            if let Some(col_name) = column_val.as_str() {
-                obj.insert(
-                    "expr".to_owned(),
-                    serde_json::json!({"type": "column_ref", "column": col_name}),
-                );
-                changed = true;
-            }
-        }
+    if !obj.contains_key("expr")
+        && let Some(column_val) = obj.remove("column")
+        && let Some(col_name) = column_val.as_str()
+    {
+        obj.insert(
+            "expr".to_owned(),
+            serde_json::json!({"type": "column_ref", "column": col_name}),
+        );
+        changed = true;
     }
 
     // Case 2: `{"expr": {"column": "name"}}` — expr has column but no type.
     // Also applies repair_expression_value to unwrap `{"type": "expr", "expression": {...}}`.
-    if let Some(expr_val) = obj.get_mut("expr") {
-        if let Some(expr_obj) = expr_val.as_object_mut() {
-            if !expr_obj.contains_key("type") && expr_obj.contains_key("column") {
-                expr_obj.insert(
-                    "type".to_owned(),
-                    Value::String("column_ref".to_owned()),
-                );
-                changed = true;
-            }
-            // Unwrap `{"type": "expr", "expression": {...}}` — strip the expr wrapper.
-            if expr_obj.get("type").and_then(|t| t.as_str()) == Some("expr")
-                && expr_obj.contains_key("expression")
-            {
-                if let Some(inner) = expr_obj.remove("expression") {
-                    *expr_val = inner;
-                    changed = true;
-                }
-            }
+    if let Some(expr_val) = obj.get_mut("expr")
+        && let Some(expr_obj) = expr_val.as_object_mut()
+    {
+        if !expr_obj.contains_key("type") && expr_obj.contains_key("column") {
+            expr_obj.insert("type".to_owned(), Value::String("column_ref".to_owned()));
+            changed = true;
+        }
+        // Unwrap `{"type": "expr", "expression": {...}}` — strip the expr wrapper.
+        if expr_obj.get("type").and_then(|t| t.as_str()) == Some("expr")
+            && expr_obj.contains_key("expression")
+            && let Some(inner) = expr_obj.remove("expression")
+        {
+            *expr_val = inner;
+            changed = true;
         }
     }
 
@@ -127,11 +122,10 @@ pub fn normalize(val: &mut serde_json::Value) -> bool {
                 && obj.contains_key("expr")
                 && !obj.contains_key("type")
                 && !obj.contains_key("column")
+                && let Some(expr) = obj.remove("expr")
             {
-                if let Some(expr) = obj.remove("expr") {
-                    *item = expr;
-                    changed = true;
-                }
+                *item = expr;
+                changed = true;
             }
         }
     }

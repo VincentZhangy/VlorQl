@@ -364,13 +364,11 @@ fn contains_aggregate(pred: &Predicate) -> bool {
                 return true;
             }
             match target {
-                InTarget::Values(values) => values.iter().any(|v| is_aggregate_expr(v)),
+                InTarget::Values(values) => values.iter().any(is_aggregate_expr),
                 InTarget::SubQuery(_) => false,
             }
         }
-        Predicate::Like { expr, .. } => {
-            is_aggregate_expr(expr)
-        }
+        Predicate::Like { expr, .. } => is_aggregate_expr(expr),
         Predicate::IsNull { expr } => is_aggregate_expr(expr),
         Predicate::And { left, right } => contains_aggregate(left) || contains_aggregate(right),
         Predicate::Or { left, right } => contains_aggregate(left) || contains_aggregate(right),
@@ -420,13 +418,24 @@ fn build_alias_map(plan: &QueryPlan) -> Vec<(String, Expression)> {
     let mut alias_map = Vec::new();
     for proj in &plan.select {
         match proj {
-            Projection::Column { column, alias: Some(a), .. } => {
-                alias_map.push((a.clone(), Expression::ColumnRef {
-                    table: None,
-                    column: column.clone(),
-                }));
+            Projection::Column {
+                column,
+                alias: Some(a),
+                ..
+            } => {
+                alias_map.push((
+                    a.clone(),
+                    Expression::ColumnRef {
+                        table: None,
+                        column: column.clone(),
+                    },
+                ));
             }
-            Projection::Expr { expression, alias: Some(a), .. } => {
+            Projection::Expr {
+                expression,
+                alias: Some(a),
+                ..
+            } => {
                 alias_map.push((a.clone(), expression.clone()));
             }
             _ => {}
@@ -448,9 +457,7 @@ fn find_alias_match<'a>(
     alias_map: &'a [(String, Expression)],
 ) -> Option<&'a (String, Expression)> {
     match expr {
-        Expression::ColumnRef { column, .. } => {
-            alias_map.iter().find(|(alias, _)| alias == column)
-        }
+        Expression::ColumnRef { column, .. } => alias_map.iter().find(|(alias, _)| alias == column),
         Expression::FunctionCall { args, .. } => {
             // Check if any arg has a direct alias match.
             for arg in args {
@@ -461,8 +468,7 @@ fn find_alias_match<'a>(
             None
         }
         Expression::BinaryOp { left, right, .. } => {
-            find_alias_match(left, alias_map)
-                .or_else(|| find_alias_match(right, alias_map))
+            find_alias_match(left, alias_map).or_else(|| find_alias_match(right, alias_map))
         }
         _ => None,
     }
@@ -509,8 +515,7 @@ fn replace_alias_in_predicate(
 ) -> bool {
     let mut changed = false;
     match predicate {
-        Predicate::And { left, right }
-        | Predicate::Or { left, right } => {
+        Predicate::And { left, right } | Predicate::Or { left, right } => {
             changed |= replace_alias_in_predicate(left, alias_map);
             changed |= replace_alias_in_predicate(right, alias_map);
         }
@@ -549,10 +554,7 @@ fn replace_alias_in_predicate(
 
 /// Recursively walk an expression tree and replace ColumnRef nodes whose
 /// column name matches a SELECT alias with the alias's source expression.
-fn replace_alias_in_expression(
-    expr: &mut Expression,
-    alias_map: &[(String, Expression)],
-) -> bool {
+fn replace_alias_in_expression(expr: &mut Expression, alias_map: &[(String, Expression)]) -> bool {
     match expr {
         Expression::ColumnRef { column, .. } => {
             if let Some((_, replacement)) = alias_map.iter().find(|(alias, _)| alias == column) {
@@ -575,7 +577,12 @@ fn replace_alias_in_expression(
             changed |= replace_alias_in_expression(right, alias_map);
             changed
         }
-        Expression::Case { operand, when_thens, else_result, .. } => {
+        Expression::Case {
+            operand,
+            when_thens,
+            else_result,
+            ..
+        } => {
             let mut changed = false;
             if let Some(op) = operand {
                 changed |= replace_alias_in_expression(op, alias_map);
@@ -796,9 +803,10 @@ mod tests {
                 offset: None,
                 joins: None,
                 ctes: None,
-            distinct: false,
-            distinct_on: None,
-            set_operation: None,            }),
+                distinct: false,
+                distinct_on: None,
+                set_operation: None,
+            }),
         }]);
         assert!(fix_plan(&mut plan));
         // CTE subquery should also be fixed.

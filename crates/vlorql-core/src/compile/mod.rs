@@ -25,8 +25,8 @@ mod tests {
     use super::*;
     use crate::schema::{
         BinaryOperator, CommonTableExpression, ComparisonOperator, DataType, Expression,
-        FromClause, InTarget, JoinClause, JoinType, OrderByTerm, Predicate,
-        Projection, QueryPlan, SetOperation, SetOperationClause, SqlDialect, WindowSpec,
+        FromClause, InTarget, JoinClause, JoinType, OrderByTerm, Predicate, Projection, QueryPlan,
+        SetOperation, SetOperationClause, SqlDialect, WindowSpec,
     };
     use crate::validate::ValidatedPlan;
     use serde_json::json;
@@ -251,7 +251,8 @@ mod tests {
         });
         plan.ctes = Some(vec![CommonTableExpression {
             name: "active_users".to_owned(),
-            query: Box::new(cte_query), recursive: false
+            query: Box::new(cte_query),
+            recursive: false,
         }]);
 
         let compiled = PostgresCompiler
@@ -656,7 +657,10 @@ mod tests {
         }]);
 
         let compiled = PostgresCompiler.compile(&validated(plan)).expect("compile");
-        let order_pos = compiled.sql.find("ORDER BY").expect("outer ORDER BY present");
+        let order_pos = compiled
+            .sql
+            .find("ORDER BY")
+            .expect("outer ORDER BY present");
         let union_pos = compiled.sql.find("UNION ALL").expect("UNION ALL present");
         assert!(
             order_pos > union_pos,
@@ -668,13 +672,11 @@ mod tests {
     #[test]
     fn postgres_compiles_select_distinct() {
         let plan = QueryPlan {
-            select: vec![
-                Projection::Column {
-                    table: Some("users".to_owned()),
-                    column: "name".to_owned(),
-                    alias: None,
-                },
-            ],
+            select: vec![Projection::Column {
+                table: Some("users".to_owned()),
+                column: "name".to_owned(),
+                alias: None,
+            }],
             distinct: true,
             distinct_on: None,
             from: FromClause {

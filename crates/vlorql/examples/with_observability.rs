@@ -119,9 +119,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 offset: None,
                 joins: None,
                 ctes: None,
-            distinct: false,
-            distinct_on: None,
-            set_operation: None,            }
+                distinct: false,
+                distinct_on: None,
+                set_operation: None,
+            }
         }))
         .with_metrics(metrics)
         .with_max_retries(0)

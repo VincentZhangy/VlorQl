@@ -46,20 +46,23 @@ fn fix_literal_type_aliases(val: &mut Value) -> bool {
         Some(t) => t,
         None => return false,
     };
-    if !matches!(type_val, "string" | "integer" | "number" | "float" | "boolean" | "null") {
+    if !matches!(
+        type_val,
+        "string" | "integer" | "number" | "float" | "boolean" | "null"
+    ) {
         return false;
     }
     if !obj.contains_key("value") {
         return false;
     }
-    let canonical_dt = match type_val {
-        "string" | "integer" | "number" | "float" | "boolean" | "null" => {
-            canonical_literal_type(type_val, obj.get("value"))
-        }
-        _ => return false,
-    };
+    // `type_val` is guaranteed to be one of the literal type tags by the
+    // `!matches!` guard above, so map it directly.
+    let canonical_dt = canonical_literal_type(type_val, obj.get("value"));
     obj.insert("type".to_owned(), Value::String("literal".to_owned()));
-    obj.insert("data_type".to_owned(), Value::String(canonical_dt.to_owned()));
+    obj.insert(
+        "data_type".to_owned(),
+        Value::String(canonical_dt.to_owned()),
+    );
     true
 }
 
@@ -76,15 +79,13 @@ pub fn repair_expression_value(val: &mut Value) -> bool {
     // Fix: `{"type": "expr", "expression": {...}}` is a Projection::Expr format,
     // not a valid Expression. The LLM sometimes uses this format in expression
     // contexts (like inside WHERE predicates). Unwrap the inner expression.
-    if let Some(obj) = val.as_object() {
-        if obj.get("type").and_then(|t| t.as_str()) == Some("expr")
-            && obj.contains_key("expression")
-        {
-            if let Some(inner) = obj.get("expression").cloned() {
-                *val = inner;
-                return true;
-            }
-        }
+    if let Some(obj) = val.as_object()
+        && obj.get("type").and_then(|t| t.as_str()) == Some("expr")
+        && obj.contains_key("expression")
+        && let Some(inner) = obj.get("expression").cloned()
+    {
+        *val = inner;
+        return true;
     }
 
     let obj = match val.as_object_mut() {
@@ -94,18 +95,26 @@ pub fn repair_expression_value(val: &mut Value) -> bool {
 
     // Fix: LLM sometimes uses {"type": "string", "value": "..."} or {"type": "integer", "value": N}
     // instead of the canonical {"type": "literal", "value": "...", "data_type": "string"}.
-    if let Some(type_val) = obj.get("type").and_then(|t| t.as_str()).map(|s| s.to_owned()) {
-        if type_val == "string" || type_val == "integer" || type_val == "number"
-            || type_val == "float" || type_val == "boolean" || type_val == "null"
-        {
-            if obj.contains_key("value") {
-                let value = obj.get("value");
-                let canonical_dt = canonical_literal_type(type_val.as_str(), value);
-                obj.insert("type".to_owned(), Value::String("literal".to_owned()));
-                obj.insert("data_type".to_owned(), Value::String(canonical_dt.to_owned()));
-                return true;
-            }
-        }
+    if let Some(type_val) = obj
+        .get("type")
+        .and_then(|t| t.as_str())
+        .map(|s| s.to_owned())
+        && (type_val == "string"
+            || type_val == "integer"
+            || type_val == "number"
+            || type_val == "float"
+            || type_val == "boolean"
+            || type_val == "null")
+        && obj.contains_key("value")
+    {
+        let value = obj.get("value");
+        let canonical_dt = canonical_literal_type(type_val.as_str(), value);
+        obj.insert("type".to_owned(), Value::String("literal".to_owned()));
+        obj.insert(
+            "data_type".to_owned(),
+            Value::String(canonical_dt.to_owned()),
+        );
+        return true;
     }
 
     if obj.contains_key("type") {
@@ -186,8 +195,7 @@ pub fn unwrap_array_sides(val: &mut Value) -> bool {
         let split: Option<(Value, Value)> = {
             let arr = obj.get("left").and_then(|v| v.as_array());
             match arr {
-                Some(arr) if arr.len() >= 2
-                    && (obj.get("right").map_or(true, |v| v.is_null())) => {
+                Some(arr) if arr.len() >= 2 && (obj.get("right").is_none_or(|v| v.is_null())) => {
                     Some((arr[0].clone(), arr[1].clone()))
                 }
                 _ => None,
@@ -240,11 +248,11 @@ fn unwrap_side(obj: &mut serde_json::Map<String, Value>, side: &str) -> bool {
 
 /// Unwrap an expression field from array to single value.
 fn unwrap_array_field(obj: &mut serde_json::Map<String, Value>, field: &str) -> bool {
-    if let Some(arr) = obj.get(field).and_then(|v| v.as_array()) {
-        if !arr.is_empty() {
-            obj.insert((*field).to_string(), arr[0].clone());
-            return true;
-        }
+    if let Some(arr) = obj.get(field).and_then(|v| v.as_array())
+        && !arr.is_empty()
+    {
+        obj.insert((*field).to_string(), arr[0].clone());
+        return true;
     }
     false
 }
@@ -295,7 +303,7 @@ pub fn simplify_single_child(val: &mut Value) -> bool {
 
     if (pred_type == "and" || pred_type == "or")
         && obj.contains_key("left")
-        && (obj.get("right").map_or(true, |v| v.is_null()))
+        && (obj.get("right").is_none_or(|v| v.is_null()))
         && let Some(left_val) = obj.remove("left")
     {
         obj.remove("right");
@@ -353,11 +361,13 @@ pub fn normalize_predicate(val: &mut Value) -> bool {
         // Rename `left` to `expr` for `like` / `is_null` predicates.
         // The LLM sometimes uses `left` (from comparison convention) instead
         // of the canonical `expr` field name for these predicate types.
-        if (pred_type == "like" || pred_type == "is_null") && obj.contains_key("left") && !obj.contains_key("expr") {
-            if let Some(left) = obj.remove("left") {
-                obj.insert("expr".to_owned(), left);
-                changed = true;
-            }
+        if (pred_type == "like" || pred_type == "is_null")
+            && obj.contains_key("left")
+            && !obj.contains_key("expr")
+            && let Some(left) = obj.remove("left")
+        {
+            obj.insert("expr".to_owned(), left);
+            changed = true;
         }
 
         // Fix: LLM outputs like predicates missing the `pattern` field,
@@ -401,19 +411,22 @@ pub fn normalize_predicate(val: &mut Value) -> bool {
             // instead of a valid Expression.  The LLM sometimes nests predicate types inside
             // a comparison (e.g. {"type":"comparison","left":{"type":"like",...},"op":"=","right":null}).
             const PREDICATE_TYPES: &[&str] = &["like", "in", "between", "is_null", "exists"];
-            let left_is_pred = obj.get("left").and_then(|v| v.as_object()).and_then(|o| o.get("type")).and_then(|t| t.as_str()).is_some_and(|t| PREDICATE_TYPES.contains(&t));
-            
+            let left_is_pred = obj
+                .get("left")
+                .and_then(|v| v.as_object())
+                .and_then(|o| o.get("type"))
+                .and_then(|t| t.as_str())
+                .is_some_and(|t| PREDICATE_TYPES.contains(&t));
+
             // If the left side is a predicate type (like/in/between/is_null/exists),
             // promote it to the top level (the comparison wrapper is spurious).
-            if left_is_pred {
-                if let Some(left_val) = obj.remove("left") {
-                    *val = left_val;
-                    // Recurse so the promoted predicate goes through the full
-                    // normalize_predicate pipeline (e.g. LIKE pattern inference).
-                    changed = true;
-                    changed |= normalize_predicate(val);
-                    return changed;
-                }
+            if left_is_pred && let Some(left_val) = obj.remove("left") {
+                *val = left_val;
+                // Recurse so the promoted predicate goes through the full
+                // normalize_predicate pipeline (e.g. LIKE pattern inference).
+                changed = true;
+                changed |= normalize_predicate(val);
+                return changed;
             }
 
             if let Some(op_val) = obj.get("op").and_then(|v| v.as_str()) {
@@ -452,19 +465,15 @@ pub fn normalize_predicate(val: &mut Value) -> bool {
 
         // Convert single-value IN target to array.
         // {"type":"in","expr":...,"target":{"value":"active"}} → {"type":"in","expr":...,"target":[{"value":"active"}]}
-        if pred_type == "in" {
-            if let Some(target) = obj.get("target") {
-                if target.is_object()
-                    && !target
-                        .as_object()
-                        .map_or(false, |o| o.contains_key("select"))
-                {
-                    // Single value object — wrap in array.
-                    let wrapped = serde_json::json!([target.clone()]);
-                    obj.insert("target".to_owned(), wrapped);
-                    changed = true;
-                }
-            }
+        if pred_type == "in"
+            && let Some(target) = obj.get("target")
+            && target.is_object()
+            && !target.as_object().is_some_and(|o| o.contains_key("select"))
+        {
+            // Single value object — wrap in array.
+            let wrapped = serde_json::json!([target.clone()]);
+            obj.insert("target".to_owned(), wrapped);
+            changed = true;
         }
 
         // Inject missing right.
@@ -490,10 +499,10 @@ pub fn normalize_predicate(val: &mut Value) -> bool {
             }
         }
 
-        if pred_type == "not" {
-            if let Some(v) = obj.get_mut("child") {
-                changed |= normalize_predicate(v);
-            }
+        if pred_type == "not"
+            && let Some(v) = obj.get_mut("child")
+        {
+            changed |= normalize_predicate(v);
         }
     }
 
@@ -533,10 +542,10 @@ fn normalize_malformed_case_expression_in_map(map: &mut serde_json::Map<String, 
         // `comparison` is a Predicate type, not an Expression.
         // Convert it to `binary_op` so the expression builder can
         // handle it inside `CASE WHEN`.
-        if let Some(when_obj) = when.as_object_mut() {
-            if when_obj.get("type").and_then(|t| t.as_str()) == Some("comparison") {
-                when_obj.insert("type".to_owned(), Value::String("binary_op".to_owned()));
-            }
+        if let Some(when_obj) = when.as_object_mut()
+            && when_obj.get("type").and_then(|t| t.as_str()) == Some("comparison")
+        {
+            when_obj.insert("type".to_owned(), Value::String("binary_op".to_owned()));
         }
         when_thens.push(serde_json::json!({
             "when": when,
@@ -573,17 +582,22 @@ fn normalize_impl(val: &mut Value) -> bool {
             // Check if this is a predicate-like object (has a known predicate
             // `type`, or looks like a comparison with `left` + `op`).
             // Known expression types (literal, column_ref, function_call, etc.)
-            // are excluded so that `std::mem::take` + `normalize_predicate` 
+            // are excluded so that `std::mem::take` + `normalize_predicate`
             // does not accidentally lose fields like `data_type`.
             const EXPR_TYPES: &[&str] = &[
-                "literal", "column_ref", "function_call", "binary_op",
-                "star", "subquery", "case", "window_function",
+                "literal",
+                "column_ref",
+                "function_call",
+                "binary_op",
+                "star",
+                "subquery",
+                "case",
+                "window_function",
                 "expr",
             ];
             let pred_type = map.get("type").and_then(|t| t.as_str()).unwrap_or("");
-            let is_predicate_like =
-                (!pred_type.is_empty() && !EXPR_TYPES.contains(&pred_type))
-                    || (map.contains_key("left") && map.contains_key("op"));
+            let is_predicate_like = (!pred_type.is_empty() && !EXPR_TYPES.contains(&pred_type))
+                || (map.contains_key("left") && map.contains_key("op"));
 
             if is_predicate_like {
                 // This is a predicate-like object — run full predicate normalization.
@@ -623,13 +637,12 @@ fn normalize_impl(val: &mut Value) -> bool {
                         | "exists"
                 )
                 && vlorql_core::function::is_known_function(&type_str)
+                && let Some(args) = map.remove("args")
             {
-                if let Some(args) = map.remove("args") {
-                    map.insert("type".to_owned(), Value::String("function_call".to_owned()));
-                    map.insert("name".to_owned(), Value::String(type_str));
-                    map.insert("args".to_owned(), args);
-                    changed = true;
-                }
+                map.insert("type".to_owned(), Value::String("function_call".to_owned()));
+                map.insert("name".to_owned(), Value::String(type_str));
+                map.insert("args".to_owned(), args);
+                changed = true;
             }
 
             // Fix: LLMs sometimes emit arithmetic operator names as `type`
@@ -642,58 +655,66 @@ fn normalize_impl(val: &mut Value) -> bool {
                 ("minus", "sub"),
                 ("divide", "div"),
             ];
-            if let Some(type_str) = map.get("type").and_then(|t| t.as_str()).map(|s| s.to_lowercase()) {
-                if let Some(&(_, op)) = ARITH_OPS.iter().find(|&&(name, _)| name == type_str) {
-                    if let Some(args) = map.remove("args").and_then(|v| v.as_array().cloned()) {
-                        map.insert("type".to_owned(), Value::String("binary_op".to_owned()));
-                        map.insert("op".to_owned(), Value::String(op.to_owned()));
-                        if args.len() >= 2 {
-                            map.insert("left".to_owned(), args[0].clone());
-                            map.insert("right".to_owned(), args[1].clone());
-                        } else if args.len() == 1 {
-                            // Single-arg arithmetic: treat as identity (e.g. multiply(0, x) with only x given).
-                            map.insert("left".to_owned(), args[0].clone());
-                            map.insert("right".to_owned(), args[0].clone());
+            if let Some(type_str) = map
+                .get("type")
+                .and_then(|t| t.as_str())
+                .map(|s| s.to_lowercase())
+                && let Some(&(_, op)) = ARITH_OPS.iter().find(|&&(name, _)| name == type_str)
+                && let Some(args) = map.remove("args").and_then(|v| v.as_array().cloned())
+            {
+                map.insert("type".to_owned(), Value::String("binary_op".to_owned()));
+                map.insert("op".to_owned(), Value::String(op.to_owned()));
+                if args.len() >= 2 {
+                    map.insert("left".to_owned(), args[0].clone());
+                    map.insert("right".to_owned(), args[1].clone());
+                } else if args.len() == 1 {
+                    // Single-arg arithmetic: treat as identity (e.g. multiply(0, x) with only x given).
+                    map.insert("left".to_owned(), args[0].clone());
+                    map.insert("right".to_owned(), args[0].clone());
+                }
+                changed = true;
+            }
+
+            // Handle case where expression type is used as a KEY instead of
+            // the value of `type`.  Weak LLMs sometimes output:
+            //   {"function_call": {"name": "sum", "args": [...]}, "alias": "..."}
+            // instead of the canonical:
+            //   {"type": "function_call", "name": "sum", "args": [...]}
+            const EXPR_TYPE_KEYS: &[&str] = &[
+                "function_call",
+                "column_ref",
+                "binary_op",
+                "literal",
+                "star",
+                "subquery",
+                "case",
+                "window_function",
+            ];
+            if !map.contains_key("type") {
+                for &expr_key in EXPR_TYPE_KEYS {
+                    if let Some(Value::Object(inner)) = map.remove(expr_key) {
+                        map.insert("type".to_owned(), Value::String(expr_key.to_owned()));
+                        for (k, v) in inner {
+                            map.entry(k).or_insert(v);
                         }
                         changed = true;
+                        break;
                     }
                 }
             }
 
-        // Handle case where expression type is used as a KEY instead of
-        // the value of `type`.  Weak LLMs sometimes output:
-        //   {"function_call": {"name": "sum", "args": [...]}, "alias": "..."}
-        // instead of the canonical:
-        //   {"type": "function_call", "name": "sum", "args": [...]}
-        const EXPR_TYPE_KEYS: &[&str] = &[
-            "function_call", "column_ref", "binary_op", "literal",
-            "star", "subquery", "case", "window_function",
-        ];
-        if !map.contains_key("type") {
-            for &expr_key in EXPR_TYPE_KEYS {
-                if let Some(Value::Object(inner)) = map.remove(expr_key) {
-                    map.insert("type".to_owned(), Value::String(expr_key.to_owned()));
-                    for (k, v) in inner {
-                        map.entry(k).or_insert(v);
-                    }
-                    changed = true;
-                    break;
-                }
+            // Convert malformed CASE expression from the LLM.
+            // LLMs often emit CASE WHEN as a function_call with interleaved args.
+            // Check whether we need to normalize — done before the `val` borrow
+            // to satisfy the borrow checker.
+            let needs_case_normalization = {
+                let name = map.get("name").and_then(|n| n.as_str());
+                let type_ = map.get("type").and_then(|t| t.as_str());
+                name == Some("case") && type_ == Some("function_call")
+            };
+            if needs_case_normalization {
+                changed |= normalize_malformed_case_expression_in_map(map);
             }
-        }
-
-        // Convert malformed CASE expression from the LLM.
-        // LLMs often emit CASE WHEN as a function_call with interleaved args.
-        // Check whether we need to normalize — done before the `val` borrow
-        // to satisfy the borrow checker.
-        let needs_case_normalization = {
-            let name = map.get("name").and_then(|n| n.as_str());
-            let type_ = map.get("type").and_then(|t| t.as_str());
-            name == Some("case") && type_ == Some("function_call")
-        };
-        if needs_case_normalization {
-            changed |= normalize_malformed_case_expression_in_map(map);
-        }
 
             // Recurse into children (some may be predicates or expressions).
             // NOTE: keys must be re-captured after `std::mem::take` above because

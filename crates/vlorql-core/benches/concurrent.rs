@@ -15,9 +15,9 @@ use std::sync::Arc;
 use vlorql_core::compile::{DialectConfig, QueryBuilder};
 use vlorql_core::policy::{PolicyConfig, PolicyEngine};
 use vlorql_core::schema::{
-    ColumnSchema, ComparisonOperator, DataType, DialectProfile, Expression, FromClause,
-    JoinClause, JoinType, Predicate, Projection, QueryPlan, SchemaMetadata,
-    SchemaSnapshot, SqlDialect, TableSchema,
+    ColumnSchema, ComparisonOperator, DataType, DialectProfile, Expression, FromClause, JoinClause,
+    JoinType, Predicate, Projection, QueryPlan, SchemaMetadata, SchemaSnapshot, SqlDialect,
+    TableSchema,
 };
 use vlorql_core::validate::ValidationPipeline;
 
@@ -182,9 +182,10 @@ fn build_query_plan() -> QueryPlan {
             },
         }]),
         ctes: None,
-            distinct: false,
-            distinct_on: None,
-            set_operation: None,    }
+        distinct: false,
+        distinct_on: None,
+        set_operation: None,
+    }
 }
 
 #[derive(Clone)]

@@ -50,15 +50,15 @@ pub fn wrap_descending_expr(val: &mut serde_json::Value) -> bool {
         return false;
     }
 
-    if let (Some(expr), Some(descending)) = (obj.remove("expr"), obj.remove("descending")) {
-        if descending.is_boolean() {
-            let term = serde_json::json!({
-                "expr": expr,
-                "descending": descending,
-            });
-            obj.insert("order_by".to_owned(), serde_json::json!([term]));
-            return true;
-        }
+    if let (Some(expr), Some(descending)) = (obj.remove("expr"), obj.remove("descending"))
+        && descending.is_boolean()
+    {
+        let term = serde_json::json!({
+            "expr": expr,
+            "descending": descending,
+        });
+        obj.insert("order_by".to_owned(), serde_json::json!([term]));
+        return true;
     }
 
     false
@@ -78,11 +78,11 @@ pub fn normalize_limit_offset(val: &mut serde_json::Value) -> bool {
     };
     let mut changed = false;
     for field in &["limit", "offset"] {
-        if let Some(str_val) = obj.get(*field).and_then(|v| v.as_str()) {
-            if let Ok(num) = str_val.parse::<u64>() {
-                obj.insert(field.to_string(), serde_json::Value::Number(num.into()));
-                changed = true;
-            }
+        if let Some(str_val) = obj.get(*field).and_then(|v| v.as_str())
+            && let Ok(num) = str_val.parse::<u64>()
+        {
+            obj.insert(field.to_string(), serde_json::Value::Number(num.into()));
+            changed = true;
         }
     }
     changed
@@ -111,17 +111,16 @@ fn lift_nested_plan_fields(val: &mut serde_json::Value) -> bool {
             .iter()
             .filter_map(|field| {
                 if !obj.contains_key(*field) {
-                    where_obj.get(*field).map(|v| (field.to_string(), v.clone()))
+                    where_obj
+                        .get(*field)
+                        .map(|v| (field.to_string(), v.clone()))
                 } else {
                     None
                 }
             })
             .collect();
 
-        let type_left = where_obj
-            .get("type")
-            .and_then(|t| t.as_str())
-            == Some("left")
+        let type_left = where_obj.get("type").and_then(|t| t.as_str()) == Some("left")
             && where_obj.contains_key("child");
 
         (lifted, type_left)
@@ -146,14 +145,12 @@ fn lift_nested_plan_fields(val: &mut serde_json::Value) -> bool {
     }
 
     // Fix `"type": "left"` → `"type": "not"` inside `where`.
-    if type_left {
-        if let Some(where_obj) = obj.get_mut("where").and_then(|v| v.as_object_mut()) {
-            where_obj.insert(
-                "type".to_owned(),
-                serde_json::Value::String("not".to_owned()),
-            );
-            changed = true;
-        }
+    if type_left && let Some(where_obj) = obj.get_mut("where").and_then(|v| v.as_object_mut()) {
+        where_obj.insert(
+            "type".to_owned(),
+            serde_json::Value::String("not".to_owned()),
+        );
+        changed = true;
     }
 
     changed

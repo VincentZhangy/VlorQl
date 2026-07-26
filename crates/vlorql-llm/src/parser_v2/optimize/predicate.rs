@@ -148,21 +148,21 @@ fn simplify_and_true(predicate: &mut Predicate) -> bool {
 
 /// `predicate AND FALSE` → `FALSE`
 fn simplify_and_false(predicate: &mut Predicate) -> bool {
-    if let Predicate::And { left, right } = predicate {
-        if is_false_predicate(left) || is_false_predicate(right) {
-            *predicate = Predicate::Comparison {
-                left: Expression::Literal {
-                    value: Value::Bool(false),
-                    data_type: DataType::Boolean,
-                },
-                op: ComparisonOperator::Eq,
-                right: Expression::Literal {
-                    value: Value::Bool(true),
-                    data_type: DataType::Boolean,
-                },
-            };
-            return true;
-        }
+    if let Predicate::And { left, right } = predicate
+        && (is_false_predicate(left) || is_false_predicate(right))
+    {
+        *predicate = Predicate::Comparison {
+            left: Expression::Literal {
+                value: Value::Bool(false),
+                data_type: DataType::Boolean,
+            },
+            op: ComparisonOperator::Eq,
+            right: Expression::Literal {
+                value: Value::Bool(true),
+                data_type: DataType::Boolean,
+            },
+        };
+        return true;
     }
     false
 }
@@ -212,11 +212,86 @@ fn simplify_or_false(predicate: &mut Predicate) -> bool {
 
 /// `predicate OR TRUE` → `TRUE`, `TRUE OR predicate` → `TRUE`
 fn simplify_or_true(predicate: &mut Predicate) -> bool {
-    if let Predicate::Or { left, right } = predicate {
-        if is_true_predicate(left) || is_true_predicate(right) {
+    if let Predicate::Or { left, right } = predicate
+        && (is_true_predicate(left) || is_true_predicate(right))
+    {
+        *predicate = Predicate::Comparison {
+            left: Expression::Literal {
+                value: Value::Bool(true),
+                data_type: DataType::Boolean,
+            },
+            op: ComparisonOperator::Eq,
+            right: Expression::Literal {
+                value: Value::Bool(true),
+                data_type: DataType::Boolean,
+            },
+        };
+        return true;
+    }
+    false
+}
+
+/// `NOT NOT predicate` → `predicate`
+fn simplify_not_not(predicate: &mut Predicate) -> bool {
+    if let Predicate::Not { child } = predicate
+        && let Predicate::Not { child: inner_child } = child.as_ref()
+    {
+        let replacement = inner_child.clone();
+        *predicate = *replacement;
+        return true;
+    }
+    false
+}
+
+/// `1 = 1` → `TRUE`, `1 != 1` → `FALSE`
+fn fold_constant_comparison(predicate: &mut Predicate) -> bool {
+    if let Predicate::Comparison { left, op, right } = predicate
+        && let (Some(lv), Some(rv)) = (as_constant_value(left), as_constant_value(right))
+    {
+        // Only fold comparisons of the same scalar type.
+        let result = match (lv, rv) {
+            (serde_json::Value::Number(a), serde_json::Value::Number(b)) => {
+                match (a.as_i64(), b.as_i64()) {
+                    (Some(ai), Some(bi)) => Some(match op {
+                        ComparisonOperator::Eq => ai == bi,
+                        ComparisonOperator::Neq => ai != bi,
+                        ComparisonOperator::Gt => ai > bi,
+                        ComparisonOperator::Gte => ai >= bi,
+                        ComparisonOperator::Lt => ai < bi,
+                        ComparisonOperator::Lte => ai <= bi,
+                        _ => return false,
+                    }),
+                    (Some(ai), None) => b.as_f64().map(|bf| {
+                        let af = ai as f64;
+                        match op {
+                            ComparisonOperator::Eq => af == bf,
+                            ComparisonOperator::Neq => af != bf,
+                            ComparisonOperator::Gt => af > bf,
+                            ComparisonOperator::Gte => af >= bf,
+                            ComparisonOperator::Lt => af < bf,
+                            ComparisonOperator::Lte => af <= bf,
+                            _ => false,
+                        }
+                    }),
+                    _ => None,
+                }
+            }
+            (serde_json::Value::Bool(a), serde_json::Value::Bool(b)) => Some(match op {
+                ComparisonOperator::Eq => a == b,
+                ComparisonOperator::Neq => a != b,
+                _ => return false,
+            }),
+            (serde_json::Value::String(a), serde_json::Value::String(b)) => Some(match op {
+                ComparisonOperator::Eq => a == b,
+                ComparisonOperator::Neq => a != b,
+                _ => return false,
+            }),
+            _ => None,
+        };
+        if let Some(result) = result {
             *predicate = Predicate::Comparison {
                 left: Expression::Literal {
-                    value: Value::Bool(true),
+                    value: Value::Bool(result),
                     data_type: DataType::Boolean,
                 },
                 op: ComparisonOperator::Eq,
@@ -231,154 +306,78 @@ fn simplify_or_true(predicate: &mut Predicate) -> bool {
     false
 }
 
-/// `NOT NOT predicate` → `predicate`
-fn simplify_not_not(predicate: &mut Predicate) -> bool {
-    if let Predicate::Not { child } = predicate {
-        if let Predicate::Not { child: inner_child } = child.as_ref() {
-            let replacement = inner_child.clone();
-            *predicate = *replacement;
-            return true;
-        }
-    }
-    false
-}
-
-/// `1 = 1` → `TRUE`, `1 != 1` → `FALSE`
-fn fold_constant_comparison(predicate: &mut Predicate) -> bool {
-    if let Predicate::Comparison { left, op, right } = predicate {
-        if let (Some(lv), Some(rv)) = (as_constant_value(left), as_constant_value(right)) {
-            // Only fold comparisons of the same scalar type.
-            let result = match (lv, rv) {
-                (serde_json::Value::Number(a), serde_json::Value::Number(b)) => {
-                    match (a.as_i64(), b.as_i64()) {
-                        (Some(ai), Some(bi)) => Some(match op {
-                            ComparisonOperator::Eq => ai == bi,
-                            ComparisonOperator::Neq => ai != bi,
-                            ComparisonOperator::Gt => ai > bi,
-                            ComparisonOperator::Gte => ai >= bi,
-                            ComparisonOperator::Lt => ai < bi,
-                            ComparisonOperator::Lte => ai <= bi,
-                            _ => return false,
-                        }),
-                        (Some(ai), None) => b.as_f64().map(|bf| {
-                            let af = ai as f64;
-                            match op {
-                                ComparisonOperator::Eq => af == bf,
-                                ComparisonOperator::Neq => af != bf,
-                                ComparisonOperator::Gt => af > bf,
-                                ComparisonOperator::Gte => af >= bf,
-                                ComparisonOperator::Lt => af < bf,
-                                ComparisonOperator::Lte => af <= bf,
-                                _ => return false,
-                            }
-                        }),
-                        _ => None,
-                    }
-                }
-                (serde_json::Value::Bool(a), serde_json::Value::Bool(b)) => Some(match op {
-                    ComparisonOperator::Eq => a == b,
-                    ComparisonOperator::Neq => a != b,
-                    _ => return false,
-                }),
-                (serde_json::Value::String(a), serde_json::Value::String(b)) => Some(match op {
-                    ComparisonOperator::Eq => a == b,
-                    ComparisonOperator::Neq => a != b,
-                    _ => return false,
-                }),
-                _ => None,
-            };
-            if let Some(result) = result {
-                *predicate = Predicate::Comparison {
-                    left: Expression::Literal {
-                        value: Value::Bool(result),
-                        data_type: DataType::Boolean,
-                    },
-                    op: ComparisonOperator::Eq,
-                    right: Expression::Literal {
-                        value: Value::Bool(true),
-                        data_type: DataType::Boolean,
-                    },
-                };
-                return true;
-            }
-        }
-    }
-    false
-}
-
 /// `column = column` → `TRUE`, `column != column` → `FALSE`
 fn simplify_trivial_comparison(predicate: &mut Predicate) -> bool {
-    if let Predicate::Comparison { left, op, right } = predicate {
-        if let (Some(lc), Some(rc)) = (as_column_name(left), as_column_name(right)) {
-            if lc == rc {
-                let is_eq = matches!(
-                    op,
-                    ComparisonOperator::Eq | ComparisonOperator::Gte | ComparisonOperator::Lte
-                );
-                *predicate = Predicate::Comparison {
-                    left: Expression::Literal {
-                        value: Value::Bool(is_eq),
-                        data_type: DataType::Boolean,
-                    },
-                    op: ComparisonOperator::Eq,
-                    right: Expression::Literal {
-                        value: Value::Bool(true),
-                        data_type: DataType::Boolean,
-                    },
-                };
-                return true;
-            }
-        }
+    if let Predicate::Comparison { left, op, right } = predicate
+        && let (Some(lc), Some(rc)) = (as_column_name(left), as_column_name(right))
+        && lc == rc
+    {
+        let is_eq = matches!(
+            op,
+            ComparisonOperator::Eq | ComparisonOperator::Gte | ComparisonOperator::Lte
+        );
+        *predicate = Predicate::Comparison {
+            left: Expression::Literal {
+                value: Value::Bool(is_eq),
+                data_type: DataType::Boolean,
+            },
+            op: ComparisonOperator::Eq,
+            right: Expression::Literal {
+                value: Value::Bool(true),
+                data_type: DataType::Boolean,
+            },
+        };
+        return true;
     }
     false
 }
 
 /// `A AND A` → `A` (duplicate elimination)
 fn simplify_duplicate_and(predicate: &mut Predicate) -> bool {
-    if let Predicate::And { left, right } = predicate {
-        if predicates_equal(left, right) {
-            let replacement = std::mem::replace(
-                left,
-                Box::new(Predicate::Comparison {
-                    left: Expression::Literal {
-                        value: Value::Bool(true),
-                        data_type: DataType::Boolean,
-                    },
-                    op: ComparisonOperator::Eq,
-                    right: Expression::Literal {
-                        value: Value::Bool(true),
-                        data_type: DataType::Boolean,
-                    },
-                }),
-            );
-            *predicate = *replacement;
-            return true;
-        }
+    if let Predicate::And { left, right } = predicate
+        && predicates_equal(left, right)
+    {
+        let replacement = std::mem::replace(
+            left,
+            Box::new(Predicate::Comparison {
+                left: Expression::Literal {
+                    value: Value::Bool(true),
+                    data_type: DataType::Boolean,
+                },
+                op: ComparisonOperator::Eq,
+                right: Expression::Literal {
+                    value: Value::Bool(true),
+                    data_type: DataType::Boolean,
+                },
+            }),
+        );
+        *predicate = *replacement;
+        return true;
     }
     false
 }
 
 /// `A OR A` → `A` (duplicate elimination)
 fn simplify_duplicate_or(predicate: &mut Predicate) -> bool {
-    if let Predicate::Or { left, right } = predicate {
-        if predicates_equal(left, right) {
-            let replacement = std::mem::replace(
-                left,
-                Box::new(Predicate::Comparison {
-                    left: Expression::Literal {
-                        value: Value::Bool(true),
-                        data_type: DataType::Boolean,
-                    },
-                    op: ComparisonOperator::Eq,
-                    right: Expression::Literal {
-                        value: Value::Bool(true),
-                        data_type: DataType::Boolean,
-                    },
-                }),
-            );
-            *predicate = *replacement;
-            return true;
-        }
+    if let Predicate::Or { left, right } = predicate
+        && predicates_equal(left, right)
+    {
+        let replacement = std::mem::replace(
+            left,
+            Box::new(Predicate::Comparison {
+                left: Expression::Literal {
+                    value: Value::Bool(true),
+                    data_type: DataType::Boolean,
+                },
+                op: ComparisonOperator::Eq,
+                right: Expression::Literal {
+                    value: Value::Bool(true),
+                    data_type: DataType::Boolean,
+                },
+            }),
+        );
+        *predicate = *replacement;
+        return true;
     }
     false
 }

@@ -5,8 +5,7 @@
 //! schema to find a valid FK relationship and inserts the correct JOIN.
 
 use crate::schema::{
-    FromClause, JoinClause, JoinType, Predicate, QueryPlan, SchemaSnapshot,
-    expressions::Expression,
+    FromClause, JoinClause, JoinType, Predicate, QueryPlan, SchemaSnapshot, expressions::Expression,
 };
 use std::collections::HashSet;
 
@@ -76,8 +75,7 @@ fn collect_tables_in_pred(pred: &Predicate, tables: &mut HashSet<String>) {
             collect_tables_in_expr(left, tables);
             collect_tables_in_expr(right, tables);
         }
-        Predicate::And { left, right }
-        | Predicate::Or { left, right } => {
+        Predicate::And { left, right } | Predicate::Or { left, right } => {
             collect_tables_in_pred(left, tables);
             collect_tables_in_pred(right, tables);
         }
@@ -110,9 +108,7 @@ fn collect_tables_in_pred(pred: &Predicate, tables: &mut HashSet<String>) {
 fn collect_tables_in_plan(plan: &QueryPlan, tables: &mut HashSet<String>) {
     for proj in &plan.select {
         match proj {
-            crate::schema::Projection::Column {
-                table: Some(t), ..
-            } => {
+            crate::schema::Projection::Column { table: Some(t), .. } => {
                 tables.insert(t.clone());
             }
             crate::schema::Projection::Expr { expression, .. } => {
@@ -157,10 +153,11 @@ fn build_reverse_fk_index(
     for table in &schema.tables {
         for col in &table.columns {
             if let Some(ref fk) = col.foreign_key {
-                index
-                    .entry(fk.foreign_table.clone())
-                    .or_default()
-                    .push((table.name.clone(), col.name.clone(), fk.foreign_column.clone()));
+                index.entry(fk.foreign_table.clone()).or_default().push((
+                    table.name.clone(),
+                    col.name.clone(),
+                    fk.foreign_column.clone(),
+                ));
             }
         }
     }
@@ -189,37 +186,9 @@ fn find_join_for(
     for scope_table in scope {
         if let Some(table) = schema.get_table(scope_table) {
             for col in &table.columns {
-                if let Some(ref fk) = col.foreign_key {
-                    if fk.foreign_table == missing_table {
-                        return Some(JoinClause {
-                            join_type: JoinType::Inner,
-                            right_table: FromClause {
-                                table: missing_table.to_owned(),
-                                alias: None,
-                            },
-                            on: Predicate::Comparison {
-                                left: Expression::ColumnRef {
-                                    table: Some(scope_table.clone()),
-                                    column: col.name.clone(),
-                                },
-                                op: crate::schema::ComparisonOperator::Eq,
-                                right: Expression::ColumnRef {
-                                    table: Some(missing_table.to_owned()),
-                                    column: fk.foreign_column.clone(),
-                                },
-                            },
-                        });
-                    }
-                }
-            }
-        }
-    }
-
-    // 2. FK from missing_table → an in-scope table (e.g. order_items.order_id → orders.id)
-    if let Some(missing_schema) = schema.get_table(missing_table) {
-        for col in &missing_schema.columns {
-            if let Some(ref fk) = col.foreign_key {
-                if scope.contains(&fk.foreign_table) {
+                if let Some(ref fk) = col.foreign_key
+                    && fk.foreign_table == missing_table
+                {
                     return Some(JoinClause {
                         join_type: JoinType::Inner,
                         right_table: FromClause {
@@ -228,17 +197,45 @@ fn find_join_for(
                         },
                         on: Predicate::Comparison {
                             left: Expression::ColumnRef {
-                                table: Some(fk.foreign_table.clone()),
-                                column: fk.foreign_column.clone(),
+                                table: Some(scope_table.clone()),
+                                column: col.name.clone(),
                             },
                             op: crate::schema::ComparisonOperator::Eq,
                             right: Expression::ColumnRef {
                                 table: Some(missing_table.to_owned()),
-                                column: col.name.clone(),
+                                column: fk.foreign_column.clone(),
                             },
                         },
                     });
                 }
+            }
+        }
+    }
+
+    // 2. FK from missing_table → an in-scope table (e.g. order_items.order_id → orders.id)
+    if let Some(missing_schema) = schema.get_table(missing_table) {
+        for col in &missing_schema.columns {
+            if let Some(ref fk) = col.foreign_key
+                && scope.contains(&fk.foreign_table)
+            {
+                return Some(JoinClause {
+                    join_type: JoinType::Inner,
+                    right_table: FromClause {
+                        table: missing_table.to_owned(),
+                        alias: None,
+                    },
+                    on: Predicate::Comparison {
+                        left: Expression::ColumnRef {
+                            table: Some(fk.foreign_table.clone()),
+                            column: fk.foreign_column.clone(),
+                        },
+                        op: crate::schema::ComparisonOperator::Eq,
+                        right: Expression::ColumnRef {
+                            table: Some(missing_table.to_owned()),
+                            column: col.name.clone(),
+                        },
+                    },
+                });
             }
         }
     }
@@ -305,9 +302,7 @@ pub fn fix_missing_joins(plan: &mut QueryPlan, schema: &SchemaSnapshot) -> bool 
     let mut referenced: HashSet<String> = HashSet::new();
     for proj in &plan.select {
         match proj {
-            crate::schema::Projection::Column {
-                table: Some(t), ..
-            } => {
+            crate::schema::Projection::Column { table: Some(t), .. } => {
                 referenced.insert(t.clone());
             }
             crate::schema::Projection::Expr { expression, .. } => {

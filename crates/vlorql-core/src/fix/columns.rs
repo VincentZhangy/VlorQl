@@ -30,7 +30,7 @@ fn parse_arithmetic_column(col: &str) -> Option<(String, BinaryOperator, String)
             let left = col[..pos].trim().to_owned();
             let right = col[pos + sep.len()..].trim().to_owned();
             if !left.is_empty() && !right.is_empty() {
-                return Some((left, op.clone(), right));
+                return Some((left, *op, right));
             }
         }
     }
@@ -133,20 +133,37 @@ fn arg_to_expr(table: Option<&str>, arg: &str) -> Expression {
 /// Common SQL keywords that appear as arguments in EXTRACT(), DATE_TRUNC(),
 /// TO_CHAR() and similar date/time functions.
 const SQL_KEYWORDS: &[&str] = &[
-    "month", "year", "day", "hour", "minute", "second",
-    "quarter", "week", "dow", "doy", "epoch", "decade",
-    "century", "millennium", "millisecond", "microsecond",
-    "yyyy", "mm", "dd", "hh", "mi", "ss",
+    "month",
+    "year",
+    "day",
+    "hour",
+    "minute",
+    "second",
+    "quarter",
+    "week",
+    "dow",
+    "doy",
+    "epoch",
+    "decade",
+    "century",
+    "millennium",
+    "millisecond",
+    "microsecond",
+    "yyyy",
+    "mm",
+    "dd",
+    "hh",
+    "mi",
+    "ss",
 ];
 
 /// Recursively fix column references in an expression tree.
 /// Tries both arithmetic and SQL function patterns.
 fn fix_expr(expr: &mut Expression) -> bool {
     match expr {
-        Expression::ColumnRef {
-            table,
-            column,
-        } if !column.is_empty() && parse_arithmetic_column(column).is_some() => {
+        Expression::ColumnRef { table, column }
+            if !column.is_empty() && parse_arithmetic_column(column).is_some() =>
+        {
             let (left, op, right) = parse_arithmetic_column(column).unwrap();
             let new_expr = Expression::BinaryOp {
                 left: Box::new(col_ref(table.clone(), &left)),
@@ -156,16 +173,13 @@ fn fix_expr(expr: &mut Expression) -> bool {
             *expr = new_expr;
             true
         }
-        Expression::ColumnRef {
-            table,
-            column,
-        } if !column.is_empty() && parse_sql_function_column(column).is_some() => {
+        Expression::ColumnRef { table, column }
+            if !column.is_empty() && parse_sql_function_column(column).is_some() =>
+        {
             let table_str = table.as_deref();
             let (name, args) = parse_sql_function_column(column).unwrap();
-            let expr_args: Vec<Expression> = args
-                .iter()
-                .map(|a| arg_to_expr(table_str, a))
-                .collect();
+            let expr_args: Vec<Expression> =
+                args.iter().map(|a| arg_to_expr(table_str, a)).collect();
             let new_expr = Expression::FunctionCall {
                 name: name.to_lowercase(),
                 args: expr_args,
@@ -182,9 +196,7 @@ fn fix_expr(expr: &mut Expression) -> bool {
             }
             changed
         }
-        Expression::BinaryOp { left, right, .. } => {
-            fix_expr(left) | fix_expr(right)
-        }
+        Expression::BinaryOp { left, right, .. } => fix_expr(left) | fix_expr(right),
         Expression::Case {
             operand,
             when_thens,
@@ -223,9 +235,7 @@ fn fix_pred(pred: &mut Predicate) -> bool {
             fix_pred(left) | fix_pred(right)
         }
         Predicate::Not { child } => fix_pred(child),
-        Predicate::Between { expr, low, high } => {
-            fix_expr(expr) | fix_expr(low) | fix_expr(high)
-        }
+        Predicate::Between { expr, low, high } => fix_expr(expr) | fix_expr(low) | fix_expr(high),
         Predicate::In { expr, target } => {
             let mut changed = fix_expr(expr);
             if let crate::schema::InTarget::SubQuery(query) = target {
@@ -268,10 +278,8 @@ fn fix_proj(proj: &mut Projection) -> bool {
             // Try SQL function pattern (e.g. "EXTRACT(MONTH FROM created_at)").
             if let Some((name, args)) = parse_sql_function_column(column) {
                 let table_str = table.as_deref();
-                let expr_args: Vec<Expression> = args
-                    .iter()
-                    .map(|a| arg_to_expr(table_str, a))
-                    .collect();
+                let expr_args: Vec<Expression> =
+                    args.iter().map(|a| arg_to_expr(table_str, a)).collect();
                 let new_expr = Expression::FunctionCall {
                     name: name.to_lowercase(),
                     args: expr_args,

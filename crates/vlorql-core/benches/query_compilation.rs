@@ -18,8 +18,7 @@ use std::sync::Arc;
 use vlorql_core::compile::{DialectConfig, QueryBuilder};
 use vlorql_core::schema::{
     BinaryOperator, CommonTableExpression, ComparisonOperator, DataType, Expression, FromClause,
-    InTarget, JoinClause, JoinType, OrderByTerm, Predicate, Projection,
-    QueryPlan, SqlDialect,
+    InTarget, JoinClause, JoinType, OrderByTerm, Predicate, Projection, QueryPlan,
 };
 use vlorql_core::validate::ValidatedPlan;
 
@@ -83,9 +82,10 @@ fn leaf_cte() -> QueryPlan {
         offset: None,
         joins: None,
         ctes: None,
-            distinct: false,
-            distinct_on: None,
-            set_operation: None,    }
+        distinct: false,
+        distinct_on: None,
+        set_operation: None,
+    }
 }
 
 /// Builds a CTE that joins `orders` and `customers`.
@@ -311,9 +311,10 @@ fn build_complex_plan() -> ValidatedPlan {
                     offset: None,
                     joins: None,
                     ctes: None,
-            distinct: false,
-            distinct_on: None,
-            set_operation: None,                }),
+                    distinct: false,
+                    distinct_on: None,
+                    set_operation: None,
+                }),
             },
             CommonTableExpression {
                 name: "active_customers".to_owned(),
@@ -366,11 +367,7 @@ fn bench_query_build(c: &mut Criterion) {
             &config,
             |bencher, config| {
                 bencher.iter(|| {
-                    let result = QueryBuilder::new(
-                        criterion::black_box(&plan),
-                        config,
-                    )
-                    .build();
+                    let result = QueryBuilder::new(criterion::black_box(&plan), config).build();
                     criterion::black_box(result.expect("complex plan should compile"))
                 })
             },

@@ -211,10 +211,13 @@ pub fn default_fold_plan<F: ExpressionFold + ?Sized>(
                 })
                 .collect()
         }),
-        set_operation: plan.set_operation.as_ref().map(|set_op| SetOperationClause {
-            operation: set_op.operation,
-            right: Box::new(folder.fold_plan(&set_op.right)),
-        }),
+        set_operation: plan
+            .set_operation
+            .as_ref()
+            .map(|set_op| SetOperationClause {
+                operation: set_op.operation,
+                right: Box::new(folder.fold_plan(&set_op.right)),
+            }),
     }
 }
 
@@ -280,9 +283,7 @@ pub fn default_visit_expression<F: ExpressionVisit + ?Sized>(
             }
         }
         Expression::ColumnRef { .. } | Expression::Literal { .. } | Expression::Star => {}
-        Expression::WindowFunction {
-            args, over, ..
-        } => {
+        Expression::WindowFunction { args, over, .. } => {
             for arg in args {
                 visitor.visit_expression(arg, ctx);
             }

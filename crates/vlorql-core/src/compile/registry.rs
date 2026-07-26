@@ -94,8 +94,7 @@ pub struct ConfigCompiler(pub Arc<DialectConfig>);
 
 impl SqlCompiler for ConfigCompiler {
     fn compile(&self, plan: &crate::validate::ValidatedPlan) -> Result<CompiledQuery, VlorQLError> {
-        let (sql, parameters) =
-            super::QueryBuilder::new(plan, &self.0).build()?;
+        let (sql, parameters) = super::QueryBuilder::new(plan, &self.0).build()?;
         Ok(CompiledQuery {
             sql,
             parameters,

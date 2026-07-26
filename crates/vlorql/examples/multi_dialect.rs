@@ -95,9 +95,10 @@ fn canonical_plan() -> QueryPlan {
         offset: Some(100),
         joins: None,
         ctes: None,
-            distinct: false,
-            distinct_on: None,
-            set_operation: None,    }
+        distinct: false,
+        distinct_on: None,
+        set_operation: None,
+    }
 }
 
 /// Builds a `VlorQl` facade for the requested dialect. The compiler defaults

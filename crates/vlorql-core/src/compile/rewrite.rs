@@ -33,10 +33,10 @@ impl RewriteEngine {
     pub fn apply(&self, sql: &str, dialect: &str) -> Result<String, VlorQLError> {
         let mut result = sql.to_string();
         for rule in &self.rules {
-            if let Some(filter) = &rule.dialect_filter {
-                if !filter.iter().any(|d| d.eq_ignore_ascii_case(dialect)) {
-                    continue;
-                }
+            if let Some(filter) = &rule.dialect_filter
+                && !filter.iter().any(|d| d.eq_ignore_ascii_case(dialect))
+            {
+                continue;
             }
             let re = Regex::new(&rule.match_pattern).map_err(|e| {
                 VlorQLError::config(
@@ -122,9 +122,7 @@ mod tests {
             replace_template: "LOWER(${left}) LIKE LOWER(${right})".into(),
             dialect_filter: Some(vec!["mysql".into()]),
         }]);
-        let sql = engine
-            .apply("WHERE name ILIKE '%foo%'", "mysql")
-            .unwrap();
+        let sql = engine.apply("WHERE name ILIKE '%foo%'", "mysql").unwrap();
         assert_eq!(sql, "WHERE LOWER(name) LIKE LOWER('%foo%')");
     }
 
