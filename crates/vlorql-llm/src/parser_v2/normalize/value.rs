@@ -64,36 +64,40 @@ fn normalize_impl(val: &mut Value) -> bool {
     match val {
         Value::Object(map) => {
             // Normalize the `data_type` field if present.
-            if let Some(dt_val) = map.get_mut("data_type") {
-                if let Some(s) = dt_val.as_str() {
-                    if let Some(canonical) = resolve_data_type(s) {
-                        if canonical != s {
-                            *dt_val = Value::String(canonical.to_owned());
-                            changed = true;
-                        }
-                    }
-                }
+            if let Some(dt_val) = map.get_mut("data_type")
+                && let Some(s) = dt_val.as_str()
+                && let Some(canonical) = resolve_data_type(s)
+                && canonical != s
+            {
+                *dt_val = Value::String(canonical.to_owned());
+                changed = true;
             }
 
             // Fix: LLM sometimes emits `data_type: "null"` with a non-null value.
             // Infer the correct data type from the `value` field.
-            if let Some(dt_val) = map.get("data_type") {
-                if dt_val.as_str() == Some("null") {
-                    if let Some(val_field) = map.get("value") {
-                        let inferred = match val_field {
-                            Value::Null => None,                    // correct already
-                            Value::Bool(_) => Some("boolean"),
-                            Value::Number(n) => {
-                                if n.is_f64() { Some("float") } else { Some("int") }
-                            }
-                            Value::String(_) => Some("string"),
-                            Value::Array(_) | Value::Object(_) => None,
-                        };
-                        if let Some(inferred_dt) = inferred {
-                            map.insert("data_type".to_owned(), Value::String(inferred_dt.to_owned()));
-                            changed = true;
+            if let Some(dt_val) = map.get("data_type")
+                && dt_val.as_str() == Some("null")
+                && let Some(val_field) = map.get("value")
+            {
+                let inferred = match val_field {
+                    Value::Null => None, // correct already
+                    Value::Bool(_) => Some("boolean"),
+                    Value::Number(n) => {
+                        if n.is_f64() {
+                            Some("float")
+                        } else {
+                            Some("int")
                         }
                     }
+                    Value::String(_) => Some("string"),
+                    Value::Array(_) | Value::Object(_) => None,
+                };
+                if let Some(inferred_dt) = inferred {
+                    map.insert(
+                        "data_type".to_owned(),
+                        Value::String(inferred_dt.to_owned()),
+                    );
+                    changed = true;
                 }
             }
             // Recurse into children.
@@ -154,7 +158,7 @@ mod tests {
 
     #[test]
     fn normalizes_decimal_to_float() {
-        let mut val = json!({"type": "literal", "value": 3.14, "data_type": "decimal"});
+        let mut val = json!({"type": "literal", "value": 2.5, "data_type": "decimal"});
         assert!(normalize(&mut val));
         assert_eq!(val.get("data_type").and_then(|v| v.as_str()), Some("float"));
     }
@@ -256,20 +260,14 @@ mod tests {
     fn infers_int_type_from_null_data_type() {
         let mut val = json!({"type": "literal", "value": 42, "data_type": "null"});
         assert!(normalize(&mut val));
-        assert_eq!(
-            val.get("data_type").and_then(|v| v.as_str()),
-            Some("int")
-        );
+        assert_eq!(val.get("data_type").and_then(|v| v.as_str()), Some("int"));
     }
 
     #[test]
     fn infers_float_type_from_null_data_type() {
-        let mut val = json!({"type": "literal", "value": 3.14, "data_type": "null"});
+        let mut val = json!({"type": "literal", "value": 2.5, "data_type": "null"});
         assert!(normalize(&mut val));
-        assert_eq!(
-            val.get("data_type").and_then(|v| v.as_str()),
-            Some("float")
-        );
+        assert_eq!(val.get("data_type").and_then(|v| v.as_str()), Some("float"));
     }
 
     #[test]
@@ -286,9 +284,6 @@ mod tests {
     fn keeps_null_data_type_when_value_is_null() {
         let mut val = json!({"type": "literal", "value": null, "data_type": "null"});
         assert!(!normalize(&mut val));
-        assert_eq!(
-            val.get("data_type").and_then(|v| v.as_str()),
-            Some("null")
-        );
+        assert_eq!(val.get("data_type").and_then(|v| v.as_str()), Some("null"));
     }
 }

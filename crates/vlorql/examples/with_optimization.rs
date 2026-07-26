@@ -191,9 +191,10 @@ fn build_test_plan() -> QueryPlan {
             },
         }]),
         ctes: None,
-            distinct: false,
-            distinct_on: None,
-            set_operation: None,    }
+        distinct: false,
+        distinct_on: None,
+        set_operation: None,
+    }
 }
 
 /// Selects a statistics provider:

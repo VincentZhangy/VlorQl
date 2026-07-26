@@ -146,7 +146,11 @@ fn build_cte(val: &Value) -> Result<CommonTableExpression, BuildError> {
         "query",
     )?;
     let query = Box::new(build_plan_from_obj(query_obj)?);
-    Ok(CommonTableExpression { name, query, recursive: false })
+    Ok(CommonTableExpression {
+        name,
+        query,
+        recursive: false,
+    })
 }
 
 /// Build a [`QueryPlan`] from a canonical JSON string.

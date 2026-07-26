@@ -125,9 +125,10 @@ mod tests {
                 offset: None,
                 joins: None,
                 ctes: None,
-            distinct: false,
-            distinct_on: None,
-            set_operation: None,            }))
+                distinct: false,
+                distinct_on: None,
+                set_operation: None,
+            }))
         };
 
         assert_eq!(normalize_plan(&plan()), normalize_plan(&plan()));

@@ -225,7 +225,10 @@ fn build_literal_expr(val: &Value) -> Result<Expression, BuildError> {
 /// Build a literal expression from a JSON object with `value` and `data_type`.
 fn build_literal_from_obj(obj: &serde_json::Map<String, Value>) -> Result<Expression, BuildError> {
     let value = obj.get("value").cloned().unwrap_or(Value::Null);
-    let dt_str = obj.get("data_type").and_then(|v| v.as_str()).map(|s| s.to_owned());
+    let dt_str = obj
+        .get("data_type")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_owned());
     let data_type = match dt_str.as_deref() {
         Some("null") => {
             // Small local LLMs (llama3.2, etc.) frequently set data_type to "null"
@@ -357,9 +360,9 @@ pub fn build_expression(val: &Value) -> Result<Expression, BuildError> {
         "case" => {
             // CASE WHEN expression
             let operand = match obj.get("operand") {
-                Some(val) if !val.is_null() => {
-                    Some(Box::new(build_expression(val).map_err(|e| e.at("operand"))?))
-                }
+                Some(val) if !val.is_null() => Some(Box::new(
+                    build_expression(val).map_err(|e| e.at("operand"))?,
+                )),
                 _ => None,
             };
             let when_thens_arr = req_arr(
@@ -370,24 +373,20 @@ pub fn build_expression(val: &Value) -> Result<Expression, BuildError> {
             let mut when_thens = Vec::new();
             for (i, item) in when_thens_arr.iter().enumerate() {
                 let item_obj = req_obj(item, &format!("when_thens[{i}]"))?;
-                let when = build_expression(
-                    item_obj
-                        .get("when")
-                        .ok_or_else(|| BuildError::new(&format!("when_thens[{i}]"), "missing `when` field"))?,
-                )
+                let when = build_expression(item_obj.get("when").ok_or_else(|| {
+                    BuildError::new(format!("when_thens[{i}]"), "missing `when` field")
+                })?)
                 .map_err(|e| e.at(&format!("when_thens[{i}].when")))?;
-                let then = build_expression(
-                    item_obj
-                        .get("then")
-                        .ok_or_else(|| BuildError::new(&format!("when_thens[{i}]"), "missing `then` field"))?,
-                )
+                let then = build_expression(item_obj.get("then").ok_or_else(|| {
+                    BuildError::new(format!("when_thens[{i}]"), "missing `then` field")
+                })?)
                 .map_err(|e| e.at(&format!("when_thens[{i}].then")))?;
                 when_thens.push(vlorql_core::schema::WhenThen { when, then });
             }
             let else_result = match obj.get("else_result") {
-                Some(val) if !val.is_null() => {
-                    Some(Box::new(build_expression(val).map_err(|e| e.at("else_result"))?))
-                }
+                Some(val) if !val.is_null() => Some(Box::new(
+                    build_expression(val).map_err(|e| e.at("else_result"))?,
+                )),
                 _ => None,
             };
             Ok(Expression::Case {

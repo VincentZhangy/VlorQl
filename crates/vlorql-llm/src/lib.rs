@@ -501,7 +501,7 @@ impl OpenAIClient {
             })
             .unwrap_or_else(|| content.to_owned());
 
-        parse_llm_response(&content).map_err(|error| {
+        parse_llm_response(content).map_err(|error| {
             VlorQLError::llm(
                 LlmErrorKind::ParseError {
                     details: format!("assistant content is not a valid QueryPlan: {error}"),

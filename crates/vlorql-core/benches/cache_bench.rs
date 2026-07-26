@@ -56,9 +56,10 @@ fn build_plan() -> ValidatedPlan {
         offset: None,
         joins: None,
         ctes: None,
-            distinct: false,
-            distinct_on: None,
-            set_operation: None,    }))
+        distinct: false,
+        distinct_on: None,
+        set_operation: None,
+    }))
 }
 
 fn build_compiled() -> CompiledQuery {
@@ -109,9 +110,10 @@ fn bench_compile_cache_miss(c: &mut Criterion) {
         offset: None,
         joins: None,
         ctes: None,
-            distinct: false,
-            distinct_on: None,
-            set_operation: None,    }));
+        distinct: false,
+        distinct_on: None,
+        set_operation: None,
+    }));
 
     c.bench_function("cache/compile_miss", |bencher| {
         bencher.iter(|| {

@@ -65,7 +65,10 @@ impl DialectConfig {
         let template = &self.limit_offset;
         let result = template
             .replace("{limit}", &limit.map(|v| v.to_string()).unwrap_or_default())
-            .replace("{offset}", &offset.map(|v| v.to_string()).unwrap_or_default());
+            .replace(
+                "{offset}",
+                &offset.map(|v| v.to_string()).unwrap_or_default(),
+            );
         if result.trim().is_empty() {
             return None;
         }

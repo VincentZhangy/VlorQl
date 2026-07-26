@@ -76,11 +76,11 @@ pub fn remove_empty_arrays(val: &mut serde_json::Value, fields: &[&str]) -> bool
     };
     let mut changed = false;
     for field in fields {
-        if let Some(arr) = obj.get(*field).and_then(|v| v.as_array()) {
-            if arr.is_empty() {
-                obj.remove(*field);
-                changed = true;
-            }
+        if let Some(arr) = obj.get(*field).and_then(|v| v.as_array())
+            && arr.is_empty()
+        {
+            obj.remove(*field);
+            changed = true;
         }
     }
     changed
@@ -100,13 +100,12 @@ pub fn flatten_array_wrapper(val: &mut serde_json::Value, field: &str) -> bool {
     };
 
     // Check if this is a {"type": "array", "items": [...]} wrapper.
-    if let Some(map) = field_val.as_object() {
-        if map.get("type").and_then(|t| t.as_str()) == Some("array") {
-            if let Some(items) = map.get("items").and_then(|v| v.as_array()) {
-                obj.insert(field.to_owned(), serde_json::Value::Array(items.clone()));
-                return true;
-            }
-        }
+    if let Some(map) = field_val.as_object()
+        && map.get("type").and_then(|t| t.as_str()) == Some("array")
+        && let Some(items) = map.get("items").and_then(|v| v.as_array())
+    {
+        obj.insert(field.to_owned(), serde_json::Value::Array(items.clone()));
+        return true;
     }
     false
 }

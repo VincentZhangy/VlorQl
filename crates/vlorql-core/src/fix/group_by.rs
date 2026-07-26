@@ -12,30 +12,28 @@ fn has_aggregate(expr: &Expression) -> bool {
             if matches!(name_lower.as_str(), "sum" | "count" | "avg" | "min" | "max") {
                 return true;
             }
-            args.iter().any(|a| has_aggregate(a))
+            args.iter().any(has_aggregate)
         }
-        Expression::BinaryOp { left, right, .. } => {
-            has_aggregate(left) || has_aggregate(right)
-        }
+        Expression::BinaryOp { left, right, .. } => has_aggregate(left) || has_aggregate(right),
         Expression::Case {
             operand,
             when_thens,
             else_result,
         } => {
-            if let Some(op) = operand {
-                if has_aggregate(op) {
-                    return true;
-                }
+            if let Some(op) = operand
+                && has_aggregate(op)
+            {
+                return true;
             }
             for wt in when_thens {
                 if has_aggregate(&wt.when) || has_aggregate(&wt.then) {
                     return true;
                 }
             }
-            if let Some(els) = else_result {
-                if has_aggregate(els) {
-                    return true;
-                }
+            if let Some(els) = else_result
+                && has_aggregate(els)
+            {
+                return true;
             }
             false
         }
@@ -64,7 +62,9 @@ fn collect_non_aggregated_columns(plan: &QueryPlan) -> Vec<Expression> {
         if is_non_aggregated(proj) {
             match proj {
                 Projection::Column {
-                    table, column, alias: _,
+                    table,
+                    column,
+                    alias: _,
                 } => {
                     let expr = Expression::ColumnRef {
                         table: table.clone(),
@@ -98,10 +98,7 @@ pub fn fix_group_by(plan: &mut QueryPlan) -> bool {
     let has_agg = plan.select.iter().any(|proj| match proj {
         Projection::Expr { expression, .. } => has_aggregate(expression),
         _ => false,
-    }) || plan
-        .having
-        .as_ref()
-        .is_some_and(|having| has_aggregate_in_pred(having));
+    }) || plan.having.as_ref().is_some_and(has_aggregate_in_pred);
 
     if !has_agg {
         // No aggregates → clear GROUP BY entirely if it exists.
@@ -145,11 +142,11 @@ pub fn fix_group_by(plan: &mut QueryPlan) -> bool {
     }
 
     // Step 3: If GROUP BY is empty after cleaning, remove it.
-    if let Some(ref group_by) = plan.group_by {
-        if group_by.is_empty() {
-            plan.group_by = None;
-            changed = true;
-        }
+    if let Some(ref group_by) = plan.group_by
+        && group_by.is_empty()
+    {
+        plan.group_by = None;
+        changed = true;
     }
 
     // Recurse into CTE subqueries.
@@ -192,7 +189,7 @@ fn plan_has_aggregates(plan: &QueryPlan) -> bool {
     plan.select.iter().any(|proj| match proj {
         Projection::Expr { expression, .. } => has_aggregate(expression),
         _ => false,
-    }) || plan.having.as_ref().is_some_and(|h| has_aggregate_in_pred(h))
+    }) || plan.having.as_ref().is_some_and(has_aggregate_in_pred)
 }
 
 #[cfg(test)]
@@ -296,10 +293,7 @@ mod tests {
         assert!(fix_group_by(&mut plan));
         let gb = plan.group_by.as_ref().unwrap();
         assert!(gb.contains(&make_order_id()), "should contain orders.id");
-        assert!(
-            gb.contains(&make_user_name()),
-            "should contain users.name"
-        );
+        assert!(gb.contains(&make_user_name()), "should contain users.name");
     }
 
     #[test]

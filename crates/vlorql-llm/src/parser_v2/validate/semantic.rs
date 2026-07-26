@@ -183,20 +183,20 @@ fn validate_limit_offset(
     offset: Option<u64>,
     errors: &mut Vec<ValidationError>,
 ) {
-    if let Some(limit) = limit {
-        if limit == 0 {
-            errors.push(ValidationError::new(
-                ValidationErrorKind::InvalidLimit,
-                "LIMIT must be greater than 0",
-            ));
-        }
+    if let Some(limit) = limit
+        && limit == 0
+    {
+        errors.push(ValidationError::new(
+            ValidationErrorKind::InvalidLimit,
+            "LIMIT must be greater than 0",
+        ));
     }
 
-    if let Some(offset) = offset {
-        if offset == 0 {
-            // offset=0 is valid (no-op), but warn about it.
-            // Actually it's fine, just skip.
-        }
+    if let Some(offset) = offset
+        && offset == 0
+    {
+        // offset=0 is valid (no-op), but warn about it.
+        // Actually it's fine, just skip.
     }
 }
 
@@ -310,9 +310,7 @@ fn validate_expression(expression: &Expression, errors: &mut Vec<ValidationError
                 validate_expression(el, errors);
             }
         }
-        Expression::WindowFunction {
-            name, args, ..
-        } => {
+        Expression::WindowFunction { name, args, .. } => {
             if name.is_empty() {
                 errors.push(ValidationError::new(
                     ValidationErrorKind::InvalidExpression,
@@ -553,9 +551,10 @@ mod tests {
                 offset: None,
                 joins: None,
                 ctes: None,
-            distinct: false,
-            distinct_on: None,
-            set_operation: None,            }),
+                distinct: false,
+                distinct_on: None,
+                set_operation: None,
+            }),
         }]);
         let errors = validate(&plan);
         assert!(

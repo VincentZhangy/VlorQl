@@ -239,6 +239,22 @@ impl ValidationPipeline {
         Ok(ValidatedPlan(Arc::new(plan)))
     }
 
+    /// Like [`validate`](Self::validate), but first applies execution-time
+    /// auto-repairs that are unsafe for diagnostics — currently dropping
+    /// JOINs to tables that do not exist in the schema (hallucinated by the
+    /// LLM). Use this on the query/execution path so a bogus JOIN does not
+    /// abort the request; use [`validate`](Self::validate) (via
+    /// `validate_only`) when you want every schema error surfaced.
+    ///
+    /// # Errors
+    /// Returns [`ValidationErrors`] when any validation stage fails on the
+    /// repaired plan.
+    pub fn validate_repairing(&self, plan: &QueryPlan) -> Result<ValidatedPlan, ValidationErrors> {
+        let mut repaired = plan.clone();
+        let _ = fix::drop_hallucinated_joins(&mut repaired, &self.schema);
+        self.validate(&repaired)
+    }
+
     /// Validates a plan and, when an optimizer is configured, applies
     /// optimisation passes to the validated result.
     ///

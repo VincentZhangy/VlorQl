@@ -100,9 +100,10 @@ fn build_query_plan() -> QueryPlan {
         offset: None,
         joins: Some(joins),
         ctes: None,
-            distinct: false,
-            distinct_on: None,
-            set_operation: None,    }
+        distinct: false,
+        distinct_on: None,
+        set_operation: None,
+    }
 }
 
 fn bench_validate_large_schema(c: &mut Criterion) {

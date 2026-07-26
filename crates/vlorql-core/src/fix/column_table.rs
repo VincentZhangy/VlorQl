@@ -8,19 +8,12 @@
 //! This must run BEFORE `fix_missing_joins` so the rewritten table reference
 //! triggers a join to the corrected table.
 
-use crate::schema::{
-    Predicate, Projection, QueryPlan, SchemaSnapshot,
-    expressions::Expression,
-};
+use crate::schema::{Predicate, Projection, QueryPlan, SchemaSnapshot, expressions::Expression};
 
 /// Try to find `column` on a table related to `table_name` via FK.
 ///
 /// Returns `Some(replacement_table_name)` if found.
-fn find_column_via_fk(
-    table_name: &str,
-    column: &str,
-    schema: &SchemaSnapshot,
-) -> Option<String> {
+fn find_column_via_fk(table_name: &str, column: &str, schema: &SchemaSnapshot) -> Option<String> {
     let table = schema.get_table(table_name)?;
     // Collect all FK columns from this table.
     let fks: Vec<(&str, &str)> = table
@@ -34,10 +27,10 @@ fn find_column_via_fk(
         .collect();
     // For each FK, check if the target table has the desired column.
     for (_local_fk_col, foreign_table) in &fks {
-        if let Some(ft) = schema.get_table(foreign_table) {
-            if ft.columns.iter().any(|c| c.name == column) {
-                return Some(ft.name.clone());
-            }
+        if let Some(ft) = schema.get_table(foreign_table)
+            && ft.columns.iter().any(|c| c.name == column)
+        {
+            return Some(ft.name.clone());
         }
     }
     // Reverse FK lookup: check if any other table has a FK pointing TO this
@@ -47,10 +40,11 @@ fn find_column_via_fk(
     // when `orders.user_id → users.id`).
     for t in &schema.tables {
         for col in &t.columns {
-            if let Some(fk) = &col.foreign_key {
-                if fk.foreign_table == table_name && t.columns.iter().any(|c| c.name == column) {
-                    return Some(t.name.clone());
-                }
+            if let Some(fk) = &col.foreign_key
+                && fk.foreign_table == table_name
+                && t.columns.iter().any(|c| c.name == column)
+            {
+                return Some(t.name.clone());
             }
         }
     }
@@ -68,11 +62,9 @@ fn fix_expr(expr: &mut Expression, schema: &SchemaSnapshot) -> bool {
             let exists = schema
                 .get_table(table_name)
                 .is_some_and(|t| t.columns.iter().any(|c| c.name == *column));
-            if !exists {
-                if let Some(new_table) = find_column_via_fk(table_name, column, schema) {
-                    *table_name = new_table;
-                    return true;
-                }
+            if !exists && let Some(new_table) = find_column_via_fk(table_name, column, schema) {
+                *table_name = new_table;
+                return true;
             }
             false
         }
@@ -159,9 +151,7 @@ fn fix_plan(plan: &mut QueryPlan, schema: &SchemaSnapshot) -> bool {
                         .get_table(table_name)
                         .is_some_and(|t| t.columns.iter().any(|c| c.name == *column));
                     if !exists {
-                        if let Some(new_table) =
-                            find_column_via_fk(table_name, column, schema)
-                        {
+                        if let Some(new_table) = find_column_via_fk(table_name, column, schema) {
                             *table_name = new_table;
                             true
                         } else {
@@ -207,8 +197,8 @@ fn fix_plan(plan: &mut QueryPlan, schema: &SchemaSnapshot) -> bool {
                 // Also check reverse FK — maybe the column exists on a
                 // related table (redundant with fix_expr above, but keeps
                 // the guard self-contained).
-                let via_fk = find_column_via_fk(table_name, column, schema).is_some();
-                via_fk
+
+                find_column_via_fk(table_name, column, schema).is_some()
             } else {
                 true
             }
@@ -251,7 +241,7 @@ pub fn fix_column_table(plan: &mut QueryPlan, schema: &SchemaSnapshot) -> bool {
 mod tests {
     use super::*;
     use crate::schema::{
-        ColumnSchema, DataType, ForeignKey, SchemaMetadata, TableSchema,
+        ColumnSchema, DataType, ForeignKey, FromClause, SchemaMetadata, TableSchema,
     };
 
     fn test_schema() -> SchemaSnapshot {

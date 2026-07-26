@@ -59,7 +59,8 @@ fn push_plan(plan: &QueryPlan) -> QueryPlan {
             ctes.iter()
                 .map(|cte| crate::schema::CommonTableExpression {
                     name: cte.name.clone(),
-                    query: Box::new(push_plan(&cte.query)), recursive: false
+                    query: Box::new(push_plan(&cte.query)),
+                    recursive: false,
                 })
                 .collect()
         })
@@ -432,9 +433,10 @@ mod tests {
                 offset: None,
                 joins: None,
                 ctes: None,
-            distinct: false,
-            distinct_on: None,
-            set_operation: None,            }),
+                distinct: false,
+                distinct_on: None,
+                set_operation: None,
+            }),
         };
         QueryPlan {
             select: vec![select_col("active", "id")],

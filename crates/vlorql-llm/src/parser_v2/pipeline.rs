@@ -10,8 +10,8 @@ use crate::parser_v2::builder::query_builder;
 use crate::parser_v2::fix::fixer;
 use crate::parser_v2::normalize::pipeline as normalize_pipeline;
 use crate::parser_v2::optimize::optimize as optimize_plan;
-use crate::parser_v2::recover::extract_json_content;
 use crate::parser_v2::recover::bracket::repair_truncated_json;
+use crate::parser_v2::recover::extract_json_content;
 use crate::parser_v2::validate::validator;
 use vlorql_core::schema::QueryPlan;
 
@@ -91,7 +91,7 @@ pub fn parse_query_plan(raw: &str) -> Result<QueryPlan, ParseError> {
         return Err(ParseError::ValidationErrors(messages));
     }
 
-    // Stage 6: Optimize — AST optimization.  
+    // Stage 6: Optimize — AST optimization.
     let _ = optimize_plan(&mut plan);
 
     Ok(plan)

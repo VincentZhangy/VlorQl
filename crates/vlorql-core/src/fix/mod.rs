@@ -14,6 +14,8 @@ mod joins;
 use crate::schema::{QueryPlan, SchemaSnapshot};
 use tracing::debug;
 
+pub(crate) use joins::drop_hallucinated_joins;
+
 /// Apply schema-aware fixes to `plan`.
 ///
 /// Returns `true` if any change was made.

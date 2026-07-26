@@ -7,7 +7,8 @@
 //! 1. **Direct** — return as-is if already valid JSON.
 //! 2. **Array-wrapper** — if it's a JSON array containing an object, extract the object.
 //! 3. **Fence** — strip markdown code fences, then try direct / bracket extraction.
-//! 4. **Bracket** — find the outermost `{…}` object anywhere in the text.
+//! 4. **Bracket** — find the best `{…}` object anywhere in the text
+//!    (plan-shaped preferred), falling back to the outermost one.
 //! 5. **Fallback** — return the original text unchanged.
 
 use super::bracket;
@@ -25,7 +26,8 @@ use super::markdown;
 /// 1. Return the text as-is if it is already valid JSON.
 /// 2. If it's a JSON array containing an object, extract the object.
 /// 3. Strip markdown code fences.
-/// 4. Find the outermost `{…}` JSON object in the text.
+/// 4. Find the best `{…}` JSON object in the text (an object containing
+///    a `select`/`from` key is preferred), falling back to the outermost.
 ///
 /// If no strategy yields valid JSON, the original text is returned
 /// unchanged so the caller can produce an accurate error message.
@@ -39,11 +41,11 @@ pub fn extract_json_content(raw: &str) -> &str {
             if json::is_valid_json_object(&s) {
                 return Box::leak(s.into_boxed_str());
             }
-            if json::is_valid_json_array(&s) {
-                if let Some(obj) = json::extract_first_json_obj_from_array(&s) {
-                    // obj borrows from s; leak obj to extend its lifetime.
-                    return Box::leak(obj.to_owned().into_boxed_str());
-                }
+            if json::is_valid_json_array(&s)
+                && let Some(obj) = json::extract_first_json_obj_from_array(&s)
+            {
+                // obj borrows from s; leak obj to extend its lifetime.
+                return Box::leak(obj.to_owned().into_boxed_str());
             }
             trimmed
         }
@@ -58,12 +60,12 @@ pub fn extract_json_content(raw: &str) -> &str {
 
     // 2. JSON array wrapping an object: `[ { ... } ]` → `{ ... }`.
     //    Must run before fence/bracket so `[{"select":...}]` is unwrapped.
-    if json::is_valid_json_array(trimmed) {
-        if let Some(obj) = json::extract_first_json_obj_from_array(trimmed) {
-            return obj;
-        }
-        // If the array is valid but doesn't contain an object, fall through.
+    if json::is_valid_json_array(trimmed)
+        && let Some(obj) = json::extract_first_json_obj_from_array(trimmed)
+    {
+        return obj;
     }
+    // If the array is valid but doesn't contain an object, fall through.
 
     // 3. Strip markdown fences.
     if let Some(cleaned) = markdown::strip_markdown_fence(trimmed) {
@@ -76,7 +78,12 @@ pub fn extract_json_content(raw: &str) -> &str {
         }
     }
 
-    // 4. Find first JSON object anywhere in the text.
+    // 4. Find the best JSON object anywhere in the text (prefers a plan-
+    //    shaped object; tolerates leading reasoning prose / multiple objects).
+    if let Some(obj) = bracket::find_best_json_obj(trimmed) {
+        return obj;
+    }
+    // 4b. Fallback: first balanced object (may be recoverable by later repair).
     if let Some(obj) = bracket::find_outermost_json_obj(trimmed) {
         return obj;
     }

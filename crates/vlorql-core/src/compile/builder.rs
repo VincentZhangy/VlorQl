@@ -8,9 +8,9 @@ use super::dialect_config::DialectConfig;
 use super::types::Parameter;
 use crate::errors::{CompilationErrorKind, VlorQLError};
 use crate::schema::{
-    BinaryOperator, ComparisonOperator, DataType, Expression, FromClause,
-    InTarget, JoinType, Predicate, Projection, QueryPlan, SetOperation, SetOperationClause,
-    SqlDialect, WindowFrame, WindowFrameBound, WindowFrameKind, WindowSpec,
+    BinaryOperator, ComparisonOperator, DataType, Expression, FromClause, InTarget, JoinType,
+    Predicate, Projection, QueryPlan, SetOperation, SetOperationClause, SqlDialect, WindowFrame,
+    WindowFrameBound, WindowFrameKind, WindowSpec,
 };
 use crate::validate::ValidatedPlan;
 use serde_json::{Value, json};
@@ -39,10 +39,7 @@ pub struct QueryBuilder<'a> {
 
 impl<'a> QueryBuilder<'a> {
     /// Creates a builder for one validated plan and dialect config.
-    pub fn new(
-        plan: &'a ValidatedPlan,
-        config: &'a DialectConfig,
-    ) -> Self {
+    pub fn new(plan: &'a ValidatedPlan, config: &'a DialectConfig) -> Self {
         let dialect = match config.name.to_lowercase().as_str() {
             "postgres" | "postgresql" => SqlDialect::Postgres,
             "sqlite" => SqlDialect::Sqlite,
@@ -76,7 +73,8 @@ impl<'a> QueryBuilder<'a> {
     fn collect_aliases(from: &FromClause, map: &mut HashMap<String, String>) {
         let effective = from.alias.clone().unwrap_or_else(|| from.table.clone());
         // 保留首次注册的表名→别名映射，避免自连接中后注册的 JOIN 覆盖 FROM 的映射
-        map.entry(from.table.clone()).or_insert_with(|| effective.clone());
+        map.entry(from.table.clone())
+            .or_insert_with(|| effective.clone());
         if let Some(ref alias) = from.alias {
             map.insert(alias.clone(), effective);
         }
@@ -345,6 +343,20 @@ impl<'a> QueryBuilder<'a> {
     }
 
     fn build_query(&mut self, plan: &QueryPlan, sql: &mut String) -> Result<(), VlorQLError> {
+        self.build_query_impl(plan, sql, false)
+    }
+
+    /// Renders `plan` into `sql`. When `is_set_operand` is true the plan is
+    /// the right-hand side of a set operation (UNION/INTERSECT/EXCEPT); in
+    /// that position standard SQL forbids ORDER BY / LIMIT / OFFSET on the
+    /// operand itself (they bind to the whole set operation), so they are
+    /// skipped.
+    fn build_query_impl(
+        &mut self,
+        plan: &QueryPlan,
+        sql: &mut String,
+        is_set_operand: bool,
+    ) -> Result<(), VlorQLError> {
         self.push_alias_scope(plan);
         self.build_with(plan, sql)?;
         self.build_select(plan, sql)?;
@@ -352,7 +364,6 @@ impl<'a> QueryBuilder<'a> {
         self.build_where(plan, sql)?;
         self.build_group_by(plan, sql)?;
         self.build_having(plan, sql)?;
-        self.alias_stack.pop();
 
         // Render set operation (UNION / INTERSECT / EXCEPT) AFTER the
         // primary query but BEFORE ORDER BY / LIMIT / OFFSET, because
@@ -362,9 +373,14 @@ impl<'a> QueryBuilder<'a> {
             self.render_set_operation(set_op, sql)?;
         }
 
-        self.build_order_by(plan, sql)?;
-        self.build_limit_offset(plan, sql)?;
+        // Operands of a set operation must not carry their own trailing clauses.
+        if !is_set_operand {
+            self.build_order_by(plan, sql)?;
+            self.build_limit_offset(plan, sql)?;
+        }
 
+        // Pop AFTER ORDER BY so it resolves against this plan's own scope.
+        self.alias_stack.pop();
         Ok(())
     }
 
@@ -537,8 +553,7 @@ impl<'a> QueryBuilder<'a> {
             }
             (SqlDialect::MySql, None, Some(offset)) => {
                 let offset_ph = self.add_parameter(Value::from(offset), DataType::Int);
-                write!(sql, " LIMIT {offset_ph}, {MYSQL_UNLIMITED_LIMIT}")
-                    .map_err(formatting_error)
+                write!(sql, " LIMIT {offset_ph}, {MYSQL_UNLIMITED_LIMIT}").map_err(formatting_error)
             }
             (SqlDialect::Sqlite, None, Some(offset)) => {
                 let offset_ph = self.add_parameter(Value::from(offset), DataType::Int);
@@ -613,7 +628,9 @@ impl<'a> QueryBuilder<'a> {
             // Function names follow identifier syntax but are not subject to
             // reserved-keyword restrictions (e.g. EXISTS, COALESCE, NULLIF).
             let mut chars = segment.chars();
-            let valid = chars.next().is_some_and(|c| c == '_' || c.is_ascii_alphabetic())
+            let valid = chars
+                .next()
+                .is_some_and(|c| c == '_' || c.is_ascii_alphabetic())
                 && chars.all(|c| c == '_' || c.is_ascii_alphanumeric());
             if !valid {
                 return Err(compilation_error(
@@ -761,7 +778,7 @@ impl<'a> QueryBuilder<'a> {
             SetOperation::Except => " EXCEPT ",
         };
         sql.push_str(keyword);
-        self.build_query(&set_op.right, sql)
+        self.build_query_impl(&set_op.right, sql, true)
     }
 
     fn render_comparison_operator(
@@ -803,8 +820,8 @@ impl<'a> QueryBuilder<'a> {
     }
 
     fn render_join_type(&self, join_type: JoinType) -> Result<&'static str, VlorQLError> {
-        let is_mysql = self.dialect == SqlDialect::MySql
-            || self.config.name.to_lowercase().contains("mysql");
+        let is_mysql =
+            self.dialect == SqlDialect::MySql || self.config.name.to_lowercase().contains("mysql");
         match join_type {
             JoinType::Full if is_mysql => Err(compilation_error(
                 "unsupported_full_join",

@@ -311,13 +311,13 @@ impl PromptBuilder {
                 continue;
             }
             for column in &table.columns {
-                if let Some(ref fk) = column.foreign_key {
-                    if relevant_tables.contains(&fk.foreign_table) {
-                        rels.push(format!(
-                            "{}.{} → {}.{}",
-                            table.name, column.name, fk.foreign_table, fk.foreign_column
-                        ));
-                    }
+                if let Some(ref fk) = column.foreign_key
+                    && relevant_tables.contains(&fk.foreign_table)
+                {
+                    rels.push(format!(
+                        "{}.{} → {}.{}",
+                        table.name, column.name, fk.foreign_table, fk.foreign_column
+                    ));
                 }
             }
         }
@@ -417,11 +417,7 @@ impl PromptBuilder {
         prompt.push_str("## Examples\n");
         for example in &skill.examples {
             let plan_str = serde_json::to_string(&example.plan).unwrap_or_default();
-            let _ = writeln!(
-                prompt,
-                "Q: {}\nA: {plan_str}\n",
-                example.question
-            );
+            let _ = writeln!(prompt, "Q: {}\nA: {plan_str}\n", example.question);
         }
         let _ = writeln!(
             prompt,

@@ -486,4 +486,57 @@ mod tests {
             } if table == "missing"
         )));
     }
+
+    #[test]
+    fn validate_repairing_drops_hallucinated_join_but_validate_reports_it() {
+        // Regression test for Task 5: the execution path (validate_repairing)
+        // must still auto-drop a JOIN to a table hallucinated by the LLM,
+        // while the diagnostic path (validate / validate_only) must keep
+        // reporting it honestly as a TableNotFound error.
+        let mut plan = base_plan();
+        plan.joins = Some(vec![JoinClause {
+            join_type: JoinType::Inner,
+            right_table: FromClause {
+                table: "missing_table".to_owned(),
+                alias: None,
+            },
+            on: Predicate::Comparison {
+                left: Expression::ColumnRef {
+                    table: Some("users".to_owned()),
+                    column: "id".to_owned(),
+                },
+                op: ComparisonOperator::Eq,
+                right: Expression::ColumnRef {
+                    table: Some("missing_table".to_owned()),
+                    column: "id".to_owned(),
+                },
+            },
+        }]);
+        let pipeline = ValidationPipeline::new(
+            schema(),
+            DialectProfile::default(),
+            PolicyEngine::new(PolicyConfig::default()),
+        );
+
+        // Execution path: the hallucinated join is dropped, so the plan validates.
+        let validated = pipeline
+            .validate_repairing(&plan)
+            .expect("hallucinated join should be dropped so the plan validates");
+        assert!(
+            validated.as_plan().joins.is_none(),
+            "the join to the nonexistent table must be removed"
+        );
+
+        // Diagnostic path: validate must not silently drop the join.
+        let errors = pipeline
+            .validate(&plan)
+            .expect_err("validate must report the hallucinated table instead of dropping it");
+        assert!(errors.as_slice().iter().any(|error| matches!(
+            error,
+            VlorQLError::Schema {
+                kind: SchemaErrorKind::TableNotFound { table },
+                ..
+            } if table == "missing_table"
+        )));
+    }
 }

@@ -22,7 +22,9 @@ use tokio::sync::mpsc;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::Instrument;
 use vlorql_core::compile::{SqlCompiler, get_compiler};
-use vlorql_core::errors::{ConfigErrorKind, LlmErrorKind, SchemaErrorKind, ValidationErrorKind, VlorQLError};
+use vlorql_core::errors::{
+    ConfigErrorKind, LlmErrorKind, SchemaErrorKind, ValidationErrorKind, VlorQLError,
+};
 use vlorql_core::observability::{TelemetryGuard, VlorqMetrics, init_telemetry};
 use vlorql_core::optimizer::QueryOptimizer;
 use vlorql_core::policy::{PolicyConfig, PolicyEngine};
@@ -32,10 +34,12 @@ use vlorql_core::statistics::StatisticsProvider;
 use vlorql_core::validate::ValidationPipeline;
 
 pub use vlorql_core::cache::{CompileCache, PromptCache, SchemaCache};
-pub use vlorql_core::compile::{CompiledQuery, DialectConfig, DialectRegistry, Parameter, RewriteEngine, RewriteRule};
-pub use vlorql_core::prompt::{ExamplePair, PromptSkill};
+pub use vlorql_core::compile::{
+    CompiledQuery, DialectConfig, DialectRegistry, Parameter, RewriteEngine, RewriteRule,
+};
 pub use vlorql_core::errors::{ErrorResponse, ValidationErrors};
 pub use vlorql_core::optimizer::QueryOptimizer as QueryOptimizerCore;
+pub use vlorql_core::prompt::{ExamplePair, PromptSkill};
 pub use vlorql_core::schema::{DialectProfile, SchemaSnapshot, SqlDialect};
 pub use vlorql_core::validate::{OptimizedPlan, ValidatedPlan};
 pub use vlorql_llm::{
@@ -221,7 +225,7 @@ impl VlorQl {
                     }
                     Err(e) => return Err(e),
                 };
-                match self.validate_only(&plan) {
+                match self.build_pipeline().validate_repairing(&plan) {
                     Ok(validated_plan) => {
                         // Optimize when an optimizer is configured, then compile.
                         let plan_for_compile = match &self.optimizer {
@@ -377,6 +381,14 @@ impl VlorQl {
     /// Validates a plan and, when an optimizer is configured, applies
     /// optimisation passes.  Returns an [`OptimizedPlan`] that derefs to
     /// [`ValidatedPlan`].
+    ///
+    /// Like [`validate_only`](Self::validate_only), this is an honest
+    /// validation entry point: it does **not** apply execution-time
+    /// auto-repairs such as dropping JOINs to tables that do not exist in
+    /// the schema. A plan referencing a non-existent table is reported as
+    /// an error, not silently repaired. To execute a plan with those
+    /// auto-repairs (e.g. recovering from an LLM-hallucinated JOIN), use
+    /// [`query`](Self::query), which validates with repair internally.
     ///
     /// # Errors
     ///
@@ -836,7 +848,7 @@ fn format_retry_question_str(question: &str, error: &VlorQLError) -> String {
             ..
         } => {
             // Try to extract available_columns from the first error in the list.
-            let tip = error
+            error
                 .details()
                 .get("errors")
                 .and_then(|v| v.as_array())
@@ -853,8 +865,7 @@ fn format_retry_question_str(question: &str, error: &VlorQLError) -> String {
                         cols.join(", ")
                     ))
                 })
-                .unwrap_or_default();
-            tip
+                .unwrap_or_default()
         }
         _ => "".to_owned(),
     };
@@ -1025,7 +1036,7 @@ fn process_assembled_text(
     };
     let validation =
         ValidationPipeline::new(Arc::clone(&schema), dialect, PolicyEngine::new(policy))
-            .validate(&plan);
+            .validate_repairing(&plan);
     match validation {
         Ok(validated) => match compiler.compile(&validated) {
             Ok(_) => StreamEvent::PlanComplete(Box::new(plan)),

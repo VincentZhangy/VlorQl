@@ -14,10 +14,14 @@ const VALID_PROJECTION_TYPES: &[&str] = &["column_ref", "expr", "star"];
 /// instead of wrapping them in an `expr` projection.
 /// When detected, these are auto-converted to `{"type": "expr", "expression": {...}}`.
 const EXPRESSION_LIKE_TYPES: &[&str] = &[
-    "function_call", "FunctionCall",
-    "binary_op", "BinaryOp",
-    "literal", "Literal",
-    "subquery", "SubQuery",
+    "function_call",
+    "FunctionCall",
+    "binary_op",
+    "BinaryOp",
+    "literal",
+    "Literal",
+    "subquery",
+    "SubQuery",
 ];
 
 /// Inject a basic `[{"type": "star"}]` select when `select` is missing
@@ -51,14 +55,15 @@ pub fn inject_missing_type(val: &mut serde_json::Value) -> bool {
     };
     let mut changed = false;
     for item in arr.iter_mut() {
-        if let Some(item_obj) = item.as_object_mut() {
-            if !item_obj.contains_key("type") && item_obj.contains_key("column") {
-                item_obj.insert(
-                    "type".to_owned(),
-                    serde_json::Value::String("column_ref".to_owned()),
-                );
-                changed = true;
-            }
+        if let Some(item_obj) = item.as_object_mut()
+            && !item_obj.contains_key("type")
+            && item_obj.contains_key("column")
+        {
+            item_obj.insert(
+                "type".to_owned(),
+                serde_json::Value::String("column_ref".to_owned()),
+            );
+            changed = true;
         }
     }
     changed
@@ -80,23 +85,25 @@ pub fn remove_invalid(val: &mut serde_json::Value) -> bool {
     // First pass: convert expression-like items (function_call, binary_op, etc.)
     // to `{"type": "expr", "expression": {...}}` wrapper.
     for item in arr.iter_mut() {
-        if let Some(item_obj) = item.as_object_mut() {
-            if let Some(type_str) = item_obj.get("type").and_then(|t| t.as_str()) {
-                if EXPRESSION_LIKE_TYPES.contains(&type_str) {
-                    // Collect alias before moving expression.
-                    let alias = item_obj.remove("alias").filter(|v| !v.is_null());
-                    // Wrap the entire item as expression.
-                    let expression = serde_json::Value::Object(std::mem::take(item_obj));
-                    let mut wrapper = serde_json::Map::new();
-                    wrapper.insert("type".to_owned(), serde_json::Value::String("expr".to_owned()));
-                    wrapper.insert("expression".to_owned(), expression);
-                    if let Some(alias_val) = alias {
-                        wrapper.insert("alias".to_owned(), alias_val);
-                    }
-                    *item = serde_json::Value::Object(wrapper);
-                    changed = true;
-                }
+        if let Some(item_obj) = item.as_object_mut()
+            && let Some(type_str) = item_obj.get("type").and_then(|t| t.as_str())
+            && EXPRESSION_LIKE_TYPES.contains(&type_str)
+        {
+            // Collect alias before moving expression.
+            let alias = item_obj.remove("alias").filter(|v| !v.is_null());
+            // Wrap the entire item as expression.
+            let expression = serde_json::Value::Object(std::mem::take(item_obj));
+            let mut wrapper = serde_json::Map::new();
+            wrapper.insert(
+                "type".to_owned(),
+                serde_json::Value::String("expr".to_owned()),
+            );
+            wrapper.insert("expression".to_owned(), expression);
+            if let Some(alias_val) = alias {
+                wrapper.insert("alias".to_owned(), alias_val);
             }
+            *item = serde_json::Value::Object(wrapper);
+            changed = true;
         }
     }
 

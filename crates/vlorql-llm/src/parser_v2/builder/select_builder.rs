@@ -48,13 +48,9 @@ pub fn build_projection(val: &Value) -> Result<Projection, BuildError> {
         // Fallback: treat bare expression types (function_call, binary_op, etc.)
         // as an Expr projection.  The normalize layer should have wrapped these
         // already, but this handles edge cases where normalization missed one.
-        "function_call" | "FunctionCall"
-        | "binary_op" | "BinaryOp"
-        | "case" | "Case"
-        | "literal" | "Literal"
-        | "subquery" | "SubQuery" => {
-            let expression = build_expression(val)
-                .map_err(|e| e.at("expression"))?;
+        "function_call" | "FunctionCall" | "binary_op" | "BinaryOp" | "case" | "Case"
+        | "literal" | "Literal" | "subquery" | "SubQuery" => {
+            let expression = build_expression(val).map_err(|e| e.at("expression"))?;
             let alias = opt_str(obj, "alias").map(|s| s.to_owned());
             Ok(Projection::Expr { expression, alias })
         }

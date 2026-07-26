@@ -25,8 +25,8 @@ mod tests {
     use super::*;
     use crate::schema::{
         BinaryOperator, CommonTableExpression, ComparisonOperator, DataType, Expression,
-        FromClause, InTarget, JoinClause, JoinType, OrderByTerm, Predicate,
-        Projection, QueryPlan, SetOperation, SetOperationClause, SqlDialect, WindowSpec,
+        FromClause, InTarget, JoinClause, JoinType, OrderByTerm, Predicate, Projection, QueryPlan,
+        SetOperation, SetOperationClause, SqlDialect, WindowSpec,
     };
     use crate::validate::ValidatedPlan;
     use serde_json::json;
@@ -251,7 +251,8 @@ mod tests {
         });
         plan.ctes = Some(vec![CommonTableExpression {
             name: "active_users".to_owned(),
-            query: Box::new(cte_query), recursive: false
+            query: Box::new(cte_query),
+            recursive: false,
         }]);
 
         let compiled = PostgresCompiler
@@ -612,15 +613,70 @@ mod tests {
     }
 
     #[test]
+    fn union_operand_order_by_is_suppressed() {
+        let mut right = base_plan();
+        right.order_by = Some(vec![OrderByTerm {
+            expr: column_ref("users", "id"),
+            descending: false,
+        }]);
+        right.limit = Some(5);
+
+        let mut plan = base_plan();
+        plan.set_operation = Some(SetOperationClause {
+            operation: SetOperation::UnionAll,
+            right: Box::new(right),
+        });
+
+        let compiled = PostgresCompiler
+            .compile(&validated(plan))
+            .expect("UNION ALL should compile");
+
+        assert!(
+            !compiled.sql.contains("ORDER BY"),
+            "set-operation operand must not carry ORDER BY, got: {}",
+            compiled.sql
+        );
+        assert!(
+            !compiled.sql.contains("LIMIT"),
+            "set-operation operand must not carry LIMIT, got: {}",
+            compiled.sql
+        );
+    }
+
+    #[test]
+    fn union_keeps_outer_order_by_after_set_op() {
+        let right = base_plan();
+        let mut plan = base_plan();
+        plan.set_operation = Some(SetOperationClause {
+            operation: SetOperation::UnionAll,
+            right: Box::new(right),
+        });
+        plan.order_by = Some(vec![OrderByTerm {
+            expr: column_ref("users", "id"),
+            descending: false,
+        }]);
+
+        let compiled = PostgresCompiler.compile(&validated(plan)).expect("compile");
+        let order_pos = compiled
+            .sql
+            .find("ORDER BY")
+            .expect("outer ORDER BY present");
+        let union_pos = compiled.sql.find("UNION ALL").expect("UNION ALL present");
+        assert!(
+            order_pos > union_pos,
+            "ORDER BY must come after UNION ALL: {}",
+            compiled.sql
+        );
+    }
+
+    #[test]
     fn postgres_compiles_select_distinct() {
         let plan = QueryPlan {
-            select: vec![
-                Projection::Column {
-                    table: Some("users".to_owned()),
-                    column: "name".to_owned(),
-                    alias: None,
-                },
-            ],
+            select: vec![Projection::Column {
+                table: Some("users".to_owned()),
+                column: "name".to_owned(),
+                alias: None,
+            }],
             distinct: true,
             distinct_on: None,
             from: FromClause {
@@ -643,6 +699,50 @@ mod tests {
         assert_eq!(
             compiled.sql,
             "SELECT DISTINCT \"users\".\"name\" FROM \"users\""
+        );
+    }
+
+    #[test]
+    fn cte_order_by_resolves_table_alias() {
+        // CTE: SELECT o.total FROM orders AS o ORDER BY orders.total
+        let cte_query = QueryPlan {
+            select: vec![Projection::Column {
+                table: Some("o".to_owned()),
+                column: "total".to_owned(),
+                alias: None,
+            }],
+            from: FromClause {
+                table: "orders".to_owned(),
+                alias: Some("o".to_owned()),
+            },
+            r#where: None,
+            group_by: None,
+            having: None,
+            order_by: Some(vec![OrderByTerm {
+                expr: column_ref("orders", "total"),
+                descending: false,
+            }]),
+            limit: None,
+            offset: None,
+            joins: None,
+            ctes: None,
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,
+        };
+
+        let mut plan = base_plan();
+        plan.ctes = Some(vec![CommonTableExpression {
+            name: "recent".to_owned(),
+            query: Box::new(cte_query),
+            recursive: false,
+        }]);
+
+        let compiled = PostgresCompiler.compile(&validated(plan)).expect("compile");
+        assert!(
+            compiled.sql.contains(r#"ORDER BY "o"."total""#),
+            "CTE ORDER BY must resolve the table alias to \"o\"; got: {}",
+            compiled.sql
         );
     }
 }
