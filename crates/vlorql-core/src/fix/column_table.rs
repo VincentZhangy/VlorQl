@@ -251,7 +251,7 @@ pub fn fix_column_table(plan: &mut QueryPlan, schema: &SchemaSnapshot) -> bool {
 mod tests {
     use super::*;
     use crate::schema::{
-        ColumnSchema, DataType, ForeignKey, SchemaMetadata, TableSchema,
+        ColumnSchema, DataType, ForeignKey, FromClause, SchemaMetadata, TableSchema,
     };
 
     fn test_schema() -> SchemaSnapshot {
