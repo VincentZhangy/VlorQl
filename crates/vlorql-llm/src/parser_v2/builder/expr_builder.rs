@@ -180,6 +180,11 @@ pub fn parse_data_type(s: &str) -> Result<DataType, BuildError> {
         "null" => Ok(Null),
         "json" => Ok(Json),
         "uuid" => Ok(Uuid),
+        "decimal" => Ok(Decimal),
+        "array" => Ok(Array),
+        "jsonb" => Ok(Jsonb),
+        "blob" => Ok(Blob),
+        "date" => Ok(Date),
         other => Err(BuildError::new(
             "data_type",
             format!("unknown data type `{other}`"),
@@ -871,5 +876,29 @@ mod tests {
         assert_eq!(parse_join_type("full").unwrap(), Full);
         assert_eq!(parse_join_type("cross").unwrap(), Cross);
         assert!(parse_join_type("unknown").is_err());
+    }
+
+    #[test]
+    fn parse_new_data_types() {
+        assert_eq!(
+            parse_data_type("decimal").unwrap(),
+            vlorql_core::schema::DataType::Decimal
+        );
+        assert_eq!(
+            parse_data_type("array").unwrap(),
+            vlorql_core::schema::DataType::Array
+        );
+        assert_eq!(
+            parse_data_type("jsonb").unwrap(),
+            vlorql_core::schema::DataType::Jsonb
+        );
+        assert_eq!(
+            parse_data_type("blob").unwrap(),
+            vlorql_core::schema::DataType::Blob
+        );
+        assert_eq!(
+            parse_data_type("date").unwrap(),
+            vlorql_core::schema::DataType::Date
+        );
     }
 }

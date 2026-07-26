@@ -122,6 +122,7 @@ impl<'a> QueryBuilder<'a> {
                         DataType::Int => write!(buf, "CAST({placeholder} AS INTEGER)"),
                         DataType::Float => write!(buf, "CAST({placeholder} AS DOUBLE PRECISION)"),
                         DataType::Boolean => write!(buf, "CAST({placeholder} AS BOOLEAN)"),
+                        DataType::Decimal => write!(buf, "CAST({placeholder} AS NUMERIC)"),
                         _ => write!(buf, "{placeholder}"),
                     }
                     .map_err(formatting_error)?;

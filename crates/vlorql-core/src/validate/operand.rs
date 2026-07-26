@@ -625,6 +625,10 @@ fn literal_matches_type(value: &Value, data_type: DataType) -> bool {
         DataType::Boolean => value.is_boolean(),
         DataType::Json => true,
         DataType::Null => value.is_null(),
+        DataType::Decimal => value.is_number() || value.is_string(),
+        DataType::Array => value.is_array(),
+        DataType::Jsonb => true,
+        DataType::Blob => value.is_string(),
     }
 }
 
@@ -651,11 +655,18 @@ fn data_type_name(data_type: DataType) -> &'static str {
         DataType::Json => "json",
         DataType::Null => "null",
         DataType::Uuid => "uuid",
+        DataType::Decimal => "decimal",
+        DataType::Array => "array",
+        DataType::Jsonb => "jsonb",
+        DataType::Blob => "blob",
     }
 }
 
 fn is_numeric(data_type: DataType) -> bool {
-    matches!(data_type, DataType::Int | DataType::Float)
+    matches!(
+        data_type,
+        DataType::Int | DataType::Float | DataType::Decimal
+    )
 }
 
 fn are_numeric(left: DataType, right: DataType) -> bool {
@@ -673,6 +684,8 @@ fn types_compatible(left: DataType, right: DataType) -> bool {
 fn numeric_result_type(left: DataType, right: DataType) -> DataType {
     if left == DataType::Float || right == DataType::Float {
         DataType::Float
+    } else if left == DataType::Decimal || right == DataType::Decimal {
+        DataType::Decimal
     } else if left == DataType::Int || right == DataType::Int {
         DataType::Int
     } else {
@@ -692,5 +705,48 @@ fn frame_bound_expr(bound: &WindowFrameBound) -> Option<&Expression> {
     match bound {
         WindowFrameBound::Preceding(expr) | WindowFrameBound::Following(expr) => Some(expr),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn decimal_is_numeric_and_promotes() {
+        assert!(is_numeric(DataType::Decimal));
+        // Float > Decimal > Int
+        assert_eq!(
+            numeric_result_type(DataType::Int, DataType::Decimal),
+            DataType::Decimal
+        );
+        assert_eq!(
+            numeric_result_type(DataType::Decimal, DataType::Float),
+            DataType::Float
+        );
+    }
+
+    #[test]
+    fn container_literal_matching() {
+        assert!(literal_matches_type(
+            &serde_json::json!([1, 2]),
+            DataType::Array
+        ));
+        assert!(literal_matches_type(
+            &serde_json::json!({"a":1}),
+            DataType::Jsonb
+        ));
+        assert!(literal_matches_type(
+            &serde_json::json!("YWJj"),
+            DataType::Blob
+        ));
+        assert!(literal_matches_type(
+            &serde_json::json!(12.34),
+            DataType::Decimal
+        ));
+        assert!(!literal_matches_type(
+            &serde_json::json!(3),
+            DataType::Array
+        ));
     }
 }

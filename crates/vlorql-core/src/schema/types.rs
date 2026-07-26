@@ -40,6 +40,15 @@ pub enum DataType {
     Null,
     /// Universally unique identifier.
     Uuid,
+    /// Fixed-point decimal number (arbitrary precision). Distinct from
+    /// [`DataType::Float`] so decimal semantics are preserved.
+    Decimal,
+    /// Ordered collection of values (SQL array). Element type is not tracked.
+    Array,
+    /// Binary JSON (PostgreSQL `JSONB`).
+    Jsonb,
+    /// Arbitrary binary data (`BLOB` / `BYTEA`).
+    Blob,
 }
 
 /// Operators that combine two expressions or values.

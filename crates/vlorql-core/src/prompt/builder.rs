@@ -771,6 +771,10 @@ fn data_type_name(data_type: DataType) -> &'static str {
         DataType::Json => "json",
         DataType::Null => "null",
         DataType::Uuid => "uuid",
+        DataType::Decimal => "decimal",
+        DataType::Array => "array",
+        DataType::Jsonb => "jsonb",
+        DataType::Blob => "blob",
     }
 }
 
