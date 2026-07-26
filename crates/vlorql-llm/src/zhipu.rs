@@ -160,7 +160,13 @@ impl ZhipuClient {
     /// for the GLM-5 family (Zhipu's documented flag for streaming tool
     /// calls). Function calling is not used in this codebase, but the
     /// flag is wired through so callers can opt in via the model name.
-    fn build_request_body(&self, question: &str, system_prompt: &str, stream: bool) -> Value {
+    fn build_request_body(
+        &self,
+        question: &str,
+        system_prompt: &str,
+        stream: bool,
+        temperature: Option<f32>,
+    ) -> Value {
         let response_format = if self.supports_strict_json_schema() {
             json!({
                 "type": "json_schema",
@@ -181,7 +187,7 @@ impl ZhipuClient {
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": question},
             ],
-            "temperature": self.config.temperature,
+            "temperature": temperature.unwrap_or(self.config.temperature),
             "max_tokens": self.effective_max_tokens(),
             "response_format": response_format,
         });
@@ -231,9 +237,10 @@ impl LlmClient for ZhipuClient {
         &self,
         question: &str,
         system_prompt: &str,
+        temperature: Option<f32>,
     ) -> Result<QueryPlan, VlorQLError> {
         let endpoint = self.endpoint();
-        let body = self.build_request_body(question, system_prompt, false);
+        let body = self.build_request_body(question, system_prompt, false, temperature);
         let max_attempts = self.max_attempts();
         let mut last_error: Option<VlorQLError> = None;
         for attempt in 0..max_attempts {
@@ -275,7 +282,7 @@ impl LlmClient for ZhipuClient {
     ) -> Result<Box<dyn Stream<Item = Result<String, VlorQLError>> + Send + Unpin>, VlorQLError>
     {
         let endpoint = self.endpoint();
-        let body = self.build_request_body(&question, &system_prompt, true);
+        let body = self.build_request_body(&question, &system_prompt, true, None);
         let response = self
             .client
             .post(&endpoint)
@@ -464,7 +471,7 @@ mod tests {
             ..zhipu_config("glm-4.7")
         };
         let client = ZhipuClient::new(config).expect("client should build");
-        let request_body = client.build_request_body("show users", "system", false);
+        let request_body = client.build_request_body("show users", "system", false, None);
         assert_eq!(request_body["model"], "glm-4.7");
         assert_eq!(request_body["temperature"], 0.0);
         assert_eq!(request_body["response_format"]["type"], "json_schema");
@@ -478,7 +485,7 @@ mod tests {
         );
 
         let actual = client
-            .generate_plan("show users", "system")
+            .generate_plan("show users", "system", None)
             .await
             .expect("zhipu plan should parse");
         assert_eq!(actual, expected);
@@ -511,12 +518,15 @@ mod tests {
             ..zhipu_config("glm-4")
         };
         let client = ZhipuClient::new(config).expect("client should build");
-        let request_body = client.build_request_body("q", "s", false);
+        let request_body = client.build_request_body("q", "s", false, None);
         assert_eq!(request_body["model"], "glm-4");
         assert_eq!(request_body["response_format"]["type"], "json_object");
 
         assert_eq!(
-            client.generate_plan("q", "s").await.expect("response"),
+            client
+                .generate_plan("q", "s", None)
+                .await
+                .expect("response"),
             expected
         );
         mock.assert_async().await;
@@ -542,7 +552,7 @@ mod tests {
         };
         let client = ZhipuClient::new(config).expect("client should build");
         let error = client
-            .generate_plan("hi", "system")
+            .generate_plan("hi", "system", None)
             .await
             .expect_err("401 should be reported");
         assert_eq!(error.error_code(), "L001");
@@ -568,7 +578,7 @@ mod tests {
         };
         let client = ZhipuClient::new(config).expect("client should build");
         let error = client
-            .generate_plan("hi", "system")
+            .generate_plan("hi", "system", None)
             .await
             .expect_err("invalid plan should fail");
         assert_eq!(error.error_code(), "L003");
@@ -610,7 +620,7 @@ mod tests {
             ..zhipu_config("glm-4.7")
         };
         let client = ZhipuClient::new(config).expect("client should build");
-        let body = client.build_request_body("hi", "system", true);
+        let body = client.build_request_body("hi", "system", true, None);
         assert_eq!(body["stream"], true);
 
         let mut stream = client
@@ -717,7 +727,7 @@ mod tests {
         config.api_base = Some(format!("{}/v4/chat/completions", server.url()));
         let client = ZhipuClient::new(config).expect("client should build from env var");
         let actual = client
-            .generate_plan("q", "s")
+            .generate_plan("q", "s", None)
             .await
             .expect("env-keyed request should succeed");
         assert_eq!(actual, expected);

@@ -222,7 +222,11 @@ impl VlorQl {
 
             let mut llm_question = question.to_owned();
             for attempt in 0..=self.max_retries {
-                let plan = match client.generate_plan(&llm_question, &system_prompt).await {
+                let temperature = retry_temperature(client.config().temperature, attempt);
+                let plan = match client
+                    .generate_plan(&llm_question, &system_prompt, temperature)
+                    .await
+                {
                     Ok(plan) => plan,
                     Err(e) if e.is_retryable() && attempt < self.max_retries => {
                         llm_question = format_retry_question_str(&llm_question, &e);
@@ -818,6 +822,17 @@ fn parse_dialect_name(name: &str) -> Result<DialectProfile, VlorQLError> {
     })
 }
 
+/// Sampling temperature for retry `attempt` (0 = first call). The first
+/// call keeps the configured default (deterministic); each retry nudges
+/// the temperature up so the model can escape a repeated bad output.
+fn retry_temperature(base: f32, attempt: usize) -> Option<f32> {
+    if attempt == 0 {
+        None
+    } else {
+        Some((base + 0.2 * attempt as f32).min(1.0))
+    }
+}
+
 fn format_retry_question_str(question: &str, error: &VlorQLError) -> String {
     let feedback = error.to_string();
     let hint = match error {
@@ -1101,6 +1116,14 @@ mod tests {
     }
 
     #[test]
+    fn retry_temperature_keeps_default_on_first_attempt_then_escalates() {
+        assert_eq!(retry_temperature(0.0, 0), None);
+        assert_eq!(retry_temperature(0.0, 1), Some(0.2));
+        assert_eq!(retry_temperature(0.0, 2), Some(0.4));
+        assert!(retry_temperature(0.9, 3).expect("retry should escalate") <= 1.0);
+    }
+
+    #[test]
     fn retry_feedback_is_tiered_by_attempt() {
         let errs: Vec<VlorQLError> = (0..5)
             .map(|i| {
@@ -1254,6 +1277,7 @@ mod tests {
             &self,
             _question: &str,
             _system_prompt: &str,
+            _temperature: Option<f32>,
         ) -> Result<QueryPlan, VlorQLError> {
             self.plans
                 .lock()
@@ -1277,7 +1301,7 @@ mod tests {
             Box<dyn futures::stream::Stream<Item = Result<String, VlorQLError>> + Send + Unpin>,
             VlorQLError,
         > {
-            let plan = self.generate_plan(&question, &system_prompt).await?;
+            let plan = self.generate_plan(&question, &system_prompt, None).await?;
             let serialized = serde_json::to_string(&plan).unwrap_or_default();
             Ok(Box::new(futures::stream::iter(vec![Ok(serialized)])))
         }

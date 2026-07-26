@@ -250,6 +250,7 @@ impl LlmClient for SequenceMockClient {
         &self,
         _question: &str,
         _system_prompt: &str,
+        _temperature: Option<f32>,
     ) -> Result<QueryPlan, VlorQLError> {
         self.plans
             .lock()
@@ -272,7 +273,7 @@ impl LlmClient for SequenceMockClient {
     ) -> Result<Box<dyn Stream<Item = Result<String, VlorQLError>> + Send + Unpin>, VlorQLError>
     {
         let plan = self
-            .generate_plan("", "")
+            .generate_plan("", "", None)
             .await
             .expect("sequence client should yield a plan");
         let serialized = serde_json::to_string(&plan).unwrap_or_default();
@@ -320,6 +321,7 @@ impl LlmClient for StreamingMockClient {
         &self,
         _question: &str,
         _system_prompt: &str,
+        _temperature: Option<f32>,
     ) -> Result<QueryPlan, VlorQLError> {
         // Concatenate the chunks and try to deserialize them. This makes
         // the streaming client also usable from the non-streaming code

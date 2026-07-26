@@ -86,7 +86,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .unwrap_or_else(|| "Show user ids".to_owned());
 
     eprintln!("Generating plan for: {question}");
-    let plan = client.generate_plan(&question, SYSTEM_PROMPT).await?;
+    let plan = client.generate_plan(&question, SYSTEM_PROMPT, None).await?;
     println!("{}", serde_json::to_string_pretty(&plan)?);
     Ok(())
 }

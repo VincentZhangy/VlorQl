@@ -149,7 +149,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let client = create_llm_client(config)?;
     eprintln!("Provider id: {}", client.provider());
     let started = std::time::Instant::now();
-    let plan = client.generate_plan(&question, SYSTEM_PROMPT).await?;
+    let plan = client.generate_plan(&question, SYSTEM_PROMPT, None).await?;
     eprintln!("Plan received in {:?}", started.elapsed());
     println!("{}", serde_json::to_string_pretty(&plan)?);
     Ok(())
