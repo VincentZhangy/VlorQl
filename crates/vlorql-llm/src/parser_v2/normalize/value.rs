@@ -20,9 +20,10 @@ const DATA_TYPE_ALIASES: &[(&str, &str)] = &[
     ("char", "string"),
     ("character", "string"),
     ("character varying", "string"),
+    // Decimal types
+    ("decimal", "decimal"),
+    ("numeric", "decimal"),
     // Float types
-    ("decimal", "float"),
-    ("numeric", "float"),
     ("real", "float"),
     ("double", "float"),
     ("double precision", "float"),
@@ -35,6 +36,8 @@ const DATA_TYPE_ALIASES: &[(&str, &str)] = &[
     ("timestamp with time zone", "timestamp"),
     ("timestamp without time zone", "timestamp"),
     ("date", "timestamp"),
+    // Blob types
+    ("bytea", "blob"),
     // Null variants
     ("NULL", "null"),
     ("Null", "null"),
@@ -123,7 +126,18 @@ fn normalize_impl(val: &mut Value) -> bool {
 pub fn is_canonical(dt: &str) -> bool {
     matches!(
         dt,
-        "int" | "string" | "float" | "boolean" | "timestamp" | "null" | "json" | "uuid" | "blob"
+        "int"
+            | "string"
+            | "float"
+            | "boolean"
+            | "timestamp"
+            | "null"
+            | "json"
+            | "uuid"
+            | "blob"
+            | "decimal"
+            | "array"
+            | "jsonb"
     )
 }
 
@@ -157,10 +171,13 @@ mod tests {
     }
 
     #[test]
-    fn normalizes_decimal_to_float() {
-        let mut val = json!({"type": "literal", "value": 2.5, "data_type": "decimal"});
+    fn normalizes_numeric_to_decimal() {
+        let mut val = json!({"type": "literal", "value": 2.5, "data_type": "numeric"});
         assert!(normalize(&mut val));
-        assert_eq!(val.get("data_type").and_then(|v| v.as_str()), Some("float"));
+        assert_eq!(
+            val.get("data_type").and_then(|v| v.as_str()),
+            Some("decimal")
+        );
     }
 
     #[test]
@@ -214,7 +231,7 @@ mod tests {
     fn resolve_data_type_works() {
         assert_eq!(resolve_data_type("integer"), Some("int"));
         assert_eq!(resolve_data_type("varchar"), Some("string"));
-        assert_eq!(resolve_data_type("decimal"), Some("float"));
+        assert_eq!(resolve_data_type("decimal"), Some("decimal"));
         assert_eq!(resolve_data_type("bool"), Some("boolean"));
         assert_eq!(resolve_data_type("datetime"), Some("timestamp"));
         assert_eq!(resolve_data_type("int"), None); // already canonical
@@ -285,5 +302,21 @@ mod tests {
         let mut val = json!({"type": "literal", "value": null, "data_type": "null"});
         assert!(!normalize(&mut val));
         assert_eq!(val.get("data_type").and_then(|v| v.as_str()), Some("null"));
+    }
+
+    #[test]
+    fn decimal_alias_maps_to_decimal_not_float() {
+        assert_eq!(resolve_data_type("decimal"), Some("decimal"));
+        assert_eq!(resolve_data_type("numeric"), Some("decimal"));
+        // 真正的浮点别名仍映射到 float
+        assert_eq!(resolve_data_type("double precision"), Some("float"));
+    }
+
+    #[test]
+    fn new_types_are_canonical() {
+        assert!(is_canonical("decimal"));
+        assert!(is_canonical("array"));
+        assert!(is_canonical("jsonb"));
+        assert!(is_canonical("blob"));
     }
 }
