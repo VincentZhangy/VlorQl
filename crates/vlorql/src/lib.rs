@@ -382,6 +382,14 @@ impl VlorQl {
     /// optimisation passes.  Returns an [`OptimizedPlan`] that derefs to
     /// [`ValidatedPlan`].
     ///
+    /// Like [`validate_only`](Self::validate_only), this is an honest
+    /// validation entry point: it does **not** apply execution-time
+    /// auto-repairs such as dropping JOINs to tables that do not exist in
+    /// the schema. A plan referencing a non-existent table is reported as
+    /// an error, not silently repaired. To execute a plan with those
+    /// auto-repairs (e.g. recovering from an LLM-hallucinated JOIN), use
+    /// [`query`](Self::query), which validates with repair internally.
+    ///
     /// # Errors
     ///
     /// Returns [`ValidationErrors`] when any validation stage (including
