@@ -221,7 +221,7 @@ impl VlorQl {
                     }
                     Err(e) => return Err(e),
                 };
-                match self.validate_only(&plan) {
+                match self.build_pipeline().validate_repairing(&plan) {
                     Ok(validated_plan) => {
                         // Optimize when an optimizer is configured, then compile.
                         let plan_for_compile = match &self.optimizer {
@@ -1025,7 +1025,7 @@ fn process_assembled_text(
     };
     let validation =
         ValidationPipeline::new(Arc::clone(&schema), dialect, PolicyEngine::new(policy))
-            .validate(&plan);
+            .validate_repairing(&plan);
     match validation {
         Ok(validated) => match compiler.compile(&validated) {
             Ok(_) => StreamEvent::PlanComplete(Box::new(plan)),

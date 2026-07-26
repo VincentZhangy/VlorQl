@@ -272,22 +272,35 @@ fn find_join_for(
     None
 }
 
+/// Removes JOIN clauses whose right-hand table does not exist in the
+/// schema. LLMs sometimes hallucinate table names; the execution path
+/// uses this as an auto-recovery step so a bogus JOIN does not abort the
+/// whole query. It is deliberately NOT part of [`schema_aware_fix`] /
+/// validation, so that `validate` / `validate_only` still report the
+/// hallucinated table as a `TableNotFound` error.
+///
+/// [`schema_aware_fix`]: super::schema_aware_fix
+///
+/// Returns `true` if any join was removed.
+pub(crate) fn drop_hallucinated_joins(plan: &mut QueryPlan, schema: &SchemaSnapshot) -> bool {
+    let Some(joins) = plan.joins.as_mut() else {
+        return false;
+    };
+    let before = joins.len();
+    joins.retain(|join| schema.get_table(&join.right_table.table).is_some());
+    let removed = joins.len() != before;
+    if joins.is_empty() {
+        plan.joins = None;
+    }
+    removed
+}
+
 /// Fix missing JOIN clauses for tables referenced but not joined.
 ///
 /// Scans all table-qualified column references in the plan, finds those
 /// whose table is missing from the query scope, and inserts the correct
 /// INNER JOIN using actual schema FK metadata.
 pub fn fix_missing_joins(plan: &mut QueryPlan, schema: &SchemaSnapshot) -> bool {
-    // Step 0: Remove joins whose right_table does not exist in the schema.
-    // LLMs sometimes hallucinate table names (e.g. "departments").
-    if let Some(ref mut joins) = plan.joins {
-        joins.retain(|join| schema.get_table(&join.right_table.table).is_some());
-        if joins.is_empty() {
-            plan.joins = None;
-        }
-        // Don't return early here — still need to add missing joins below.
-    }
-
     // Collect all referenced tables.
     let mut referenced: HashSet<String> = HashSet::new();
     for proj in &plan.select {
