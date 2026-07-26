@@ -15,6 +15,40 @@ pub fn find_outermost_json_obj(text: &str) -> Option<&str> {
     Some(&text[start..=start + end])
 }
 
+/// Finds the "best" balanced JSON object in `text`.
+///
+/// Unlike [`find_outermost_json_obj`], which returns the first balanced
+/// `{…}`, this scans **every** `{` start position, keeps only candidates
+/// that parse as JSON, and returns the best one: objects that look like a
+/// query plan (contain a `select` or `from` key) win over those that
+/// don't, and among equals the longest wins. This tolerates models that
+/// emit reasoning prose (possibly containing braces) before the plan, or
+/// multiple JSON objects.
+///
+/// Returns `None` if no substring parses as a JSON object.
+#[must_use]
+pub fn find_best_json_obj(text: &str) -> Option<&str> {
+    let mut best: Option<&str> = None;
+    let mut best_score = (false, 0usize); // (looks_like_plan, byte_len)
+    let mut idx = 0;
+    while let Some(rel) = text[idx..].find('{') {
+        let start = idx + rel;
+        if let Some(end) = find_matching_close(&text[start..], '{', '}') {
+            let candidate = &text[start..=start + end];
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(candidate) {
+                let looks_like_plan = v.get("select").is_some() || v.get("from").is_some();
+                let score = (looks_like_plan, candidate.len());
+                if best.is_none() || score > best_score {
+                    best = Some(candidate);
+                    best_score = score;
+                }
+            }
+        }
+        idx = start + 1; // '{' is ASCII → safe byte boundary
+    }
+    best
+}
+
 /// Finds the outermost array brackets (`[…]`) in a string by tracking
 /// bracket depth, respecting string boundaries.
 ///
@@ -227,5 +261,30 @@ mod tests {
         // The closing brace should be the one after the string, not the one inside the string
         let end = result.unwrap();
         assert_eq!(&input[..=end], input);
+    }
+
+    #[test]
+    fn find_best_json_obj_skips_leading_prose_braces() {
+        let input = r#"Here is my reasoning {note: skip me} and the plan:
+        {"select":[{"type":"star"}],"from":{"table":"users"}}"#;
+        let found = find_best_json_obj(input).expect("should find the plan object");
+        let v: serde_json::Value = serde_json::from_str(found).unwrap();
+        assert!(
+            v.get("select").is_some(),
+            "should pick the object with select/from, got: {found}"
+        );
+    }
+
+    #[test]
+    fn find_best_json_obj_prefers_plan_over_first() {
+        let input = r#"{"error":"none"} {"select":[{"type":"star"}],"from":{"table":"t"}}"#;
+        let found = find_best_json_obj(input).unwrap();
+        let v: serde_json::Value = serde_json::from_str(found).unwrap();
+        assert!(v.get("from").is_some());
+    }
+
+    #[test]
+    fn find_best_json_obj_none_when_no_valid_json() {
+        assert_eq!(find_best_json_obj("no json { unbalanced"), None);
     }
 }

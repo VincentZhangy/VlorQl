@@ -134,3 +134,12 @@ fn passes_through_valid_json() {
     let valid = r#"{"select":[{"type":"star"}],"from":{"table":"users"}}"#;
     assert_eq!(extract_json_content(valid), valid);
 }
+
+#[test]
+fn extract_skips_reasoning_prose_before_plan() {
+    let raw = "Let me think about {this} first.\n\
+        {\"select\":[{\"type\":\"star\"}],\"from\":{\"table\":\"users\"}}";
+    let extracted = extract_json_content(raw);
+    let v: serde_json::Value = serde_json::from_str(extracted).unwrap();
+    assert!(v.get("select").is_some(), "extracted: {extracted}");
+}

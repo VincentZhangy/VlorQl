@@ -76,7 +76,12 @@ pub fn extract_json_content(raw: &str) -> &str {
         }
     }
 
-    // 4. Find first JSON object anywhere in the text.
+    // 4. Find the best JSON object anywhere in the text (prefers a plan-
+    //    shaped object; tolerates leading reasoning prose / multiple objects).
+    if let Some(obj) = bracket::find_best_json_obj(trimmed) {
+        return obj;
+    }
+    // 4b. Fallback: first balanced object (may be recoverable by later repair).
     if let Some(obj) = bracket::find_outermost_json_obj(trimmed) {
         return obj;
     }
