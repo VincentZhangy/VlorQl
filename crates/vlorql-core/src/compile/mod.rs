@@ -699,4 +699,48 @@ mod tests {
             "SELECT DISTINCT \"users\".\"name\" FROM \"users\""
         );
     }
+
+    #[test]
+    fn cte_order_by_resolves_table_alias() {
+        // CTE: SELECT o.total FROM orders AS o ORDER BY orders.total
+        let cte_query = QueryPlan {
+            select: vec![Projection::Column {
+                table: Some("o".to_owned()),
+                column: "total".to_owned(),
+                alias: None,
+            }],
+            from: FromClause {
+                table: "orders".to_owned(),
+                alias: Some("o".to_owned()),
+            },
+            r#where: None,
+            group_by: None,
+            having: None,
+            order_by: Some(vec![OrderByTerm {
+                expr: column_ref("orders", "total"),
+                descending: false,
+            }]),
+            limit: None,
+            offset: None,
+            joins: None,
+            ctes: None,
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,
+        };
+
+        let mut plan = base_plan();
+        plan.ctes = Some(vec![CommonTableExpression {
+            name: "recent".to_owned(),
+            query: Box::new(cte_query),
+            recursive: false,
+        }]);
+
+        let compiled = PostgresCompiler.compile(&validated(plan)).expect("compile");
+        assert!(
+            compiled.sql.contains(r#"ORDER BY "o"."total""#),
+            "CTE ORDER BY must resolve the table alias to \"o\"; got: {}",
+            compiled.sql
+        );
+    }
 }

@@ -366,7 +366,6 @@ impl<'a> QueryBuilder<'a> {
         self.build_where(plan, sql)?;
         self.build_group_by(plan, sql)?;
         self.build_having(plan, sql)?;
-        self.alias_stack.pop();
 
         // Render set operation (UNION / INTERSECT / EXCEPT) AFTER the
         // primary query but BEFORE ORDER BY / LIMIT / OFFSET, because
@@ -381,6 +380,9 @@ impl<'a> QueryBuilder<'a> {
             self.build_order_by(plan, sql)?;
             self.build_limit_offset(plan, sql)?;
         }
+
+        // Pop AFTER ORDER BY so it resolves against this plan's own scope.
+        self.alias_stack.pop();
         Ok(())
     }
 
