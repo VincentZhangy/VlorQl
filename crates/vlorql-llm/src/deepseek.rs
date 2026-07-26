@@ -135,7 +135,13 @@ impl DeepSeekClient {
     /// JSON Schema example (containing the word "json") in the system
     /// prompt so the model emits structured output. When `stream` is
     /// `true`, the `stream` flag is toggled on for SSE delivery.
-    fn build_request_body(&self, question: &str, system_prompt: &str, stream: bool) -> Value {
+    fn build_request_body(
+        &self,
+        question: &str,
+        system_prompt: &str,
+        stream: bool,
+        temperature: Option<f32>,
+    ) -> Value {
         let mut body = json!({
             "model": self.config.model,
             "messages": [
@@ -143,7 +149,7 @@ impl DeepSeekClient {
                 {"role": "user", "content": question},
             ],
             "response_format": {"type": "json_object"},
-            "temperature": self.config.temperature,
+            "temperature": temperature.unwrap_or(self.config.temperature),
             "max_tokens": self.config.max_tokens,
         });
         if stream {
@@ -189,9 +195,10 @@ impl LlmClient for DeepSeekClient {
         &self,
         question: &str,
         system_prompt: &str,
+        temperature: Option<f32>,
     ) -> Result<QueryPlan, VlorQLError> {
         let endpoint = self.endpoint();
-        let body = self.build_request_body(question, system_prompt, false);
+        let body = self.build_request_body(question, system_prompt, false, temperature);
         let max_attempts = self.max_attempts();
         let mut last_error: Option<VlorQLError> = None;
         for attempt in 0..max_attempts {
@@ -233,7 +240,7 @@ impl LlmClient for DeepSeekClient {
     ) -> Result<Box<dyn Stream<Item = Result<String, VlorQLError>> + Send + Unpin>, VlorQLError>
     {
         let endpoint = self.endpoint();
-        let body = self.build_request_body(&question, &system_prompt, true);
+        let body = self.build_request_body(&question, &system_prompt, true, None);
         let response = self
             .client
             .post(&endpoint)
@@ -448,7 +455,7 @@ mod tests {
         };
         let client = DeepSeekClient::new(config).expect("client should build");
 
-        let body = client.build_request_body("show users", "system", false);
+        let body = client.build_request_body("show users", "system", false, None);
         assert_eq!(body["model"], "deepseek-v4-pro");
         assert_eq!(body["response_format"]["type"], "json_object");
         assert_eq!(body["temperature"], 0.0);
@@ -461,13 +468,31 @@ mod tests {
         assert_eq!(messages[1]["content"], "show users");
 
         let actual = client
-            .generate_plan("show users", "system")
+            .generate_plan("show users", "system", None)
             .await
             .expect("plan should parse");
         assert_eq!(actual, expected);
         assert_eq!(client.provider(), LlmProvider::DeepSeek);
         assert_eq!(client.config().model, "deepseek-v4-pro");
         mock.assert_async().await;
+    }
+
+    #[test]
+    fn deepseek_client_build_request_body_overrides_temperature() {
+        let config = deepseek_config("deepseek-v4-pro");
+        let client = DeepSeekClient::new(config).expect("client should build");
+
+        let overridden = client.build_request_body("show users", "system", false, Some(0.7));
+        let overridden_temperature = overridden["temperature"]
+            .as_f64()
+            .expect("temperature should serialize as a number");
+        assert!(
+            (overridden_temperature - 0.7).abs() < 1e-6,
+            "expected ~0.7, got {overridden_temperature}"
+        );
+
+        let default = client.build_request_body("show users", "system", false, None);
+        assert_eq!(default["temperature"], client.config().temperature);
     }
 
     #[tokio::test]
@@ -486,7 +511,7 @@ mod tests {
         };
         let client = DeepSeekClient::new(config).expect("client should build");
         let actual = client
-            .generate_plan("show users", "system")
+            .generate_plan("show users", "system", None)
             .await
             .expect("plan should parse");
         assert_eq!(actual, expected);
@@ -515,7 +540,7 @@ mod tests {
         };
         let client = DeepSeekClient::new(config).expect("client should build");
         let error = client
-            .generate_plan("hi", "system")
+            .generate_plan("hi", "system", None)
             .await
             .expect_err("empty content should fail");
         assert_eq!(error.error_code(), "L003");
@@ -542,7 +567,7 @@ mod tests {
         };
         let client = DeepSeekClient::new(config).expect("client should build");
         let error = client
-            .generate_plan("hi", "system")
+            .generate_plan("hi", "system", None)
             .await
             .expect_err("missing content should fail");
         assert_eq!(error.error_code(), "L003");
@@ -564,7 +589,7 @@ mod tests {
         };
         let client = DeepSeekClient::new(config).expect("client should build");
         let error = client
-            .generate_plan("hi", "system")
+            .generate_plan("hi", "system", None)
             .await
             .expect_err("429 should be reported");
         assert_eq!(error.error_code(), "L001");
@@ -593,7 +618,7 @@ mod tests {
         };
         let client = DeepSeekClient::new(config).expect("client should build");
         let error = client
-            .generate_plan("hi", "system")
+            .generate_plan("hi", "system", None)
             .await
             .expect_err("invalid plan should fail");
         assert_eq!(error.error_code(), "L003");
@@ -635,7 +660,7 @@ mod tests {
             ..deepseek_config("deepseek-v4-pro")
         };
         let client = DeepSeekClient::new(config).expect("client should build");
-        let body = client.build_request_body("hi", "system", true);
+        let body = client.build_request_body("hi", "system", true, None);
         assert_eq!(body["stream"], true);
         assert_eq!(body["response_format"]["type"], "json_object");
 
@@ -702,7 +727,7 @@ mod tests {
         let client = DeepSeekClient::new(config).expect("client should build");
 
         let actual = client
-            .generate_plan("hi", "system")
+            .generate_plan("hi", "system", None)
             .await
             .expect("retry should succeed");
         assert_eq!(actual, expected);
@@ -758,7 +783,7 @@ mod tests {
                 panic!("client should build from env var: {error}");
             }
         };
-        let result = client.generate_plan("q", "s").await;
+        let result = client.generate_plan("q", "s", None).await;
         drop(guard);
         let actual = result.expect("env-keyed request should succeed");
         assert_eq!(actual, expected);

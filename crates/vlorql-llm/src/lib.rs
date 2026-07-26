@@ -235,17 +235,22 @@ pub(crate) const DEFAULT_RETRY_DELAY: Duration = Duration::from_secs(1);
 ///     joins: None, ctes: None, distinct: false, distinct_on: None, set_operation: None,
 /// };
 /// let client = MockLlmClient::success(plan);
-/// let result = client.generate_plan("test", "prompt").await;
+/// let result = client.generate_plan("test", "prompt", None).await;
 /// assert!(result.is_ok());
 /// # }
 /// ```
 #[async_trait]
 pub trait LlmClient: Send + Sync {
     /// Generates a complete query plan from the LLM.
+    ///
+    /// `temperature` overrides the sampling temperature used for this
+    /// single call. Pass `None` to fall back to [`LlmConfig::temperature`]
+    /// as returned by [`LlmClient::config`].
     async fn generate_plan(
         &self,
         question: &str,
         system_prompt: &str,
+        temperature: Option<f32>,
     ) -> Result<QueryPlan, VlorQLError>;
 
     /// Streams raw text deltas as the LLM emits them.
@@ -271,8 +276,11 @@ where
         &self,
         question: &str,
         system_prompt: &str,
+        temperature: Option<f32>,
     ) -> Result<QueryPlan, VlorQLError> {
-        (**self).generate_plan(question, system_prompt).await
+        (**self)
+            .generate_plan(question, system_prompt, temperature)
+            .await
     }
 
     async fn stream_plan(
@@ -541,7 +549,7 @@ impl OpenAIClient {
         })
     }
 
-    fn request_body(&self, question: &str, system_prompt: &str) -> Value {
+    fn request_body(&self, question: &str, system_prompt: &str, temperature: Option<f32>) -> Value {
         let response_format = if self.supports_strict_json_schema() {
             json!({
                 "type": "json_schema",
@@ -561,7 +569,7 @@ impl OpenAIClient {
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": question},
             ],
-            "temperature": 0.0,
+            "temperature": temperature.unwrap_or(self.config.temperature),
             "response_format": response_format,
         })
     }
@@ -582,6 +590,7 @@ impl LlmClient for OpenAIClient {
         &self,
         question: &str,
         system_prompt: &str,
+        temperature: Option<f32>,
     ) -> Result<QueryPlan, VlorQLError> {
         let span = tracing::info_span!(
             "llm.generate_plan",
@@ -592,7 +601,7 @@ impl LlmClient for OpenAIClient {
         );
         async move {
             let endpoint = self.endpoint();
-            let body = self.request_body(question, system_prompt);
+            let body = self.request_body(question, system_prompt, temperature);
             let attempts = self.max_attempts.max(1);
             let mut last_error = None;
 
@@ -767,6 +776,7 @@ impl LlmClient for MockLlmClient {
         &self,
         _question: &str,
         _system_prompt: &str,
+        _temperature: Option<f32>,
     ) -> Result<QueryPlan, VlorQLError> {
         if self.should_succeed {
             Ok(self.plan.clone().unwrap_or_else(default_plan))
@@ -1458,7 +1468,7 @@ mod tests {
         let success = MockLlmClient::success(expected.clone());
         assert_eq!(
             success
-                .generate_plan("question", "system")
+                .generate_plan("question", "system", None)
                 .await
                 .expect("mock should succeed"),
             expected
@@ -1466,7 +1476,7 @@ mod tests {
 
         let failure = MockLlmClient::failure();
         let error = failure
-            .generate_plan("question", "system")
+            .generate_plan("question", "system", None)
             .await
             .expect_err("mock should fail");
         assert_eq!(error.error_code(), "L001");
@@ -1492,7 +1502,7 @@ mod tests {
         let client = OpenAIClient::new("test-key", "gpt-4o-mini")
             .with_api_base(format!("{}/v1", server.url()))
             .with_retry_base_delay(Duration::ZERO);
-        let request_body = client.request_body("show users", "system instructions");
+        let request_body = client.request_body("show users", "system instructions", None);
         assert_eq!(request_body["model"], "gpt-4o-mini");
         assert_eq!(request_body["temperature"], 0.0);
         assert_eq!(request_body["response_format"]["type"], "json_schema");
@@ -1506,7 +1516,7 @@ mod tests {
         );
 
         let actual = client
-            .generate_plan("show users", "system instructions")
+            .generate_plan("show users", "system instructions", None)
             .await
             .expect("OpenAI response should parse");
 
@@ -1530,12 +1540,15 @@ mod tests {
         let client = OpenAIClient::new("key", "local-model")
             .with_api_base(format!("{}/", server.url()))
             .with_retry_base_delay(Duration::ZERO);
-        let request_body = client.request_body("q", "s");
+        let request_body = client.request_body("q", "s", None);
         assert_eq!(request_body["model"], "local-model");
         assert_eq!(request_body["response_format"]["type"], "json_object");
 
         assert_eq!(
-            client.generate_plan("q", "s").await.expect("response"),
+            client
+                .generate_plan("q", "s", None)
+                .await
+                .expect("response"),
             expected
         );
         mock.assert_async().await;
@@ -1565,7 +1578,7 @@ mod tests {
 
         assert_eq!(
             client
-                .generate_plan("q", "s")
+                .generate_plan("q", "s", None)
                 .await
                 .expect("retry should succeed"),
             expected
@@ -1593,7 +1606,7 @@ mod tests {
             .with_retry_base_delay(Duration::ZERO);
 
         let error = client
-            .generate_plan("q", "s")
+            .generate_plan("q", "s", None)
             .await
             .expect_err("invalid plan should fail");
         assert_eq!(error.error_code(), "L003");
@@ -1825,7 +1838,9 @@ mod tests {
 
         // The mockito server will fail, so we expect an error — but the span
         // should still be created with the correct attributes.
-        let result = client.generate_plan("test question", "test prompt").await;
+        let result = client
+            .generate_plan("test question", "test prompt", None)
+            .await;
         assert!(result.is_err(), "expected error from mock endpoint");
 
         // The span was created; the subscriber captured it.
