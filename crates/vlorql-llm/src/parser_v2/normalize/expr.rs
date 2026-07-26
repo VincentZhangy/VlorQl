@@ -12,6 +12,26 @@
 
 use serde_json::Value;
 
+/// Maps a raw literal type tag plus its JSON value to the canonical
+/// `data_type` string. The ambiguous `"number"` tag is disambiguated by
+/// inspecting whether the value is integral, so both normalization paths
+/// agree on `int` vs `float`.
+fn canonical_literal_type(type_val: &str, value: Option<&Value>) -> &'static str {
+    match type_val {
+        "string" => "string",
+        "integer" => "int",
+        "float" => "float",
+        "number" => match value {
+            Some(Value::Number(n)) if n.as_i64().is_some() || n.as_u64().is_some() => "int",
+            Some(Value::Number(_)) => "float",
+            _ => "int",
+        },
+        "boolean" => "boolean",
+        "null" => "null",
+        _ => "null",
+    }
+}
+
 /// Convert LLM type aliases (string, integer, number, float, boolean, null)
 /// to the canonical literal format:
 ///   {"type": "string", "value": "..."} → {"type": "literal", "value": "...", "data_type": "string"}
@@ -33,11 +53,9 @@ fn fix_literal_type_aliases(val: &mut Value) -> bool {
         return false;
     }
     let canonical_dt = match type_val {
-        "string" => "string",
-        "integer" | "number" => "int",
-        "float" => "float",
-        "boolean" => "boolean",
-        "null" => "null",
+        "string" | "integer" | "number" | "float" | "boolean" | "null" => {
+            canonical_literal_type(type_val, obj.get("value"))
+        }
         _ => return false,
     };
     obj.insert("type".to_owned(), Value::String("literal".to_owned()));
@@ -81,13 +99,8 @@ pub fn repair_expression_value(val: &mut Value) -> bool {
             || type_val == "float" || type_val == "boolean" || type_val == "null"
         {
             if obj.contains_key("value") {
-                let canonical_dt = match type_val.as_str() {
-                    "string" => "string",
-                    "integer" | "number" | "float" => "float",
-                    "boolean" => "boolean",
-                    "null" => "null",
-                    _ => "null",
-                };
+                let value = obj.get("value");
+                let canonical_dt = canonical_literal_type(type_val.as_str(), value);
                 obj.insert("type".to_owned(), Value::String("literal".to_owned()));
                 obj.insert("data_type".to_owned(), Value::String(canonical_dt.to_owned()));
                 return true;
@@ -744,6 +757,29 @@ mod tests {
     fn expression_no_recognizable_fields() {
         let mut val = json!({"unknown": "field"});
         assert!(!repair_expression_value(&mut val));
+    }
+
+    #[test]
+    fn integer_literal_normalizes_to_int_consistently() {
+        let mut v = serde_json::json!({"type": "integer", "value": 5});
+        assert!(repair_expression_value(&mut v));
+        assert_eq!(
+            v.get("data_type").and_then(|d| d.as_str()),
+            Some("int"),
+            "integer 字面量应规范化为 int，而非 float"
+        );
+        assert_eq!(v.get("type").and_then(|t| t.as_str()), Some("literal"));
+    }
+
+    #[test]
+    fn number_literal_disambiguates_by_value() {
+        let mut i = serde_json::json!({"type": "number", "value": 3});
+        assert!(repair_expression_value(&mut i));
+        assert_eq!(i.get("data_type").and_then(|d| d.as_str()), Some("int"));
+
+        let mut f = serde_json::json!({"type": "number", "value": 3.5});
+        assert!(repair_expression_value(&mut f));
+        assert_eq!(f.get("data_type").and_then(|d| d.as_str()), Some("float"));
     }
 
     // ── repair_predicate_type ─────────────────────────────────────
