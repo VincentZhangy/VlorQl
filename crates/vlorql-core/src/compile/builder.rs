@@ -345,6 +345,20 @@ impl<'a> QueryBuilder<'a> {
     }
 
     fn build_query(&mut self, plan: &QueryPlan, sql: &mut String) -> Result<(), VlorQLError> {
+        self.build_query_impl(plan, sql, false)
+    }
+
+    /// Renders `plan` into `sql`. When `is_set_operand` is true the plan is
+    /// the right-hand side of a set operation (UNION/INTERSECT/EXCEPT); in
+    /// that position standard SQL forbids ORDER BY / LIMIT / OFFSET on the
+    /// operand itself (they bind to the whole set operation), so they are
+    /// skipped.
+    fn build_query_impl(
+        &mut self,
+        plan: &QueryPlan,
+        sql: &mut String,
+        is_set_operand: bool,
+    ) -> Result<(), VlorQLError> {
         self.push_alias_scope(plan);
         self.build_with(plan, sql)?;
         self.build_select(plan, sql)?;
@@ -362,9 +376,11 @@ impl<'a> QueryBuilder<'a> {
             self.render_set_operation(set_op, sql)?;
         }
 
-        self.build_order_by(plan, sql)?;
-        self.build_limit_offset(plan, sql)?;
-
+        // Operands of a set operation must not carry their own trailing clauses.
+        if !is_set_operand {
+            self.build_order_by(plan, sql)?;
+            self.build_limit_offset(plan, sql)?;
+        }
         Ok(())
     }
 
@@ -761,7 +777,7 @@ impl<'a> QueryBuilder<'a> {
             SetOperation::Except => " EXCEPT ",
         };
         sql.push_str(keyword);
-        self.build_query(&set_op.right, sql)
+        self.build_query_impl(&set_op.right, sql, true)
     }
 
     fn render_comparison_operator(

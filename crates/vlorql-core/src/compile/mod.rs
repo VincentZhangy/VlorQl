@@ -612,6 +612,60 @@ mod tests {
     }
 
     #[test]
+    fn union_operand_order_by_is_suppressed() {
+        let mut right = base_plan();
+        right.order_by = Some(vec![OrderByTerm {
+            expr: column_ref("users", "id"),
+            descending: false,
+        }]);
+        right.limit = Some(5);
+
+        let mut plan = base_plan();
+        plan.set_operation = Some(SetOperationClause {
+            operation: SetOperation::UnionAll,
+            right: Box::new(right),
+        });
+
+        let compiled = PostgresCompiler
+            .compile(&validated(plan))
+            .expect("UNION ALL should compile");
+
+        assert!(
+            !compiled.sql.contains("ORDER BY"),
+            "set-operation operand must not carry ORDER BY, got: {}",
+            compiled.sql
+        );
+        assert!(
+            !compiled.sql.contains("LIMIT"),
+            "set-operation operand must not carry LIMIT, got: {}",
+            compiled.sql
+        );
+    }
+
+    #[test]
+    fn union_keeps_outer_order_by_after_set_op() {
+        let right = base_plan();
+        let mut plan = base_plan();
+        plan.set_operation = Some(SetOperationClause {
+            operation: SetOperation::UnionAll,
+            right: Box::new(right),
+        });
+        plan.order_by = Some(vec![OrderByTerm {
+            expr: column_ref("users", "id"),
+            descending: false,
+        }]);
+
+        let compiled = PostgresCompiler.compile(&validated(plan)).expect("compile");
+        let order_pos = compiled.sql.find("ORDER BY").expect("outer ORDER BY present");
+        let union_pos = compiled.sql.find("UNION ALL").expect("UNION ALL present");
+        assert!(
+            order_pos > union_pos,
+            "ORDER BY must come after UNION ALL: {}",
+            compiled.sql
+        );
+    }
+
+    #[test]
     fn postgres_compiles_select_distinct() {
         let plan = QueryPlan {
             select: vec![
