@@ -55,6 +55,7 @@ impl LlmClient for ChunkyMock {
         &self,
         _question: &str,
         _system_prompt: &str,
+        _temperature: Option<f32>,
     ) -> Result<QueryPlan, VlorQLError> {
         Ok(self.plan.clone())
     }

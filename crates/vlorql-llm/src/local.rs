@@ -177,7 +177,13 @@ impl LocalClient {
     }
 
     /// Builds the JSON body sent to a vLLM `/chat/completions` endpoint.
-    fn build_vllm_body(&self, question: &str, system_prompt: &str, stream: bool) -> Value {
+    fn build_vllm_body(
+        &self,
+        question: &str,
+        system_prompt: &str,
+        stream: bool,
+        temperature: Option<f32>,
+    ) -> Value {
         let response_format = if self.supports_strict_json_schema() {
             json!({
                 "type": "json_schema",
@@ -196,7 +202,7 @@ impl LocalClient {
                 {"role": "user", "content": question},
             ],
             "response_format": response_format,
-            "temperature": self.config.temperature,
+            "temperature": temperature.unwrap_or(self.config.temperature),
             "max_tokens": self.config.max_tokens,
         });
         if stream {
@@ -206,7 +212,13 @@ impl LocalClient {
     }
 
     /// Builds the JSON body sent to an Ollama `/api/chat` endpoint.
-    fn build_ollama_body(&self, question: &str, system_prompt: &str, stream: bool) -> Value {
+    fn build_ollama_body(
+        &self,
+        question: &str,
+        system_prompt: &str,
+        stream: bool,
+        temperature: Option<f32>,
+    ) -> Value {
         let format_value = if self.supports_strict_json_schema() {
             compact_query_plan_schema()
         } else {
@@ -221,17 +233,27 @@ impl LocalClient {
             "format": format_value,
             "stream": stream,
             "options": {
-                "temperature": self.config.temperature,
+                "temperature": temperature.unwrap_or(self.config.temperature),
                 "num_predict": self.config.max_tokens,
             },
         })
     }
 
     /// Builds the request body for the active backend.
-    fn build_request_body(&self, question: &str, system_prompt: &str, stream: bool) -> Value {
+    fn build_request_body(
+        &self,
+        question: &str,
+        system_prompt: &str,
+        stream: bool,
+        temperature: Option<f32>,
+    ) -> Value {
         match self.backend {
-            LocalBackend::VLLM => self.build_vllm_body(question, system_prompt, stream),
-            LocalBackend::Ollama => self.build_ollama_body(question, system_prompt, stream),
+            LocalBackend::VLLM => {
+                self.build_vllm_body(question, system_prompt, stream, temperature)
+            }
+            LocalBackend::Ollama => {
+                self.build_ollama_body(question, system_prompt, stream, temperature)
+            }
         }
     }
 
@@ -241,7 +263,13 @@ impl LocalClient {
     /// (typically HTTP 400 or 422). The fallback uses
     /// `response_format.type = "json_object"` for vLLM and `format = "json"`
     /// for Ollama.
-    fn build_fallback_body(&self, question: &str, system_prompt: &str, stream: bool) -> Value {
+    fn build_fallback_body(
+        &self,
+        question: &str,
+        system_prompt: &str,
+        stream: bool,
+        temperature: Option<f32>,
+    ) -> Value {
         match self.backend {
             LocalBackend::VLLM => {
                 let mut body = json!({
@@ -251,7 +279,7 @@ impl LocalClient {
                         {"role": "user", "content": question},
                     ],
                     "response_format": {"type": "json_object"},
-                    "temperature": self.config.temperature,
+                    "temperature": temperature.unwrap_or(self.config.temperature),
                     "max_tokens": self.config.max_tokens,
                 });
                 if stream {
@@ -268,7 +296,7 @@ impl LocalClient {
                 "format": "json",
                 "stream": stream,
                 "options": {
-                    "temperature": self.config.temperature,
+                    "temperature": temperature.unwrap_or(self.config.temperature),
                     "num_predict": self.config.max_tokens,
                 },
             }),
@@ -333,8 +361,9 @@ impl LlmClient for LocalClient {
         &self,
         question: &str,
         system_prompt: &str,
+        temperature: Option<f32>,
     ) -> Result<QueryPlan, VlorQLError> {
-        let primary = self.build_request_body(question, system_prompt, false);
+        let primary = self.build_request_body(question, system_prompt, false, temperature);
         let max_attempts = self.max_attempts();
         let mut last_error: Option<VlorQLError> = None;
         let mut body = primary;
@@ -351,7 +380,8 @@ impl LlmClient for LocalClient {
                             backend = self.backend.label(),
                             "structured-output request rejected; retrying with json_object mode"
                         );
-                        body = self.build_fallback_body(question, system_prompt, false);
+                        body =
+                            self.build_fallback_body(question, system_prompt, false, temperature);
                         fallback_used = true;
                         did_fallback = true;
                     }
@@ -393,7 +423,7 @@ impl LlmClient for LocalClient {
         system_prompt: String,
     ) -> Result<Box<dyn Stream<Item = Result<String, VlorQLError>> + Send + Unpin>, VlorQLError>
     {
-        let body = self.build_request_body(&question, &system_prompt, true);
+        let body = self.build_request_body(&question, &system_prompt, true, None);
         let endpoint = self.endpoint();
         let mut builder = self.client.post(&endpoint).json(&body);
         if matches!(self.backend, LocalBackend::VLLM) {
@@ -902,7 +932,7 @@ mod tests {
             ..local_config(LlmProvider::Vllm, "Qwen2.5-7B-Instruct")
         };
         let client = LocalClient::new(config).expect("client should build");
-        let request_body = client.build_request_body("show users", "system", false);
+        let request_body = client.build_request_body("show users", "system", false, None);
         assert_eq!(request_body["model"], "Qwen2.5-7B-Instruct");
         assert_eq!(request_body["response_format"]["type"], "json_schema");
         assert_eq!(
@@ -924,7 +954,7 @@ mod tests {
         assert_eq!(messages[1]["content"], "show users");
 
         let actual = client
-            .generate_plan("show users", "system")
+            .generate_plan("show users", "system", None)
             .await
             .expect("plan should parse");
         assert_eq!(actual, expected);
@@ -952,7 +982,7 @@ mod tests {
         };
         let client = LocalClient::new(config).expect("client should build");
         let actual = client
-            .generate_plan("q", "s")
+            .generate_plan("q", "s", None)
             .await
             .expect("plan should parse");
         assert_eq!(actual, expected);
@@ -989,7 +1019,7 @@ mod tests {
         };
         let client = LocalClient::new(config).expect("client should build");
         let actual = client
-            .generate_plan("q", "s")
+            .generate_plan("q", "s", None)
             .await
             .expect("fallback should succeed");
         assert_eq!(actual, expected);
@@ -1033,7 +1063,7 @@ mod tests {
             ..local_config(LlmProvider::Vllm, "Qwen2.5-7B-Instruct")
         };
         let client = LocalClient::new(config).expect("client should build");
-        let body = client.build_request_body("hi", "system", true);
+        let body = client.build_request_body("hi", "system", true, None);
         assert_eq!(body["stream"], true);
 
         let mut stream = client
@@ -1096,7 +1126,7 @@ mod tests {
             ..local_config(LlmProvider::Ollama, "llama3.2")
         };
         let client = LocalClient::new(config).expect("client should build");
-        let request_body = client.build_request_body("show users", "system", false);
+        let request_body = client.build_request_body("show users", "system", false, None);
         assert_eq!(request_body["model"], "llama3.2");
         assert_eq!(request_body["stream"], false);
         assert!(
@@ -1107,7 +1137,7 @@ mod tests {
         assert_eq!(request_body["options"]["num_predict"], 1024);
 
         let actual = client
-            .generate_plan("show users", "system")
+            .generate_plan("show users", "system", None)
             .await
             .expect("plan should parse");
         assert_eq!(actual, expected);
@@ -1137,10 +1167,10 @@ mod tests {
             .extra
             .insert("strict_json_schema".to_owned(), Value::Bool(false));
         let client = LocalClient::new(config).expect("client should build");
-        let request_body = client.build_request_body("q", "s", false);
+        let request_body = client.build_request_body("q", "s", false, None);
         assert_eq!(request_body["format"], "json");
         let actual = client
-            .generate_plan("q", "s")
+            .generate_plan("q", "s", None)
             .await
             .expect("plan should parse");
         assert_eq!(actual, expected);
@@ -1170,7 +1200,7 @@ mod tests {
         };
         let client = LocalClient::new(config).expect("client should build");
         let actual = client
-            .generate_plan("q", "s")
+            .generate_plan("q", "s", None)
             .await
             .expect("ollama plan should parse");
         assert_eq!(actual, expected);
@@ -1199,7 +1229,7 @@ mod tests {
         };
         let client = LocalClient::new(config).expect("client should build");
         let error = client
-            .generate_plan("q", "s")
+            .generate_plan("q", "s", None)
             .await
             .expect_err("empty content should fail");
         assert_eq!(error.error_code(), "L003");
@@ -1221,7 +1251,7 @@ mod tests {
         };
         let client = LocalClient::new(config).expect("client should build");
         let error = client
-            .generate_plan("q", "s")
+            .generate_plan("q", "s", None)
             .await
             .expect_err("500 should be reported");
         assert_eq!(error.error_code(), "L001");
@@ -1322,7 +1352,7 @@ mod tests {
         };
         let client = LocalClient::new(config).expect("client should build");
         let error = client
-            .generate_plan("q", "s")
+            .generate_plan("q", "s", None)
             .await
             .expect_err("dead endpoint should fail");
         assert!(

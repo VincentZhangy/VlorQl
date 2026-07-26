@@ -49,6 +49,11 @@ pub use vlorql_llm::{
 
 const DEFAULT_MAX_RETRIES: usize = 2;
 
+/// Maximum number of validation errors surfaced in a single retry
+/// feedback message. Smaller models degrade when flooded with every
+/// error at once, so the feedback is capped and the remainder summarised.
+const MAX_RETRY_FEEDBACK_ERRORS: usize = 3;
+
 /// One item in the high-level stream emitted by [`VlorQl::query_stream`].
 ///
 /// The facade first emits [`StreamEvent::TextChunk`] values as the LLM
@@ -217,7 +222,11 @@ impl VlorQl {
 
             let mut llm_question = question.to_owned();
             for attempt in 0..=self.max_retries {
-                let plan = match client.generate_plan(&llm_question, &system_prompt).await {
+                let temperature = retry_temperature(client.config().temperature, attempt);
+                let plan = match client
+                    .generate_plan(&llm_question, &system_prompt, temperature)
+                    .await
+                {
                     Ok(plan) => plan,
                     Err(e) if e.is_retryable() && attempt < self.max_retries => {
                         llm_question = format_retry_question_str(&llm_question, &e);
@@ -299,7 +308,7 @@ impl VlorQl {
                             return Err(validation_errors_to_error(errors));
                         }
 
-                        llm_question = format_retry_question(question, &errors);
+                        llm_question = format_retry_question(question, &errors, attempt);
                     }
                 }
             }
@@ -813,6 +822,17 @@ fn parse_dialect_name(name: &str) -> Result<DialectProfile, VlorQLError> {
     })
 }
 
+/// Sampling temperature for retry `attempt` (0 = first call). The first
+/// call keeps the configured default (deterministic); each retry nudges
+/// the temperature up so the model can escape a repeated bad output.
+fn retry_temperature(base: f32, attempt: usize) -> Option<f32> {
+    if attempt == 0 {
+        None
+    } else {
+        Some((base + 0.2 * attempt as f32).min(1.0))
+    }
+}
+
 fn format_retry_question_str(question: &str, error: &VlorQLError) -> String {
     let feedback = error.to_string();
     let hint = match error {
@@ -874,15 +894,24 @@ fn format_retry_question_str(question: &str, error: &VlorQLError) -> String {
     )
 }
 
-fn format_retry_question(original_question: &str, errors: &ValidationErrors) -> String {
-    let feedback = errors
-        .as_slice()
+fn format_retry_question(
+    original_question: &str,
+    errors: &ValidationErrors,
+    attempt: usize,
+) -> String {
+    // Tiered detail: the first retry gets a terse summary, later retries surface
+    // more, capped by MAX_RETRY_FEEDBACK_ERRORS.
+    let tier_cap = (1 + attempt).min(MAX_RETRY_FEEDBACK_ERRORS);
+    let all = errors.as_slice();
+    let shown = all.len().min(tier_cap);
+    let feedback = all[..shown]
         .iter()
         .map(|error| error.to_string())
         .collect::<Vec<_>>()
         .join("; ");
-    let hints: Vec<String> = errors.as_slice().iter().filter_map(|error| {
-        match error {
+    let hints: Vec<String> = all[..shown]
+        .iter()
+        .filter_map(|error| match error {
             VlorQLError::Schema {
                 kind: SchemaErrorKind::ColumnNotFound { table, column },
                 ..
@@ -905,15 +934,21 @@ fn format_retry_question(original_question: &str, errors: &ValidationErrors) -> 
                 }
             }
             _ => None,
-        }
-    }).collect();
+        })
+        .collect();
     let hints_str = if hints.is_empty() {
         String::new()
     } else {
         format!("\n{}", hints.join("\n"))
     };
+    let omitted = all.len().saturating_sub(shown);
+    let omitted_str = if omitted > 0 {
+        format!("\n(… and {omitted} more errors omitted)")
+    } else {
+        String::new()
+    };
     format!(
-        "{original_question}\n\nThe previous QueryPlan failed validation. Correct it and return only a new JSON QueryPlan. Feedback:\n{feedback}{hints_str}"
+        "{original_question}\n\nThe previous QueryPlan failed validation. Correct it and return only a new JSON QueryPlan. Feedback:\n{feedback}{hints_str}{omitted_str}"
     )
 }
 
@@ -1057,6 +1092,59 @@ mod tests {
     };
     use vlorql_llm::MockLlmClient;
 
+    #[test]
+    fn retry_feedback_is_truncated_when_many_errors() {
+        let errs: Vec<VlorQLError> = (0..5)
+            .map(|i| {
+                VlorQLError::schema(
+                    SchemaErrorKind::ColumnNotFound {
+                        table: "t".to_owned(),
+                        column: format!("c{i}"),
+                    },
+                    serde_json::json!({"table": "t", "column": format!("c{i}")}),
+                )
+            })
+            .collect();
+        let errors = ValidationErrors(errs);
+        let q = format_retry_question("q", &errors, 2);
+        assert!(
+            q.contains("c0") && q.contains("c1") && q.contains("c2"),
+            "first 3: {q}"
+        );
+        assert!(!q.contains("c4"), "not the 5th: {q}");
+        assert!(q.contains("2 more"), "omitted count: {q}");
+    }
+
+    #[test]
+    fn retry_temperature_keeps_default_on_first_attempt_then_escalates() {
+        assert_eq!(retry_temperature(0.0, 0), None);
+        assert_eq!(retry_temperature(0.0, 1), Some(0.2));
+        assert_eq!(retry_temperature(0.0, 2), Some(0.4));
+        assert!(retry_temperature(0.9, 3).expect("retry should escalate") <= 1.0);
+    }
+
+    #[test]
+    fn retry_feedback_is_tiered_by_attempt() {
+        let errs: Vec<VlorQLError> = (0..5)
+            .map(|i| {
+                VlorQLError::schema(
+                    SchemaErrorKind::ColumnNotFound {
+                        table: "t".to_owned(),
+                        column: format!("c{i}"),
+                    },
+                    serde_json::json!({"table": "t", "column": format!("c{i}")}),
+                )
+            })
+            .collect();
+        let errors = ValidationErrors(errs);
+        let first = format_retry_question("q", &errors, 0);
+        let later = format_retry_question("q", &errors, 2);
+        assert!(
+            first.matches("does not exist").count() < later.matches("does not exist").count(),
+            "attempt 0 terser than attempt 2:\nfirst={first}\nlater={later}"
+        );
+    }
+
     fn schema() -> Arc<SchemaSnapshot> {
         Arc::new(SchemaSnapshot::new(
             vec![TableSchema {
@@ -1189,6 +1277,7 @@ mod tests {
             &self,
             _question: &str,
             _system_prompt: &str,
+            _temperature: Option<f32>,
         ) -> Result<QueryPlan, VlorQLError> {
             self.plans
                 .lock()
@@ -1212,7 +1301,7 @@ mod tests {
             Box<dyn futures::stream::Stream<Item = Result<String, VlorQLError>> + Send + Unpin>,
             VlorQLError,
         > {
-            let plan = self.generate_plan(&question, &system_prompt).await?;
+            let plan = self.generate_plan(&question, &system_prompt, None).await?;
             let serialized = serde_json::to_string(&plan).unwrap_or_default();
             Ok(Box::new(futures::stream::iter(vec![Ok(serialized)])))
         }

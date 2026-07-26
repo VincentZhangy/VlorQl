@@ -86,7 +86,13 @@ impl AnthropicClient {
         usize::try_from(self.config.max_retries.max(1)).unwrap_or(DEFAULT_MAX_ATTEMPTS)
     }
 
-    fn build_request_body(&self, question: &str, system_prompt: &str, stream: bool) -> Value {
+    fn build_request_body(
+        &self,
+        question: &str,
+        system_prompt: &str,
+        stream: bool,
+        temperature: Option<f32>,
+    ) -> Value {
         let mut body = json!({
             "model": self.config.model,
             "max_tokens": self.config.max_tokens,
@@ -97,7 +103,7 @@ impl AnthropicClient {
                     "content": question,
                 }
             ],
-            "temperature": self.config.temperature,
+            "temperature": temperature.unwrap_or(self.config.temperature),
             "output_config": {
                 "format": {
                     "type": "json_schema",
@@ -148,9 +154,10 @@ impl LlmClient for AnthropicClient {
         &self,
         question: &str,
         system_prompt: &str,
+        temperature: Option<f32>,
     ) -> Result<QueryPlan, VlorQLError> {
         let endpoint = self.endpoint();
-        let body = self.build_request_body(question, system_prompt, false);
+        let body = self.build_request_body(question, system_prompt, false, temperature);
         let max_attempts = self.max_attempts();
         let mut last_error: Option<VlorQLError> = None;
         for attempt in 0..max_attempts {
@@ -192,7 +199,7 @@ impl LlmClient for AnthropicClient {
     ) -> Result<Box<dyn Stream<Item = Result<String, VlorQLError>> + Send + Unpin>, VlorQLError>
     {
         let endpoint = self.endpoint();
-        let body = self.build_request_body(&question, &system_prompt, true);
+        let body = self.build_request_body(&question, &system_prompt, true, None);
         let response = self
             .client
             .post(&endpoint)
@@ -374,7 +381,7 @@ mod tests {
         };
         let client = AnthropicClient::new(config).expect("client should build");
         let result = client
-            .generate_plan("hi", "system")
+            .generate_plan("hi", "system", None)
             .await
             .expect("anthropic plan should parse");
         assert_eq!(result, plan);
@@ -402,7 +409,7 @@ mod tests {
         };
         let client = AnthropicClient::new(config).expect("client should build");
         let error = client
-            .generate_plan("hi", "system")
+            .generate_plan("hi", "system", None)
             .await
             .expect_err("rate limit should be reported");
         assert_eq!(error.error_code(), "L001");
