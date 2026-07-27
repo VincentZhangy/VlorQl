@@ -323,6 +323,146 @@ fn build_complex_plan() -> ValidatedPlan {
     ValidatedPlan(Arc::new(plan))
 }
 
+/// Builds a plan whose `FROM` clause is a subquery (`SELECT … FROM (SELECT …)`).
+fn build_from_subquery_plan() -> ValidatedPlan {
+    let inner = QueryPlan {
+        select: vec![
+            Projection::Column {
+                table: Some("users".to_owned()),
+                column: "id".to_owned(),
+                alias: None,
+            },
+            Projection::Column {
+                table: Some("users".to_owned()),
+                column: "email".to_owned(),
+                alias: None,
+            },
+            Projection::Column {
+                table: Some("users".to_owned()),
+                column: "tenant_id".to_owned(),
+                alias: None,
+            },
+        ],
+        from: FromClause::table("users".to_owned(), None),
+        r#where: Some(Predicate::Comparison {
+            left: column_ref("users", "active"),
+            op: ComparisonOperator::Eq,
+            right: Expression::Literal {
+                value: json!(true),
+                data_type: DataType::Boolean,
+            },
+        }),
+        group_by: None,
+        having: None,
+        order_by: None,
+        limit: None,
+        offset: None,
+        joins: None,
+        ctes: None,
+        distinct: false,
+        distinct_on: None,
+        set_operation: None,
+    };
+
+    let plan = QueryPlan {
+        select: vec![
+            Projection::Column {
+                table: Some("sq".to_owned()),
+                column: "id".to_owned(),
+                alias: None,
+            },
+            Projection::Column {
+                table: Some("sq".to_owned()),
+                column: "email".to_owned(),
+                alias: None,
+            },
+        ],
+        from: FromClause::Subquery {
+            query: Box::new(inner),
+            alias: Some("sq".to_owned()),
+        },
+        r#where: Some(Predicate::Comparison {
+            left: column_ref("sq", "tenant_id"),
+            op: ComparisonOperator::Eq,
+            right: Expression::Literal {
+                value: json!("tenant-1"),
+                data_type: DataType::String,
+            },
+        }),
+        group_by: None,
+        having: None,
+        order_by: None,
+        limit: Some(10),
+        offset: None,
+        joins: None,
+        ctes: None,
+        distinct: false,
+        distinct_on: None,
+        set_operation: None,
+    };
+
+    ValidatedPlan(Arc::new(plan))
+}
+
+/// Builds a plan that exercises new data types (Decimal, Array, Jsonb)
+/// across projections and literal expressions.
+fn build_new_data_types_plan() -> ValidatedPlan {
+    let plan = QueryPlan {
+        select: vec![
+            Projection::Column {
+                table: Some("products".to_owned()),
+                column: "name".to_owned(),
+                alias: None,
+            },
+            Projection::Expr {
+                expression: Expression::Literal {
+                    value: json!("99.95"),
+                    data_type: DataType::Decimal,
+                },
+                alias: Some("price".to_owned()),
+            },
+            Projection::Expr {
+                expression: Expression::Literal {
+                    value: json!(["a", "b", "c"]),
+                    data_type: DataType::Array,
+                },
+                alias: Some("tags".to_owned()),
+            },
+            Projection::Expr {
+                expression: Expression::Literal {
+                    value: json!({"key": "value", "count": 42}),
+                    data_type: DataType::Jsonb,
+                },
+                alias: Some("metadata".to_owned()),
+            },
+        ],
+        from: FromClause::table("products".to_owned(), None),
+        r#where: Some(Predicate::Comparison {
+            left: Expression::Literal {
+                value: json!(true),
+                data_type: DataType::Boolean,
+            },
+            op: ComparisonOperator::Eq,
+            right: Expression::Literal {
+                value: json!(true),
+                data_type: DataType::Boolean,
+            },
+        }),
+        group_by: None,
+        having: None,
+        order_by: None,
+        limit: None,
+        offset: None,
+        joins: None,
+        ctes: None,
+        distinct: false,
+        distinct_on: None,
+        set_operation: None,
+    };
+
+    ValidatedPlan(Arc::new(plan))
+}
+
 fn bench_query_build(c: &mut Criterion) {
     let plan = build_complex_plan();
     let mut group = c.benchmark_group("query_build");
@@ -347,5 +487,58 @@ fn bench_query_build(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_query_build);
+fn bench_from_subquery(c: &mut Criterion) {
+    let plan = build_from_subquery_plan();
+    let mut group = c.benchmark_group("query_build/from_subquery");
+
+    for name in ["postgres", "sqlite"] {
+        let config = match name {
+            "postgres" => DialectConfig::default_postgres(),
+            _ => DialectConfig::default_sqlite(),
+        };
+        group.bench_with_input(
+            BenchmarkId::from_parameter(name),
+            &config,
+            |bencher, config| {
+                bencher.iter(|| {
+                    let result = QueryBuilder::new(criterion::black_box(&plan), config).build();
+                    criterion::black_box(result.expect("subquery plan should compile"))
+                })
+            },
+        );
+    }
+
+    group.finish();
+}
+
+fn bench_new_data_types(c: &mut Criterion) {
+    let plan = build_new_data_types_plan();
+    let mut group = c.benchmark_group("query_build/new_data_types");
+
+    for name in ["postgres", "sqlite"] {
+        let config = match name {
+            "postgres" => DialectConfig::default_postgres(),
+            _ => DialectConfig::default_sqlite(),
+        };
+        group.bench_with_input(
+            BenchmarkId::from_parameter(name),
+            &config,
+            |bencher, config| {
+                bencher.iter(|| {
+                    let result = QueryBuilder::new(criterion::black_box(&plan), config).build();
+                    criterion::black_box(result.expect("new-data-types plan should compile"))
+                })
+            },
+        );
+    }
+
+    group.finish();
+}
+
+criterion_group!(
+    benches,
+    bench_query_build,
+    bench_from_subquery,
+    bench_new_data_types,
+);
 criterion_main!(benches);

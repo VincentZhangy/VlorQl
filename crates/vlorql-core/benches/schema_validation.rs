@@ -4,6 +4,10 @@
 //! 5 tables and 10 columns on the hot path. The target p100 wall-clock is well
 //! under 10 ms — large enough to make `cargo bench` regressions easy to spot
 //! but tight enough to catch accidental O(n²) traversals.
+//!
+//! A second benchmark exercises the same pipeline with audit-stage (SQL-injection
+//! detection) enabled, which adds per-identifier checks against known suspicious
+//! patterns.
 
 use criterion::{Criterion, criterion_group, criterion_main};
 use std::sync::Arc;
@@ -118,5 +122,31 @@ fn bench_validate_large_schema(c: &mut Criterion) {
     });
 }
 
-criterion_group!(benches, bench_validate_large_schema);
+/// Benchmarks validation with the SQL-injection audit stage enabled.
+/// The audit stage inspects every identifier for suspicious patterns (; -- /* etc.)
+/// on top of the regular schema validation.
+fn bench_validate_with_audit(c: &mut Criterion) {
+    let schema = build_large_snapshot();
+    let dialect = DialectProfile {
+        dialect: SqlDialect::Postgres,
+        ..DialectProfile::default()
+    };
+    let pipeline =
+        ValidationPipeline::new(schema, dialect, PolicyEngine::new(PolicyConfig::default()))
+            .with_audit(true);
+    let plan = build_query_plan();
+
+    c.bench_function("validate/1000_tables_50_cols_with_audit", |bencher| {
+        bencher.iter(|| {
+            let result = pipeline.validate(&plan);
+            criterion::black_box(result.expect("plan should validate with audit"))
+        })
+    });
+}
+
+criterion_group!(
+    benches,
+    bench_validate_large_schema,
+    bench_validate_with_audit,
+);
 criterion_main!(benches);
