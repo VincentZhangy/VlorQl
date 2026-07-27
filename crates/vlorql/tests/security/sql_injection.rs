@@ -55,10 +55,7 @@ fn base_plan() -> QueryPlan {
             column: "name".to_owned(),
             alias: None,
         }],
-        from: FromClause {
-            table: "users".to_owned(),
-            alias: None,
-        },
+        from: FromClause::table("users".to_owned(), None),
         r#where: None,
         group_by: None,
         having: None,
@@ -229,10 +226,7 @@ fn unsafe_identifier_is_rejected_before_sql_is_built() {
     use vlorql_core::compile::{DialectConfig, QueryBuilder};
 
     let mut plan = base_plan();
-    plan.from = FromClause {
-        table: "users; DROP TABLE x; --".to_owned(),
-        alias: None,
-    };
+    plan.from = FromClause::table("users; DROP TABLE x; --".to_owned(), None);
     let validated = ValidatedPlan(Arc::new(plan));
     let config = DialectConfig {
         name: "postgres".to_owned(),
@@ -256,10 +250,7 @@ fn double_quoted_identifier_escapes_dangerous_characters() {
     use vlorql_core::compile::{DialectConfig, QueryBuilder};
 
     let mut plan = base_plan();
-    plan.from = FromClause {
-        table: "users\"; DROP TABLE x; --".to_owned(),
-        alias: None,
-    };
+    plan.from = FromClause::table("users\"; DROP TABLE x; --".to_owned(), None);
     let validated = ValidatedPlan(Arc::new(plan));
     let config = DialectConfig::default_postgres();
     let (sql, _params) = QueryBuilder::new(&validated, &config)

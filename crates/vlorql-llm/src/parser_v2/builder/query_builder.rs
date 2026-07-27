@@ -28,7 +28,7 @@ use super::table_builder::build_from_clause;
 ///
 /// let json = json!({"select": [{"type": "star"}], "from": {"table": "users"}});
 /// let plan = build_plan(&json).unwrap();
-/// assert_eq!(plan.from.table, "users");
+/// assert_eq!(plan.from.table_name().unwrap(), "users");
 /// ```
 pub fn build_plan(value: &Value) -> Result<QueryPlan, BuildError> {
     let obj = req_obj(value, "plan")?;
@@ -188,7 +188,7 @@ mod tests {
         });
         let plan = build_plan(&val).unwrap();
         assert_eq!(plan.select.len(), 1);
-        assert_eq!(plan.from.table, "users");
+        assert_eq!(plan.from.table_name().unwrap(), "users");
         assert!(plan.r#where.is_none());
         assert!(plan.group_by.is_none());
         assert!(plan.order_by.is_none());
@@ -214,8 +214,8 @@ mod tests {
         });
         let plan = build_plan(&val).unwrap();
         assert_eq!(plan.select.len(), 2);
-        assert_eq!(plan.from.table, "users");
-        assert_eq!(plan.from.alias, Some("u".to_owned()));
+        assert_eq!(plan.from.table_name().unwrap(), "users");
+        assert_eq!(plan.from.alias().as_deref(), Some("u"));
         assert!(plan.r#where.is_some());
         assert_eq!(plan.group_by.unwrap().len(), 1);
         assert!(plan.having.is_some());
@@ -234,7 +234,7 @@ mod tests {
         });
         let plan = build_plan(&val).unwrap();
         assert_eq!(plan.select.len(), 1);
-        assert_eq!(plan.from.table, "users");
+        assert_eq!(plan.from.table_name().unwrap(), "users");
     }
 
     #[test]
@@ -272,14 +272,14 @@ mod tests {
     fn from_canonical_str_roundtrip() {
         let input = r#"{"select":[{"type":"star"}],"from":{"table":"users"}}"#;
         let plan = from_canonical_str(input).unwrap();
-        assert_eq!(plan.from.table, "users");
+        assert_eq!(plan.from.table_name().unwrap(), "users");
     }
 
     #[test]
     fn from_canonical_value_roundtrip() {
         let val = json!({"select": [{"type": "star"}], "from": {"table": "users"}});
         let plan = from_canonical_value(&val).unwrap();
-        assert_eq!(plan.from.table, "users");
+        assert_eq!(plan.from.table_name().unwrap(), "users");
     }
 
     #[test]

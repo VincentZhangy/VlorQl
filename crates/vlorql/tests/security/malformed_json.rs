@@ -145,7 +145,7 @@ fn json_array_is_rejected_as_query_plan() {
 fn limit_as_string_is_rejected() {
     let body = r#"{
         "select": [{"type": "column", "table": "users", "column": "id", "alias": null}],
-        "from": {"table": "users", "alias": null},
+        "from": {"type": "table", "table": "users", "alias": null},
         "limit": "ten"
     }"#;
     let error = parse_plan_from_str(body).expect_err("string limit must fail");
@@ -209,7 +209,7 @@ fn from_clause_missing_table_is_rejected() {
 fn extra_top_level_field_is_rejected() {
     let body = r#"{
         "select": [{"type": "column_ref", "table": "users", "column": "id", "alias": null}],
-        "from": {"table": "users", "alias": null},
+        "from": {"type": "table", "table": "users", "alias": null},
         "extra": true
     }"#;
     let error = parse_plan_from_str(body).expect_err("extra top-level field must fail");
@@ -271,7 +271,7 @@ fn facade_rejects_malicious_json_body() {
             "column": "name",
             "alias": null
         }],
-        "from": {"table": "users", "alias": null},
+        "from": {"type": "table", "table": "users", "alias": null},
         "where": {
             "type": "comparison",
             "left": {"type": "column_ref", "table": "users", "column": "name"},
@@ -314,7 +314,7 @@ fn facade_rejects_malformed_json_via_validate_only() {
 fn facade_rejects_type_mismatch_via_validate_only() {
     let body = r#"{
         "select": [{"type": "column", "table": "users", "column": "id", "alias": null}],
-        "from": {"table": "users", "alias": null},
+        "from": {"type": "table", "table": "users", "alias": null},
         "limit": {"not": "a number"}
     }"#;
     let result: Result<QueryPlan, _> = serde_json::from_str(body);
@@ -336,10 +336,7 @@ fn valid_plan_round_trips_through_serde() {
             column: "id".to_owned(),
             alias: None,
         }],
-        from: FromClause {
-            table: "users".to_owned(),
-            alias: None,
-        },
+        from: FromClause::table("users".to_owned(), None),
         r#where: None,
         group_by: None,
         having: None,

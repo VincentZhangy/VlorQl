@@ -50,10 +50,7 @@ mod tests {
                 column: "id".to_owned(),
                 alias: None,
             }],
-            from: FromClause {
-                table: "users".to_owned(),
-                alias: None,
-            },
+            from: FromClause::table("users".to_owned(), None),
             r#where: None,
             group_by: None,
             having: None,
@@ -132,7 +129,7 @@ mod tests {
     #[test]
     fn builder_compiles_join_group_having_and_binary_expression() {
         let mut plan = base_plan();
-        plan.from.alias = Some("u".to_owned());
+        plan.from = FromClause::table("users".to_owned(), Some("u".to_owned()));
         plan.select = vec![
             Projection::Column {
                 table: Some("u".to_owned()),
@@ -150,10 +147,7 @@ mod tests {
         ];
         plan.joins = Some(vec![JoinClause {
             join_type: JoinType::Left,
-            right_table: FromClause {
-                table: "accounts".to_owned(),
-                alias: Some("a".to_owned()),
-            },
+            right_table: FromClause::table("accounts".to_owned(), Some("a".to_owned())),
             on: Predicate::Comparison {
                 left: column_ref("u", "id"),
                 op: ComparisonOperator::Eq,
@@ -235,10 +229,7 @@ mod tests {
             right: literal(json!(true), DataType::Boolean),
         });
         let mut plan = base_plan();
-        plan.from = FromClause {
-            table: "active_users".to_owned(),
-            alias: None,
-        };
+        plan.from = FromClause::table("active_users".to_owned(), None);
         plan.select = vec![Projection::Column {
             table: Some("active_users".to_owned()),
             column: "id".to_owned(),
@@ -450,10 +441,7 @@ mod tests {
                     alias: Some("rn".to_owned()),
                 },
             ],
-            from: FromClause {
-                table: "users".to_owned(),
-                alias: None,
-            },
+            from: FromClause::table("users".to_owned(), None),
             r#where: None,
             group_by: None,
             having: None,
@@ -505,10 +493,7 @@ mod tests {
                     alias: Some("running_total".to_owned()),
                 },
             ],
-            from: FromClause {
-                table: "users".to_owned(),
-                alias: None,
-            },
+            from: FromClause::table("users".to_owned(), None),
             r#where: None,
             group_by: None,
             having: None,
@@ -545,10 +530,7 @@ mod tests {
                     alias: None,
                 },
             ],
-            from: FromClause {
-                table: "users".to_owned(),
-                alias: None,
-            },
+            from: FromClause::table("users".to_owned(), None),
             r#where: Some(Predicate::Comparison {
                 left: column_ref("users", "id"),
                 op: ComparisonOperator::Gt,
@@ -578,10 +560,7 @@ mod tests {
                     alias: None,
                 },
             ],
-            from: FromClause {
-                table: "users".to_owned(),
-                alias: None,
-            },
+            from: FromClause::table("users".to_owned(), None),
             r#where: Some(Predicate::Comparison {
                 left: column_ref("users", "id"),
                 op: ComparisonOperator::Lte,
@@ -679,10 +658,7 @@ mod tests {
             }],
             distinct: true,
             distinct_on: None,
-            from: FromClause {
-                table: "users".to_owned(),
-                alias: None,
-            },
+            from: FromClause::table("users".to_owned(), None),
             r#where: None,
             group_by: None,
             having: None,
@@ -711,10 +687,7 @@ mod tests {
                 column: "total".to_owned(),
                 alias: None,
             }],
-            from: FromClause {
-                table: "orders".to_owned(),
-                alias: Some("o".to_owned()),
-            },
+            from: FromClause::table("orders".to_owned(), Some("o".to_owned())),
             r#where: None,
             group_by: None,
             having: None,
@@ -742,6 +715,67 @@ mod tests {
         assert!(
             compiled.sql.contains(r#"ORDER BY "o"."total""#),
             "CTE ORDER BY must resolve the table alias to \"o\"; got: {}",
+            compiled.sql
+        );
+    }
+
+    #[test]
+    fn compiles_subquery_in_from() {
+        let inner = QueryPlan {
+            select: vec![Projection::Column {
+                table: None,
+                column: "id".to_owned(),
+                alias: None,
+            }],
+            from: FromClause::table("users", None),
+            r#where: None,
+            group_by: None,
+            having: None,
+            order_by: None,
+            limit: None,
+            offset: None,
+            joins: None,
+            ctes: None,
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,
+        };
+
+        let outer = QueryPlan {
+            select: vec![Projection::Star { table: None }],
+            from: FromClause::Subquery {
+                query: Box::new(inner),
+                alias: Some("sub".to_owned()),
+            },
+            r#where: None,
+            group_by: None,
+            having: None,
+            order_by: None,
+            limit: None,
+            offset: None,
+            joins: None,
+            ctes: None,
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,
+        };
+
+        let compiled = PostgresCompiler
+            .compile(&validated(outer))
+            .expect("compile");
+        assert!(
+            compiled.sql.contains("FROM ("),
+            "Should contain FROM ( for subquery; got: {}",
+            compiled.sql
+        );
+        assert!(
+            compiled.sql.contains("SELECT"),
+            "Should contain SELECT for inner query; got: {}",
+            compiled.sql
+        );
+        assert!(
+            compiled.sql.contains("AS "),
+            "Should contain AS alias; got: {}",
             compiled.sql
         );
     }

@@ -25,13 +25,13 @@ use std::sync::Arc;
 ///     select: vec![Projection::Column {
 ///         table: None, column: "id".to_owned(), alias: None,
 ///     }],
-///     from: FromClause { table: "users".to_owned(), alias: None },
+///     from: FromClause::table("users".to_owned(), None),
 ///     r#where: None, group_by: None, having: None,
 ///     order_by: None, limit: None, offset: None,
 ///     joins: None, ctes: None, distinct: false, distinct_on: None, set_operation: None,
 /// };
 /// let validated = ValidatedPlan(Arc::new(plan));
-/// assert_eq!(validated.as_plan().from.table, "users");
+/// assert_eq!(validated.as_plan().from.table_name().unwrap(), "users");
 /// ```
 #[derive(Debug, Clone, PartialEq)]
 pub struct ValidatedPlan(pub Arc<QueryPlan>);
@@ -74,14 +74,14 @@ impl Deref for ValidatedPlan {
 ///     select: vec![Projection::Column {
 ///         table: None, column: "id".to_owned(), alias: None,
 ///     }],
-///     from: FromClause { table: "users".to_owned(), alias: None },
+///     from: FromClause::table("users".to_owned(), None),
 ///     r#where: None, group_by: None, having: None,
 ///     order_by: None, limit: None, offset: None,
 ///     joins: None, ctes: None, distinct: false, distinct_on: None, set_operation: None,
 /// };
 /// let validated = ValidatedPlan(Arc::new(plan));
 /// let optimized = OptimizedPlan::from(validated);
-/// assert_eq!(optimized.as_plan().from.table, "users");
+/// assert_eq!(optimized.as_plan().from.table_name().unwrap(), "users");
 /// ```
 #[derive(Debug, Clone, PartialEq)]
 pub struct OptimizedPlan(ValidatedPlan);
@@ -154,7 +154,7 @@ impl Deref for OptimizedPlan {
 ///     select: vec![Projection::Column {
 ///         table: None, column: "id".to_owned(), alias: None,
 ///     }],
-///     from: FromClause { table: "users".to_owned(), alias: None },
+///     from: FromClause::table("users".to_owned(), None),
 ///     r#where: None, group_by: None, having: None,
 ///     order_by: None, limit: None, offset: None,
 ///     joins: None, ctes: None, distinct: false, distinct_on: None, set_operation: None,

@@ -123,11 +123,17 @@ impl AuditStage {
 
         // 1. Check the FROM clause.
         audit_from(&plan.from, schema, &mut report);
+        if let FromClause::Subquery { query, .. } = &plan.from {
+            let _ = self.audit(query.as_ref(), schema);
+        }
 
         // 2. Check JOIN clauses.
         if let Some(joins) = &plan.joins {
             for join in joins {
                 audit_from(&join.right_table, schema, &mut report);
+                if let FromClause::Subquery { query, .. } = &join.right_table {
+                    let _ = self.audit(query.as_ref(), schema);
+                }
             }
         }
 
@@ -225,31 +231,38 @@ fn has_suspicious_pattern(ident: &str) -> Option<&'static str> {
 
 /// Check a `FromClause` for injection patterns *and* against the schema.
 fn audit_from(from: &FromClause, schema: &Arc<SchemaSnapshot>, report: &mut AuditReport) {
-    // Injection check (always runs, before alias/lookup).
-    if let Some(pattern) = has_suspicious_pattern(&from.table) {
-        warn!(
-            "AUDIT: identifier `{}` contains suspicious pattern `{}` (FROM)",
-            from.table, pattern
-        );
-        report.warnings.push(AuditWarning {
-            kind: AuditWarningKind::SuspiciousIdentifier,
-            identifier: from.table.clone(),
-            context: pattern.to_owned(),
-            severity: Severity::Critical,
-        });
-        // Still check existence if the identifier is unsafe?  The spec
-        // says to check injection + existence, so we do both.
-    }
+    let (table_name, alias) = match from {
+        FromClause::Table { table, alias } => (Some(table.as_str()), alias.as_deref()),
+        FromClause::Subquery { .. } => (None, None),
+    };
 
-    // Existence check – skip aliases.
-    if from.alias.is_none() && schema.get_table(&from.table).is_none() {
-        warn!("AUDIT: table `{}` not found in schema (FROM)", from.table);
-        report.warnings.push(AuditWarning {
-            kind: AuditWarningKind::MissingTable,
-            identifier: from.table.clone(),
-            context: "FROM clause".to_owned(),
-            severity: Severity::Error,
-        });
+    // Injection check (always runs, before alias/lookup).
+    if let Some(table_name) = table_name {
+        if let Some(pattern) = has_suspicious_pattern(table_name) {
+            warn!(
+                "AUDIT: identifier `{}` contains suspicious pattern `{}` (FROM)",
+                table_name, pattern
+            );
+            report.warnings.push(AuditWarning {
+                kind: AuditWarningKind::SuspiciousIdentifier,
+                identifier: table_name.to_owned(),
+                context: pattern.to_owned(),
+                severity: Severity::Critical,
+            });
+            // Still check existence if the identifier is unsafe?  The spec
+            // says to check injection + existence, so we do both.
+        }
+
+        // Existence check – skip aliases.
+        if alias.is_none() && schema.get_table(table_name).is_none() {
+            warn!("AUDIT: table `{}` not found in schema (FROM)", table_name);
+            report.warnings.push(AuditWarning {
+                kind: AuditWarningKind::MissingTable,
+                identifier: table_name.to_owned(),
+                context: "FROM clause".to_owned(),
+                severity: Severity::Error,
+            });
+        }
     }
 }
 
@@ -567,10 +580,7 @@ mod tests {
                 column: "id".to_owned(),
                 alias: None,
             }],
-            from: FromClause {
-                table: "users".to_owned(),
-                alias: None,
-            },
+            from: FromClause::table("users".to_owned(), None),
             r#where: None,
             group_by: None,
             having: None,
@@ -597,7 +607,7 @@ mod tests {
     fn audit_rejects_missing_table() {
         let schema = test_schema();
         let mut plan = valid_plan();
-        plan.from.table = "nonexistent".to_owned();
+        plan.from = FromClause::table("nonexistent".to_owned(), None);
         let stage = AuditStage::new();
         let result = stage.audit(&plan, &schema);
         assert!(result.is_err(), "missing table should be rejected");
@@ -621,7 +631,7 @@ mod tests {
     fn audit_rejects_injection_pattern() {
         let schema = test_schema();
         let mut plan = valid_plan();
-        plan.from.table = "users; DROP TABLE".to_owned();
+        plan.from = FromClause::table("users; DROP TABLE".to_owned(), None);
         let stage = AuditStage::new();
         let result = stage.audit(&plan, &schema);
         assert!(result.is_err(), "injection pattern should be rejected");
@@ -665,10 +675,7 @@ mod tests {
         // FROM with an alias — should skip existence check on table name
         // because the table is looked up by its real name, not the alias.
         // Also add a column alias in the projection.
-        plan.from = FromClause {
-            table: "users".to_owned(),
-            alias: Some("u".to_owned()),
-        };
+        plan.from = FromClause::table("users".to_owned(), Some("u".to_owned()));
         plan.select = vec![Projection::Column {
             table: Some("users".to_owned()),
             column: "id".to_owned(),

@@ -63,10 +63,7 @@ mod tests {
     fn base_plan() -> QueryPlan {
         QueryPlan {
             select: vec![],
-            from: FromClause {
-                table: "users".to_owned(),
-                alias: None,
-            },
+            from: FromClause::table("users".to_owned(), None),
             r#where: None,
             group_by: None,
             having: None,

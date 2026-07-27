@@ -60,10 +60,7 @@ mod tests {
                 column: "id".to_owned(),
                 alias: None,
             }],
-            from: FromClause {
-                table: "users".to_owned(),
-                alias: None,
-            },
+            from: FromClause::table("users".to_owned(), None),
             r#where: None,
             group_by: None,
             having: None,
@@ -92,10 +89,7 @@ mod tests {
         });
         plan.joins = Some(vec![JoinClause {
             join_type: JoinType::Inner,
-            right_table: FromClause {
-                table: "missing_table".to_owned(),
-                alias: None,
-            },
+            right_table: FromClause::table("missing_table".to_owned(), None),
             on: Predicate::Comparison {
                 left: Expression::ColumnRef {
                     table: Some("users".to_owned()),
@@ -170,10 +164,7 @@ mod tests {
         });
         plan.joins = Some(vec![JoinClause {
             join_type: JoinType::Inner,
-            right_table: FromClause {
-                table: "users".to_owned(),
-                alias: Some("other".to_owned()),
-            },
+            right_table: FromClause::table("users".to_owned(), Some("other".to_owned())),
             on: Predicate::IsNull {
                 expr: Expression::ColumnRef {
                     table: Some("other".to_owned()),
@@ -230,10 +221,7 @@ mod tests {
         });
         plan.joins = Some(vec![JoinClause {
             join_type: JoinType::Inner,
-            right_table: FromClause {
-                table: "users".to_owned(),
-                alias: Some("other".to_owned()),
-            },
+            right_table: FromClause::table("users".to_owned(), Some("other".to_owned())),
             on: Predicate::Comparison {
                 left: Expression::ColumnRef {
                     table: Some("users".to_owned()),
@@ -325,10 +313,7 @@ mod tests {
                 column: "id".to_owned(),
                 alias: None,
             }],
-            from: FromClause {
-                table: "users".to_owned(),
-                alias: None,
-            },
+            from: FromClause::table("users".to_owned(), None),
             r#where: Some(Predicate::Comparison {
                 left: Expression::ColumnRef {
                     table: Some("users".to_owned()),
@@ -410,10 +395,7 @@ mod tests {
         plan.joins = Some(vec![
             JoinClause {
                 join_type: JoinType::Inner,
-                right_table: FromClause {
-                    table: "users".to_owned(),
-                    alias: Some("u2".to_owned()),
-                },
+                right_table: FromClause::table("users".to_owned(), Some("u2".to_owned())),
                 on: Predicate::IsNull {
                     expr: Expression::ColumnRef {
                         table: Some("u2".to_owned()),
@@ -423,10 +405,7 @@ mod tests {
             },
             JoinClause {
                 join_type: JoinType::Inner,
-                right_table: FromClause {
-                    table: "users".to_owned(),
-                    alias: Some("u3".to_owned()),
-                },
+                right_table: FromClause::table("users".to_owned(), Some("u3".to_owned())),
                 on: Predicate::IsNull {
                     expr: Expression::ColumnRef {
                         table: Some("u3".to_owned()),
@@ -462,10 +441,7 @@ mod tests {
                 column: "id".to_owned(),
                 alias: None,
             }],
-            from: FromClause {
-                table: "users".to_owned(),
-                alias: None,
-            },
+            from: FromClause::table("users".to_owned(), None),
             r#where: None,
             group_by: None,
             having: None,
@@ -498,10 +474,7 @@ mod tests {
         let mut plan = base_plan();
         plan.joins = Some(vec![JoinClause {
             join_type: JoinType::Inner,
-            right_table: FromClause {
-                table: "missing_table".to_owned(),
-                alias: None,
-            },
+            right_table: FromClause::table("missing_table".to_owned(), None),
             on: Predicate::Comparison {
                 left: Expression::ColumnRef {
                     table: Some("users".to_owned()),

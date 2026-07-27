@@ -127,10 +127,7 @@ fn build_query_plan() -> QueryPlan {
                 alias: Some("order_count".to_owned()),
             },
         ],
-        from: FromClause {
-            table: "users".to_owned(),
-            alias: Some("u".to_owned()),
-        },
+        from: FromClause::table("users".to_owned(), Some("u".to_owned())),
         r#where: Some(Predicate::And {
             left: Box::new(Predicate::Comparison {
                 left: Expression::ColumnRef {
@@ -165,10 +162,7 @@ fn build_query_plan() -> QueryPlan {
         offset: None,
         joins: Some(vec![JoinClause {
             join_type: JoinType::Left,
-            right_table: FromClause {
-                table: "orders".to_owned(),
-                alias: Some("o".to_owned()),
-            },
+            right_table: FromClause::table("orders".to_owned(), Some("o".to_owned())),
             on: Predicate::Comparison {
                 left: Expression::ColumnRef {
                     table: Some("u".to_owned()),

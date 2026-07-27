@@ -9,9 +9,15 @@ pub(crate) struct QuerySource {
 
 impl From<&FromClause> for QuerySource {
     fn from(from: &FromClause) -> Self {
-        Self {
-            table: from.table.clone(),
-            alias: from.alias.clone(),
+        match from {
+            FromClause::Table { table, alias } => Self {
+                table: table.clone(),
+                alias: alias.clone(),
+            },
+            FromClause::Subquery { alias, .. } => Self {
+                table: alias.clone().unwrap_or_else(|| "<subquery>".to_owned()),
+                alias: alias.clone(),
+            },
         }
     }
 }

@@ -731,10 +731,7 @@ mod tests {
                 column: "id".to_owned(),
                 alias: None,
             }],
-            from: FromClause {
-                table: "users".to_owned(),
-                alias: Some("t1".to_owned()),
-            },
+            from: FromClause::table("users".to_owned(), Some("t1".to_owned())),
             r#where: None,
             group_by: None,
             having: None,

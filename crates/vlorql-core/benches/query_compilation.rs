@@ -66,10 +66,7 @@ fn leaf_cte() -> QueryPlan {
                 alias: None,
             },
         ],
-        from: FromClause {
-            table: "orders".to_owned(),
-            alias: None,
-        },
+        from: FromClause::table("orders".to_owned(), None),
         r#where: Some(Predicate::Comparison {
             left: column_ref("orders", "status"),
             op: ComparisonOperator::Eq,
@@ -108,10 +105,7 @@ fn orders_with_customers_cte() -> QueryPlan {
                 alias: None,
             },
         ],
-        from: FromClause {
-            table: "paid_orders".to_owned(),
-            alias: Some("o".to_owned()),
-        },
+        from: FromClause::table("paid_orders".to_owned(), Some("o".to_owned())),
         r#where: Some(Predicate::Comparison {
             left: column_ref("c", "active"),
             op: ComparisonOperator::Eq,
@@ -127,10 +121,7 @@ fn orders_with_customers_cte() -> QueryPlan {
         offset: None,
         joins: Some(vec![JoinClause {
             join_type: JoinType::Inner,
-            right_table: FromClause {
-                table: "customers".to_owned(),
-                alias: Some("c".to_owned()),
-            },
+            right_table: FromClause::table("customers".to_owned(), Some("c".to_owned())),
             on: Predicate::Comparison {
                 left: column_ref("o", "customer_id"),
                 op: ComparisonOperator::Eq,
@@ -174,10 +165,7 @@ fn build_complex_plan() -> ValidatedPlan {
                 alias: Some("revenue".to_owned()),
             },
         ],
-        from: FromClause {
-            table: "regional_orders".to_owned(),
-            alias: Some("r".to_owned()),
-        },
+        from: FromClause::table("regional_orders".to_owned(), Some("r".to_owned())),
         r#where: Some(Predicate::And {
             left: Box::new(Predicate::Or {
                 left: Box::new(Predicate::In {
@@ -233,10 +221,7 @@ fn build_complex_plan() -> ValidatedPlan {
         joins: Some(vec![
             JoinClause {
                 join_type: JoinType::Left,
-                right_table: FromClause {
-                    table: "payments".to_owned(),
-                    alias: Some("p".to_owned()),
-                },
+                right_table: FromClause::table("payments".to_owned(), Some("p".to_owned())),
                 on: Predicate::Comparison {
                     left: column_ref("r", "order_id"),
                     op: ComparisonOperator::Eq,
@@ -245,10 +230,7 @@ fn build_complex_plan() -> ValidatedPlan {
             },
             JoinClause {
                 join_type: JoinType::Right,
-                right_table: FromClause {
-                    table: "subscriptions".to_owned(),
-                    alias: Some("s".to_owned()),
-                },
+                right_table: FromClause::table("subscriptions".to_owned(), Some("s".to_owned())),
                 on: Predicate::Comparison {
                     left: column_ref("r", "customer_name"),
                     op: ComparisonOperator::Eq,
@@ -257,10 +239,7 @@ fn build_complex_plan() -> ValidatedPlan {
             },
             JoinClause {
                 join_type: JoinType::Full,
-                right_table: FromClause {
-                    table: "tiers".to_owned(),
-                    alias: Some("t".to_owned()),
-                },
+                right_table: FromClause::table("tiers".to_owned(), Some("t".to_owned())),
                 on: Predicate::Comparison {
                     left: column_ref("s", "tier"),
                     op: ComparisonOperator::Eq,
@@ -269,10 +248,7 @@ fn build_complex_plan() -> ValidatedPlan {
             },
             JoinClause {
                 join_type: JoinType::Inner,
-                right_table: FromClause {
-                    table: "addresses".to_owned(),
-                    alias: Some("a".to_owned()),
-                },
+                right_table: FromClause::table("addresses".to_owned(), Some("a".to_owned())),
                 on: Predicate::Comparison {
                     left: column_ref("r", "customer_name"),
                     op: ComparisonOperator::Eq,
@@ -295,10 +271,7 @@ fn build_complex_plan() -> ValidatedPlan {
                         column: "id".to_owned(),
                         alias: Some("order_id".to_owned()),
                     }],
-                    from: FromClause {
-                        table: "orders".to_owned(),
-                        alias: None,
-                    },
+                    from: FromClause::table("orders".to_owned(), None),
                     r#where: Some(Predicate::Comparison {
                         left: column_ref("orders", "total"),
                         op: ComparisonOperator::Gt,
@@ -325,10 +298,7 @@ fn build_complex_plan() -> ValidatedPlan {
                         column: "id".to_owned(),
                         alias: Some("customer_id".to_owned()),
                     }],
-                    from: FromClause {
-                        table: "customers".to_owned(),
-                        alias: None,
-                    },
+                    from: FromClause::table("customers".to_owned(), None),
                     r#where: Some(Predicate::IsNull {
                         expr: column_ref("customers", "deleted_at"),
                     }),

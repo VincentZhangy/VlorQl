@@ -35,10 +35,7 @@ mod tests {
                 column: "id".to_owned(),
                 alias: None,
             }],
-            from: FromClause {
-                table: "users".to_owned(),
-                alias: None,
-            },
+            from: FromClause::table("users".to_owned(), None),
             r#where: Some(Predicate::Comparison {
                 left: Expression::ColumnRef {
                     table: Some("users".to_owned()),
@@ -178,7 +175,7 @@ mod tests {
                 "column": "id",
                 "alias": null
             }],
-            "from": {"table": "users", "alias": null}
+            "from": {"type": "table", "table": "users", "alias": null}
         });
         let plan: QueryPlan = from_value(body).expect("optional fields may be omitted");
         assert!(plan.r#where.is_none());
@@ -204,10 +201,7 @@ mod tests {
                 column: "id".to_owned(),
                 alias: None,
             }],
-            from: FromClause {
-                table: "users".to_owned(),
-                alias: None,
-            },
+            from: FromClause::table("users".to_owned(), None),
             r#where: None,
             group_by: None,
             having: None,
@@ -229,7 +223,7 @@ mod tests {
 
     #[test]
     fn from_clause_rejects_unknown_fields() {
-        let body = json!({"table": "users", "alias": null, "sneaky": 1});
+        let body = json!({"type": "table", "table": "users", "alias": null, "sneaky": 1});
         let error = from_value::<FromClause>(body).expect_err("unknown FromClause field");
         assert!(error.to_string().contains("sneaky") || error.to_string().contains("unknown"));
     }

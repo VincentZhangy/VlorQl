@@ -145,10 +145,7 @@ fn build_test_plan() -> QueryPlan {
                 alias: Some("total".to_owned()),
             },
         ],
-        from: FromClause {
-            table: "users".to_owned(),
-            alias: None,
-        },
+        from: FromClause::table("users".to_owned(), None),
         r#where: Some(Predicate::Comparison {
             left: Expression::ColumnRef {
                 table: Some("orders".to_owned()),
@@ -174,10 +171,7 @@ fn build_test_plan() -> QueryPlan {
         offset: None,
         joins: Some(vec![JoinClause {
             join_type: JoinType::Inner,
-            right_table: FromClause {
-                table: "orders".to_owned(),
-                alias: None,
-            },
+            right_table: FromClause::table("orders".to_owned(), None),
             on: Predicate::Comparison {
                 left: Expression::ColumnRef {
                     table: Some("users".to_owned()),

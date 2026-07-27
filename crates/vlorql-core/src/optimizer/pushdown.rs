@@ -28,7 +28,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::errors::VlorQLError;
-use crate::schema::{Expression, JoinType, Predicate, QueryPlan};
+use crate::schema::{Expression, FromClause, JoinType, Predicate, QueryPlan};
 
 use super::analyze::{combine_conjuncts, referenced_tables, split_conjuncts};
 use super::rules::PlanRewriter;
@@ -62,7 +62,7 @@ impl PlanRewriter for PredicatePushdown {
     /// let pushdown = PredicatePushdown;
     /// let plan = QueryPlan {
     ///     select: vec![Projection::Star { table: None }],
-    ///     from: FromClause { table: "t".to_owned(), alias: None },
+    ///     from: FromClause::table("t".to_owned(), None),
     ///     r#where: None, group_by: None, having: None,
     ///     order_by: None, limit: None, offset: None,
     ///     joins: None, ctes: None, distinct: false,
@@ -161,15 +161,25 @@ fn push_plan(plan: &QueryPlan) -> QueryPlan {
                 continue;
             };
 
-            let inner_table = cte.query.from.table.as_str();
+            let inner_table = cte.query.from.table_name();
+            if inner_table.is_none() {
+                // Subquery in FROM — cannot cascade; keep all conditions local.
+                local_injections.push((cte.name.clone(), conjuncts.clone()));
+                continue;
+            }
+            let inner_table = inner_table.unwrap();
             if cte_names_set.contains(inner_table) {
-                let inner_alias = cte.query.from.alias.as_deref().unwrap_or(inner_table);
+                let inner_alias = cte
+                    .query
+                    .from
+                    .alias()
+                    .unwrap_or_else(|| inner_table.to_owned());
 
                 let mut cascade: Vec<Predicate> = Vec::new();
                 let mut local: Vec<Predicate> = Vec::new();
 
                 for conjunct in conjuncts {
-                    let translated = translate_qualifier(conjunct, &cte.name, inner_alias);
+                    let translated = translate_qualifier(conjunct, &cte.name, &inner_alias);
 
                     let mut inner_alias_map = HashMap::new();
                     inner_alias_map.insert(inner_alias.to_owned(), inner_table.to_owned());
@@ -269,17 +279,21 @@ fn single_cte_target(
 fn cte_relation_aliases(plan: &QueryPlan, cte_names: &HashSet<&str>) -> HashMap<String, String> {
     let mut map = HashMap::new();
 
-    let mut record = |table: &str, alias: &Option<String>| {
+    let mut record = |table: &str, alias: Option<&str>| {
         if cte_names.contains(table) {
-            let key = alias.clone().unwrap_or_else(|| table.to_owned());
+            let key = alias.unwrap_or(table).to_owned();
             map.insert(key, table.to_owned());
         }
     };
 
-    record(&plan.from.table, &plan.from.alias);
+    if let Some(table) = plan.from.table_name() {
+        record(table, plan.from.alias().as_deref());
+    }
     if let Some(joins) = plan.joins.as_ref() {
         for join in joins {
-            record(&join.right_table.table, &join.right_table.alias);
+            if let Some(table) = join.right_table.table_name() {
+                record(table, join.right_table.alias().as_deref());
+            }
         }
     }
 
@@ -298,18 +312,20 @@ fn outer_join_protected_aliases(plan: &QueryPlan) -> HashSet<String> {
         return protected;
     };
 
-    let from_key = plan
-        .from
-        .alias
-        .clone()
-        .unwrap_or_else(|| plan.from.table.clone());
+    let from_key = match &plan.from {
+        FromClause::Table { table, alias } => alias.clone().unwrap_or_else(|| table.clone()),
+        FromClause::Subquery { alias, .. } => {
+            alias.clone().unwrap_or_else(|| "<subquery>".to_owned())
+        }
+    };
 
     for (index, join) in joins.iter().enumerate() {
-        let right_key = join
-            .right_table
-            .alias
-            .clone()
-            .unwrap_or_else(|| join.right_table.table.clone());
+        let right_key = match &join.right_table {
+            FromClause::Table { table, alias } => alias.clone().unwrap_or_else(|| table.clone()),
+            FromClause::Subquery { alias, .. } => {
+                alias.clone().unwrap_or_else(|| "<subquery>".to_owned())
+            }
+        };
         match join.join_type {
             JoinType::Left => {
                 protected.insert(right_key);
@@ -318,26 +334,28 @@ fn outer_join_protected_aliases(plan: &QueryPlan) -> HashSet<String> {
                 // Everything to the left of this join is null-supplying.
                 protected.insert(from_key.clone());
                 for earlier in joins.iter().take(index) {
-                    protected.insert(
-                        earlier
-                            .right_table
-                            .alias
-                            .clone()
-                            .unwrap_or_else(|| earlier.right_table.table.clone()),
-                    );
+                    protected.insert(match &earlier.right_table {
+                        FromClause::Table { table, alias } => {
+                            alias.clone().unwrap_or_else(|| table.clone())
+                        }
+                        FromClause::Subquery { alias, .. } => {
+                            alias.clone().unwrap_or_else(|| "<subquery>".to_owned())
+                        }
+                    });
                 }
             }
             JoinType::Full => {
                 protected.insert(from_key.clone());
                 protected.insert(right_key);
                 for earlier in joins.iter().take(index) {
-                    protected.insert(
-                        earlier
-                            .right_table
-                            .alias
-                            .clone()
-                            .unwrap_or_else(|| earlier.right_table.table.clone()),
-                    );
+                    protected.insert(match &earlier.right_table {
+                        FromClause::Table { table, alias } => {
+                            alias.clone().unwrap_or_else(|| table.clone())
+                        }
+                        FromClause::Subquery { alias, .. } => {
+                            alias.clone().unwrap_or_else(|| "<subquery>".to_owned())
+                        }
+                    });
                 }
             }
             JoinType::Inner | JoinType::Cross => {}
@@ -449,10 +467,7 @@ mod tests {
             recursive: false,
             query: Box::new(QueryPlan {
                 select: vec![select_col("orders", "id"), select_col("orders", "amount")],
-                from: FromClause {
-                    table: "orders".to_owned(),
-                    alias: None,
-                },
+                from: FromClause::table("orders".to_owned(), None),
                 r#where: None,
                 group_by: None,
                 having: None,
@@ -468,10 +483,7 @@ mod tests {
         };
         QueryPlan {
             select: vec![select_col("active", "id")],
-            from: FromClause {
-                table: "active".to_owned(),
-                alias: None,
-            },
+            from: FromClause::table("active".to_owned(), None),
             r#where: Some(outer_where),
             group_by: None,
             having: None,
@@ -526,17 +538,11 @@ mod tests {
         // Outer query LEFT JOINs the CTE; a filter on the CTE must not be
         // pushed because that would drop null-extended rows.
         let mut plan = plan_with_cte(gt(col(Some("active"), "amount"), lit(100)));
-        plan.from = FromClause {
-            table: "base".to_owned(),
-            alias: None,
-        };
+        plan.from = FromClause::table("base".to_owned(), None);
         plan.select = vec![select_col("base", "id")];
         plan.joins = Some(vec![JoinClause {
             join_type: JoinType::Left,
-            right_table: FromClause {
-                table: "active".to_owned(),
-                alias: None,
-            },
+            right_table: FromClause::table("active".to_owned(), None),
             on: gt(col(Some("base"), "id"), col(Some("active"), "id")),
         }]);
 

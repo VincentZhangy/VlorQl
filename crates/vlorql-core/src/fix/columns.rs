@@ -421,10 +421,7 @@ mod tests {
             ],
             distinct: false,
             distinct_on: None,
-            from: crate::schema::FromClause {
-                table: "products".to_owned(),
-                alias: None,
-            },
+            from: crate::schema::FromClause::table("products".to_owned(), None),
             r#where: None,
             group_by: Some(vec![Expression::ColumnRef {
                 table: Some("products".to_owned()),
@@ -489,10 +486,7 @@ mod tests {
             }],
             distinct: false,
             distinct_on: None,
-            from: crate::schema::FromClause {
-                table: "products".to_owned(),
-                alias: None,
-            },
+            from: crate::schema::FromClause::table("products".to_owned(), None),
             r#where: None,
             group_by: None,
             having: None,

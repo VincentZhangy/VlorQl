@@ -12,7 +12,9 @@
 //! that the validator can focus on real errors.  When in doubt, it
 //! does nothing and lets the validator report the issue.
 
-use vlorql_core::schema::{Expression, InTarget, JoinClause, Predicate, Projection, QueryPlan};
+use vlorql_core::schema::{
+    Expression, FromClause, InTarget, JoinClause, Predicate, Projection, QueryPlan,
+};
 
 /// Run all auto-fix rules on a [`QueryPlan`] recursively
 /// (including CTE subqueries).
@@ -261,13 +263,13 @@ fn fix_missing_aliases(plan: &mut QueryPlan) -> bool {
 
 /// Collect all existing aliases from the plan tree.
 fn collect_existing_aliases(plan: &QueryPlan, aliases: &mut Vec<String>) {
-    if let Some(ref alias) = plan.from.alias {
-        aliases.push(alias.clone());
+    if let Some(alias) = plan.from.alias() {
+        aliases.push(alias.to_owned());
     }
     if let Some(ref joins) = plan.joins {
         for join in joins {
-            if let Some(ref alias) = join.right_table.alias {
-                aliases.push(alias.clone());
+            if let Some(alias) = join.right_table.alias() {
+                aliases.push(alias.to_owned());
             }
         }
     }
@@ -293,9 +295,16 @@ fn generate_alias(counter: &mut u32, used: &mut Vec<String>) -> String {
 
 /// Fix missing alias on FROM clause.
 fn fix_from_alias(plan: &mut QueryPlan, counter: &mut u32, used: &mut Vec<String>) -> bool {
-    if plan.from.alias.is_none() {
+    let needs_alias = match &plan.from {
+        FromClause::Table { alias, .. } | FromClause::Subquery { alias, .. } => alias.is_none(),
+    };
+    if needs_alias {
         let alias = generate_alias(counter, used);
-        plan.from.alias = Some(alias);
+        match &mut plan.from {
+            FromClause::Table { alias: a, .. } | FromClause::Subquery { alias: a, .. } => {
+                *a = Some(alias)
+            }
+        }
         true
     } else {
         false
@@ -304,9 +313,16 @@ fn fix_from_alias(plan: &mut QueryPlan, counter: &mut u32, used: &mut Vec<String
 
 /// Fix missing alias on a JOIN clause's right_table.
 fn fix_join_alias(join: &mut JoinClause, counter: &mut u32, used: &mut Vec<String>) -> bool {
-    if join.right_table.alias.is_none() {
+    let needs_alias = match &join.right_table {
+        FromClause::Table { alias, .. } | FromClause::Subquery { alias, .. } => alias.is_none(),
+    };
+    if needs_alias {
         let alias = generate_alias(counter, used);
-        join.right_table.alias = Some(alias);
+        match &mut join.right_table {
+            FromClause::Table { alias: a, .. } | FromClause::Subquery { alias: a, .. } => {
+                *a = Some(alias)
+            }
+        }
         true
     } else {
         false
@@ -617,10 +633,7 @@ mod tests {
     fn base_plan() -> QueryPlan {
         QueryPlan {
             select: vec![Projection::Star { table: None }],
-            from: FromClause {
-                table: "users".to_owned(),
-                alias: None,
-            },
+            from: FromClause::table("users".to_owned(), None),
             r#where: None,
             group_by: None,
             having: None,
@@ -684,7 +697,7 @@ mod tests {
     fn adds_alias_to_from() {
         let mut plan = base_plan();
         assert!(fix_missing_aliases(&mut plan));
-        assert_eq!(plan.from.alias, Some("t1".to_owned()));
+        assert_eq!(plan.from.alias(), Some("t1".to_owned()));
     }
 
     #[test]
@@ -692,10 +705,7 @@ mod tests {
         let mut plan = base_plan();
         plan.joins = Some(vec![JoinClause {
             join_type: JoinType::Inner,
-            right_table: FromClause {
-                table: "orders".to_owned(),
-                alias: None,
-            },
+            right_table: FromClause::table("orders".to_owned(), None),
             on: Predicate::Comparison {
                 left: Expression::ColumnRef {
                     table: None,
@@ -709,29 +719,26 @@ mod tests {
             },
         }]);
         assert!(fix_missing_aliases(&mut plan));
-        assert_eq!(plan.from.alias, Some("t1".to_owned()));
+        assert_eq!(plan.from.alias(), Some("t1".to_owned()));
         let join = &plan.joins.unwrap()[0];
-        assert_eq!(join.right_table.alias, Some("t2".to_owned()));
+        assert_eq!(join.right_table.alias(), Some("t2".to_owned()));
     }
 
     #[test]
     fn skips_if_alias_already_exists() {
         let mut plan = base_plan();
-        plan.from.alias = Some("u".to_owned());
+        plan.from = FromClause::table("users".to_owned(), Some("u".to_owned()));
         assert!(!fix_missing_aliases(&mut plan));
-        assert_eq!(plan.from.alias, Some("u".to_owned()));
+        assert_eq!(plan.from.alias(), Some("u".to_owned()));
     }
 
     #[test]
     fn generates_unique_aliases() {
         let mut plan = base_plan();
-        plan.from.alias = Some("t1".to_owned());
+        plan.from = FromClause::table("users".to_owned(), Some("t1".to_owned()));
         plan.joins = Some(vec![JoinClause {
             join_type: JoinType::Inner,
-            right_table: FromClause {
-                table: "orders".to_owned(),
-                alias: None,
-            },
+            right_table: FromClause::table("orders".to_owned(), None),
             on: Predicate::Comparison {
                 left: Expression::ColumnRef {
                     table: None,
@@ -747,7 +754,7 @@ mod tests {
         assert!(fix_missing_aliases(&mut plan));
         // "t1" is already used, so the join should get "t2"
         let join = &plan.joins.unwrap()[0];
-        assert_eq!(join.right_table.alias, Some("t2".to_owned()));
+        assert_eq!(join.right_table.alias(), Some("t2".to_owned()));
     }
 
     // ── fix_plan (full pipeline) ─────────────────────────────────
@@ -763,13 +770,13 @@ mod tests {
         // Empty select fixed.
         assert_eq!(plan.select.len(), 1);
         // Missing alias added.
-        assert_eq!(plan.from.alias, Some("t1".to_owned()));
+        assert_eq!(plan.from.alias(), Some("t1".to_owned()));
     }
 
     #[test]
     fn no_change_for_valid_plan() {
         let mut plan = base_plan();
-        plan.from.alias = Some("u".to_owned());
+        plan.from = FromClause::table("users".to_owned(), Some("u".to_owned()));
         // A valid plan should have no changes.
         assert!(!fix_plan(&mut plan));
     }
@@ -780,7 +787,7 @@ mod tests {
         plan.limit = Some(0);
         let fixed = apply_fixes(plan);
         assert_eq!(fixed.limit, None);
-        assert_eq!(fixed.from.alias, Some("t1".to_owned()));
+        assert_eq!(fixed.from.alias(), Some("t1".to_owned()));
     }
 
     #[test]
@@ -791,10 +798,7 @@ mod tests {
             recursive: false,
             query: Box::new(QueryPlan {
                 select: vec![Projection::Star { table: None }],
-                from: FromClause {
-                    table: "users".to_owned(),
-                    alias: None,
-                },
+                from: FromClause::table("users".to_owned(), None),
                 r#where: None,
                 group_by: None,
                 having: None,
@@ -812,6 +816,6 @@ mod tests {
         // CTE subquery should also be fixed.
         let cte = &plan.ctes.unwrap()[0];
         assert_eq!(cte.query.limit, None);
-        assert_eq!(cte.query.from.alias, Some("t1".to_owned()));
+        assert_eq!(cte.query.from.alias(), Some("t1".to_owned()));
     }
 }

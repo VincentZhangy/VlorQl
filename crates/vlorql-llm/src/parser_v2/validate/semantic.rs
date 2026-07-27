@@ -5,7 +5,7 @@
 //! it only reports errors.
 
 use vlorql_core::schema::{
-    Expression, InTarget, JoinClause, JoinType, Predicate, Projection, QueryPlan,
+    Expression, FromClause, InTarget, JoinClause, JoinType, Predicate, Projection, QueryPlan,
 };
 
 use super::validator::{ValidationError, ValidationErrorKind};
@@ -46,7 +46,7 @@ fn validate_plan(plan: &QueryPlan, errors: &mut Vec<ValidationError>) {
     validate_select(&plan.select, errors);
 
     // 2. Validate FROM
-    validate_from(&plan.from.table, errors);
+    validate_from(plan.from.table_name().unwrap(), errors);
 
     // 3. Validate WHERE
     if let Some(ref predicate) = plan.r#where {
@@ -160,7 +160,8 @@ fn validate_join(join: &JoinClause, errors: &mut Vec<ValidationError>) {
                 ValidationErrorKind::MissingJoinCondition,
                 format!(
                     "{:?} JOIN on table `{}` is missing an ON condition",
-                    join.join_type, join.right_table.table
+                    join.join_type,
+                    join.right_table.table_name().unwrap_or("?")
                 ),
             ));
         } else {
@@ -169,7 +170,7 @@ fn validate_join(join: &JoinClause, errors: &mut Vec<ValidationError>) {
     }
 
     // Check that right_table has a table name.
-    if join.right_table.table.is_empty() {
+    if join.right_table.table_name().map_or(true, |n| n.is_empty()) {
         errors.push(ValidationError::new(
             ValidationErrorKind::MissingJoinCondition,
             "JOIN has an empty right_table name",
@@ -333,10 +334,7 @@ mod tests {
     fn valid_plan() -> QueryPlan {
         QueryPlan {
             select: vec![Projection::Star { table: None }],
-            from: FromClause {
-                table: "users".to_owned(),
-                alias: None,
-            },
+            from: FromClause::table("users".to_owned(), None),
             r#where: None,
             group_by: None,
             having: None,
@@ -393,7 +391,7 @@ mod tests {
     #[test]
     fn detects_empty_from_table() {
         let mut plan = valid_plan();
-        plan.from.table = "".to_owned();
+        plan.from = FromClause::table("".to_owned(), None);
         let errors = validate(&plan);
         assert!(
             errors
@@ -407,10 +405,7 @@ mod tests {
         let mut plan = valid_plan();
         plan.joins = Some(vec![JoinClause {
             join_type: JoinType::Inner,
-            right_table: FromClause {
-                table: "orders".to_owned(),
-                alias: None,
-            },
+            right_table: FromClause::table("orders".to_owned(), None),
             on: Predicate::Comparison {
                 left: Expression::Literal {
                     value: json!(true),
@@ -436,10 +431,7 @@ mod tests {
         let mut plan = valid_plan();
         plan.joins = Some(vec![JoinClause {
             join_type: JoinType::Cross,
-            right_table: FromClause {
-                table: "orders".to_owned(),
-                alias: None,
-            },
+            right_table: FromClause::table("orders".to_owned(), None),
             on: Predicate::Comparison {
                 left: Expression::Literal {
                     value: json!(true),
@@ -539,10 +531,7 @@ mod tests {
             recursive: false,
             query: Box::new(QueryPlan {
                 select: vec![Projection::Star { table: None }],
-                from: FromClause {
-                    table: "users".to_owned(),
-                    alias: None,
-                },
+                from: FromClause::table("users".to_owned(), None),
                 r#where: None,
                 group_by: None,
                 having: None,

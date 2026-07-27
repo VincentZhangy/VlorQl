@@ -37,7 +37,9 @@
 use std::collections::HashSet;
 
 use crate::errors::VlorQLError;
-use crate::schema::{ArcSchemaSnapshot, CommonTableExpression, Expression, Projection, QueryPlan};
+use crate::schema::{
+    ArcSchemaSnapshot, CommonTableExpression, Expression, FromClause, Projection, QueryPlan,
+};
 
 use super::analyze::{
     ColumnRef, columns_in_expression, columns_in_order_by, columns_in_predicate,
@@ -102,11 +104,29 @@ impl PlanRewriter for ColumnPruning {
 
 impl ColumnPruning {
     fn prune_plan(&self, plan: &QueryPlan) -> QueryPlan {
+        // Recursively prune subquery in FROM clause.
+        let from = match &plan.from {
+            FromClause::Subquery { query, alias } => {
+                let pruned = self.prune_plan(query);
+                FromClause::Subquery {
+                    query: Box::new(pruned),
+                    alias: alias.clone(),
+                }
+            }
+            other => other.clone(),
+        };
+
         let Some(ctes) = plan.ctes.as_ref() else {
-            return plan.clone();
+            return QueryPlan {
+                from,
+                ..plan.clone()
+            };
         };
         if ctes.is_empty() {
-            return plan.clone();
+            return QueryPlan {
+                from,
+                ..plan.clone()
+            };
         }
 
         // Collect every column the outer query reads, keyed by qualifier.
@@ -115,7 +135,10 @@ impl ColumnPruning {
         // A single unqualified reference anywhere means we cannot know
         // which CTE it targets; keep all columns to preserve semantics.
         if used.iter().any(|(table, _)| table.is_none()) {
-            return plan.clone();
+            return QueryPlan {
+                from,
+                ..plan.clone()
+            };
         }
 
         // Recurse first so a CTE defined over other CTEs is pruned using
@@ -129,6 +152,7 @@ impl ColumnPruning {
             .collect();
 
         QueryPlan {
+            from,
             ctes: Some(pruned),
             ..plan.clone()
         }
@@ -325,7 +349,7 @@ impl ColumnPruning {
         let Some(schema) = self.schema.as_ref() else {
             return protected;
         };
-        let Some(table) = schema.get_table(&cte_body.from.table) else {
+        let Some(table) = schema.get_table(cte_body.from.table_name().unwrap()) else {
             return protected;
         };
         for column in &table.columns {
@@ -483,10 +507,7 @@ mod tests {
             recursive: false,
             query: Box::new(QueryPlan {
                 select: cte_projection,
-                from: FromClause {
-                    table: "orders".to_owned(),
-                    alias: None,
-                },
+                from: FromClause::table("orders".to_owned(), None),
                 r#where: None,
                 group_by: cte_gb,
                 having: cte_having,
@@ -502,10 +523,7 @@ mod tests {
         };
         QueryPlan {
             select: outer_select,
-            from: FromClause {
-                table: cte_name.to_owned(),
-                alias: None,
-            },
+            from: FromClause::table(cte_name.to_owned(), None),
             r#where: outer_where,
             group_by: None,
             having: None,

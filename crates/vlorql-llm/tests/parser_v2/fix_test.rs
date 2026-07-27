@@ -36,7 +36,7 @@ fn fix_missing_alias_in_pipeline() {
     let raw = r#"{"select": [{"type": "star"}], "from": {"table": "users"}}"#;
     let plan = build_and_fix(raw).unwrap();
     assert_eq!(
-        plan.from.alias,
+        plan.from.alias(),
         Some("t1".to_owned()),
         "missing alias should be generated"
     );
@@ -50,9 +50,9 @@ fn fix_missing_alias_in_join() {
         "joins": [{"join_type": "inner", "right_table": {"table": "orders"}, "on": {"type": "comparison", "left": {"type": "column_ref", "column": "user_id"}, "op": "eq", "right": {"type": "column_ref", "column": "id"}}}]
     }"#;
     let plan = build_and_fix(raw).unwrap();
-    assert_eq!(plan.from.alias, Some("t1".to_owned()));
+    assert_eq!(plan.from.alias(), Some("t1".to_owned()));
     assert_eq!(
-        plan.joins.unwrap()[0].right_table.alias,
+        plan.joins.unwrap()[0].right_table.alias(),
         Some("t2".to_owned())
     );
 }
@@ -66,10 +66,7 @@ fn fix_empty_select_in_pipeline() {
     // We test the fix layer directly on a plan with empty select.
     let mut plan = vlorql_core::schema::QueryPlan {
         select: vec![],
-        from: vlorql_core::schema::FromClause {
-            table: "users".to_owned(),
-            alias: None,
-        },
+        from: vlorql_core::schema::FromClause::table("users".to_owned(), None),
         r#where: None,
         group_by: None,
         having: None,
@@ -95,12 +92,12 @@ fn full_pipeline_with_fix() {
     let plan = build_and_fix(raw).unwrap();
     // Normalize: projection → select, source → from, filter → where
     assert_eq!(plan.select.len(), 1);
-    assert_eq!(plan.from.table, "users");
+    assert_eq!(plan.from.table_name().unwrap(), "users");
     assert!(plan.r#where.is_some());
     // Fix: limit 0 removed
     assert_eq!(plan.limit, None, "limit 0 should be removed by fix");
     // Fix: missing alias added
-    assert_eq!(plan.from.alias, Some("t1".to_owned()));
+    assert_eq!(plan.from.alias(), Some("t1".to_owned()));
     // Validate: should pass
     assert!(
         validator::validate_plan(&plan).is_ok(),
@@ -113,7 +110,7 @@ fn valid_plan_unchanged_by_fix() {
     let raw = r#"{"select": [{"type": "star"}], "from": {"table": "users", "alias": "u"}}"#;
     let plan = build_and_fix(raw).unwrap();
     // Already has alias, should not be changed.
-    assert_eq!(plan.from.alias, Some("u".to_owned()));
+    assert_eq!(plan.from.alias(), Some("u".to_owned()));
     assert!(validator::validate_plan(&plan).is_ok());
 }
 
@@ -126,7 +123,7 @@ fn deepseek_style_with_fix() {
     // Normalize: filter → where
     assert!(plan.r#where.is_some());
     // Fix: missing alias added
-    assert_eq!(plan.from.alias, Some("t1".to_owned()));
+    assert_eq!(plan.from.alias(), Some("t1".to_owned()));
     // Validate: should pass
     assert!(validator::validate_plan(&plan).is_ok());
 }

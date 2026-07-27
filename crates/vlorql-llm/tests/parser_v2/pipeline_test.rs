@@ -35,7 +35,7 @@ fn openai_style_full_pipeline() {
     }"#;
     let plan = run_pipeline_str(raw).unwrap();
     assert_eq!(plan.select.len(), 1);
-    assert_eq!(plan.from.table, "users");
+    assert_eq!(plan.from.table_name().unwrap(), "users");
     assert!(plan.r#where.is_some());
 }
 
@@ -61,7 +61,7 @@ fn qwen_style_full_pipeline() {
     let raw = r#"{"projection": ["id", "name"], "source": "users", "filter": {"type": "comparison", "left": {"column": "age"}, "op": "gt", "right": {"value": 18}}}"#;
     let plan = run_pipeline_str(raw).unwrap();
     assert_eq!(plan.select.len(), 2);
-    assert_eq!(plan.from.table, "users");
+    assert_eq!(plan.from.table_name().unwrap(), "users");
     assert!(plan.r#where.is_some());
 }
 
@@ -72,7 +72,7 @@ fn llama_style_full_pipeline() {
     let raw = "```json\n{\"select\": [{\"type\": \"star\"}], \"from\": {\"table\": \"products\"}, \"where\": [{\"type\": \"comparison\", \"left\": {\"column\": \"price\"}, \"op\": \"lt\", \"right\": {\"value\": 100}}], \"sort\": [{\"expr\": {\"column\": \"name\"}, \"descending\": true}]}\n```";
     let plan = run_pipeline_str(raw).unwrap();
     assert_eq!(plan.select.len(), 1);
-    assert_eq!(plan.from.table, "products");
+    assert_eq!(plan.from.table_name().unwrap(), "products");
     assert!(plan.r#where.is_some());
     assert!(plan.order_by.is_some());
 }
@@ -94,7 +94,7 @@ fn messy_multi_model_full_pipeline() {
     let raw = "some text ```json\n{\"projection\": [{\"column\": \"name\"}, {\"column\": \"email\"}], \"source\": \"employees\", \"filter\": [{\"type\": \"comparison\", \"left\": {\"column\": \"salary\"}, \"operator\": \">\", \"right\": {\"value\": 50000, \"data_type\": \"integer\"}}], \"sort\": [{\"expr\": {\"column\": \"name\"}, \"descending\": true}]}\n``` more text";
     let plan = run_pipeline_str(raw).unwrap();
     assert_eq!(plan.select.len(), 2);
-    assert_eq!(plan.from.table, "employees");
+    assert_eq!(plan.from.table_name().unwrap(), "employees");
     assert!(plan.r#where.is_some());
     assert!(plan.order_by.is_some());
 }
@@ -106,7 +106,7 @@ fn minimal_star_plan() {
     let raw = r#"{"select": [{"type": "star"}], "from": {"table": "users"}}"#;
     let plan = run_pipeline_str(raw).unwrap();
     assert_eq!(plan.select.len(), 1);
-    assert_eq!(plan.from.table, "users");
+    assert_eq!(plan.from.table_name().unwrap(), "users");
     assert!(plan.r#where.is_none());
     assert!(plan.group_by.is_none());
     assert!(plan.order_by.is_none());
@@ -131,8 +131,8 @@ fn full_plan_with_joins_and_ctes() {
     }"#;
     let plan = run_pipeline_str(raw).unwrap();
     assert_eq!(plan.select.len(), 2);
-    assert_eq!(plan.from.table, "users");
-    assert_eq!(plan.from.alias, Some("u".to_owned()));
+    assert_eq!(plan.from.table_name().unwrap(), "users");
+    assert_eq!(plan.from.alias(), Some("u".to_owned()));
     assert!(plan.r#where.is_some());
     assert!(plan.order_by.is_some());
     assert_eq!(plan.limit, Some(10));
@@ -175,6 +175,6 @@ fn double_normalize_roundtrip() {
     // Build
     let plan = query_builder::build_plan(&value).unwrap();
     assert_eq!(plan.select.len(), 1);
-    assert_eq!(plan.from.table, "users");
+    assert_eq!(plan.from.table_name().unwrap(), "users");
     assert!(plan.r#where.is_some());
 }

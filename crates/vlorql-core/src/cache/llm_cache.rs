@@ -141,10 +141,7 @@ mod tests {
                 column: "id".to_owned(),
                 alias: None,
             }],
-            from: FromClause {
-                table: table.to_owned(),
-                alias: None,
-            },
+            from: FromClause::table(table.to_owned(), None),
             r#where: None,
             group_by: None,
             having: None,
@@ -179,7 +176,7 @@ mod tests {
         let cached = cache.get(&k).await;
         assert_eq!(cached, Some(plan));
         // Verify the plan content
-        assert_eq!(cached.unwrap().from.table, "users");
+        assert_eq!(cached.unwrap().from.table_name().unwrap(), "users");
     }
 
     /// Different keys produce cache misses even when the values are
@@ -267,7 +264,10 @@ mod tests {
                 cache.insert(k.clone(), plan).await;
                 let cached = cache.get(&k).await;
                 assert!(cached.is_some());
-                assert_eq!(cached.unwrap().from.table, format!("table_{}", i));
+                assert_eq!(
+                    cached.unwrap().from.table_name().unwrap(),
+                    format!("table_{}", i)
+                );
             });
             handles.push(handle);
         }

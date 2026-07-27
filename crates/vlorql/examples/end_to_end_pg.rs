@@ -406,10 +406,7 @@ fn build_demo_plan() -> QueryPlan {
                 alias: None,
             },
         ],
-        from: FromClause {
-            table: "orders".to_owned(),
-            alias: Some("o".to_owned()),
-        },
+        from: FromClause::table("orders".to_owned(), Some("o".to_owned())),
         r#where: Some(Predicate::And {
             left: Box::new(Predicate::Comparison {
                 left: Expression::ColumnRef {
@@ -447,10 +444,7 @@ fn build_demo_plan() -> QueryPlan {
         offset: None,
         joins: Some(vec![JoinClause {
             join_type: JoinType::Inner,
-            right_table: FromClause {
-                table: "users".to_owned(),
-                alias: Some("u".to_owned()),
-            },
+            right_table: FromClause::table("users".to_owned(), Some("u".to_owned())),
             on: Predicate::Comparison {
                 left: Expression::ColumnRef {
                     table: Some("orders".to_owned()),
@@ -504,16 +498,10 @@ fn build_in_predicate_plan() -> QueryPlan {
                 alias: None,
             },
         ],
-        from: FromClause {
-            table: "orders".to_owned(),
-            alias: Some("o".to_owned()),
-        },
+        from: FromClause::table("orders".to_owned(), Some("o".to_owned())),
         joins: Some(vec![JoinClause {
             join_type: JoinType::Inner,
-            right_table: FromClause {
-                table: "users".to_owned(),
-                alias: Some("u".to_owned()),
-            },
+            right_table: FromClause::table("users".to_owned(), Some("u".to_owned())),
             on: Predicate::Comparison {
                 left: Expression::ColumnRef {
                     table: Some("orders".to_owned()),
@@ -588,16 +576,10 @@ fn build_is_null_plan() -> QueryPlan {
                 alias: None,
             },
         ],
-        from: FromClause {
-            table: "products".to_owned(),
-            alias: Some("p".to_owned()),
-        },
+        from: FromClause::table("products".to_owned(), Some("p".to_owned())),
         joins: Some(vec![JoinClause {
             join_type: JoinType::Left,
-            right_table: FromClause {
-                table: "order_items".to_owned(),
-                alias: Some("oi".to_owned()),
-            },
+            right_table: FromClause::table("order_items".to_owned(), Some("oi".to_owned())),
             on: Predicate::Comparison {
                 left: Expression::ColumnRef {
                     table: Some("products".to_owned()),
@@ -657,16 +639,10 @@ fn build_aggregate_plan() -> QueryPlan {
                 alias: Some("total_sold".to_owned()),
             },
         ],
-        from: FromClause {
-            table: "products".to_owned(),
-            alias: Some("p".to_owned()),
-        },
+        from: FromClause::table("products".to_owned(), Some("p".to_owned())),
         joins: Some(vec![JoinClause {
             join_type: JoinType::Inner,
-            right_table: FromClause {
-                table: "order_items".to_owned(),
-                alias: Some("oi".to_owned()),
-            },
+            right_table: FromClause::table("order_items".to_owned(), Some("oi".to_owned())),
             on: Predicate::Comparison {
                 left: Expression::ColumnRef {
                     table: Some("products".to_owned()),
@@ -726,17 +702,11 @@ fn build_having_plan() -> QueryPlan {
                 alias: Some("order_count".to_owned()),
             },
         ],
-        from: FromClause {
-            table: "users".to_owned(),
-            alias: Some("u".to_owned()),
-        },
+        from: FromClause::table("users".to_owned(), Some("u".to_owned())),
         r#where: None,
         joins: Some(vec![JoinClause {
             join_type: JoinType::Inner,
-            right_table: FromClause {
-                table: "orders".to_owned(),
-                alias: Some("o".to_owned()),
-            },
+            right_table: FromClause::table("orders".to_owned(), Some("o".to_owned())),
             on: Predicate::Comparison {
                 left: Expression::ColumnRef {
                     table: Some("users".to_owned()),
@@ -822,10 +792,7 @@ fn build_between_plan() -> QueryPlan {
                 alias: None,
             },
         ],
-        from: FromClause {
-            table: "orders".to_owned(),
-            alias: None,
-        },
+        from: FromClause::table("orders".to_owned(), None),
         r#where: Some(Predicate::Between {
             expr: Expression::ColumnRef {
                 table: Some("orders".to_owned()),
@@ -886,10 +853,7 @@ fn build_like_plan() -> QueryPlan {
                 alias: None,
             },
         ],
-        from: FromClause {
-            table: "users".to_owned(),
-            alias: None,
-        },
+        from: FromClause::table("users".to_owned(), None),
         r#where: Some(Predicate::Like {
             expr: Expression::ColumnRef {
                 table: Some("users".to_owned()),
@@ -934,10 +898,7 @@ fn build_subquery_in_plan() -> QueryPlan {
                 alias: None,
             },
         ],
-        from: FromClause {
-            table: "users".to_owned(),
-            alias: None,
-        },
+        from: FromClause::table("users".to_owned(), None),
         r#where: Some(Predicate::In {
             expr: Expression::ColumnRef {
                 table: Some("users".to_owned()),
@@ -949,10 +910,7 @@ fn build_subquery_in_plan() -> QueryPlan {
                     column: "user_id".to_owned(),
                     alias: None,
                 }],
-                from: FromClause {
-                    table: "orders".to_owned(),
-                    alias: None,
-                },
+                from: FromClause::table("orders".to_owned(), None),
                 r#where: Some(Predicate::Comparison {
                     left: Expression::ColumnRef {
                         table: Some("orders".to_owned()),
@@ -1036,17 +994,11 @@ fn build_cte_plan() -> QueryPlan {
                 alias: Some("revenue".to_owned()),
             },
         ],
-        from: FromClause {
-            table: "products".to_owned(),
-            alias: Some("p".to_owned()),
-        },
+        from: FromClause::table("products".to_owned(), Some("p".to_owned())),
         r#where: None,
         joins: Some(vec![JoinClause {
             join_type: JoinType::Inner,
-            right_table: FromClause {
-                table: "order_items".to_owned(),
-                alias: Some("oi".to_owned()),
-            },
+            right_table: FromClause::table("order_items".to_owned(), Some("oi".to_owned())),
             on: Predicate::Comparison {
                 left: Expression::ColumnRef {
                     table: Some("products".to_owned()),
@@ -1092,10 +1044,7 @@ fn build_cte_plan() -> QueryPlan {
                 alias: None,
             },
         ],
-        from: FromClause {
-            table: "product_sales".to_owned(),
-            alias: None,
-        },
+        from: FromClause::table("product_sales".to_owned(), None),
         order_by: Some(vec![OrderByTerm {
             expr: Expression::ColumnRef {
                 table: Some("product_sales".to_owned()),
@@ -1179,17 +1128,11 @@ fn build_multi_join_plan() -> QueryPlan {
                 alias: Some("subtotal".to_owned()),
             },
         ],
-        from: FromClause {
-            table: "orders".to_owned(),
-            alias: Some("o".to_owned()),
-        },
+        from: FromClause::table("orders".to_owned(), Some("o".to_owned())),
         joins: Some(vec![
             JoinClause {
                 join_type: JoinType::Inner,
-                right_table: FromClause {
-                    table: "users".to_owned(),
-                    alias: Some("u".to_owned()),
-                },
+                right_table: FromClause::table("users".to_owned(), Some("u".to_owned())),
                 on: Predicate::Comparison {
                     left: Expression::ColumnRef {
                         table: Some("orders".to_owned()),
@@ -1204,10 +1147,7 @@ fn build_multi_join_plan() -> QueryPlan {
             },
             JoinClause {
                 join_type: JoinType::Inner,
-                right_table: FromClause {
-                    table: "order_items".to_owned(),
-                    alias: Some("oi".to_owned()),
-                },
+                right_table: FromClause::table("order_items".to_owned(), Some("oi".to_owned())),
                 on: Predicate::Comparison {
                     left: Expression::ColumnRef {
                         table: Some("orders".to_owned()),
@@ -1222,10 +1162,7 @@ fn build_multi_join_plan() -> QueryPlan {
             },
             JoinClause {
                 join_type: JoinType::Inner,
-                right_table: FromClause {
-                    table: "products".to_owned(),
-                    alias: Some("p".to_owned()),
-                },
+                right_table: FromClause::table("products".to_owned(), Some("p".to_owned())),
                 on: Predicate::Comparison {
                     left: Expression::ColumnRef {
                         table: Some("order_items".to_owned()),
@@ -1287,10 +1224,7 @@ fn build_not_exists_plan() -> QueryPlan {
                 alias: None,
             },
         ],
-        from: FromClause {
-            table: "products".to_owned(),
-            alias: Some("p".to_owned()),
-        },
+        from: FromClause::table("products".to_owned(), Some("p".to_owned())),
         r#where: Some(Predicate::Not {
             child: Box::new(Predicate::Exists {
                 query: Box::new(QueryPlan {
@@ -1301,10 +1235,7 @@ fn build_not_exists_plan() -> QueryPlan {
                         },
                         alias: None,
                     }],
-                    from: FromClause {
-                        table: "order_items".to_owned(),
-                        alias: Some("oi".to_owned()),
-                    },
+                    from: FromClause::table("order_items".to_owned(), Some("oi".to_owned())),
                     r#where: Some(Predicate::Comparison {
                         left: Expression::ColumnRef {
                             table: Some("order_items".to_owned()),
@@ -1376,16 +1307,10 @@ fn build_full_outer_join_plan() -> QueryPlan {
                 alias: None,
             },
         ],
-        from: FromClause {
-            table: "users".to_owned(),
-            alias: Some("u".to_owned()),
-        },
+        from: FromClause::table("users".to_owned(), Some("u".to_owned())),
         joins: Some(vec![JoinClause {
             join_type: JoinType::Full,
-            right_table: FromClause {
-                table: "orders".to_owned(),
-                alias: Some("o".to_owned()),
-            },
+            right_table: FromClause::table("orders".to_owned(), Some("o".to_owned())),
             on: Predicate::Comparison {
                 left: Expression::ColumnRef {
                     table: Some("users".to_owned()),
@@ -1449,16 +1374,10 @@ fn build_cross_join_plan() -> QueryPlan {
                 alias: Some("product_name".to_owned()),
             },
         ],
-        from: FromClause {
-            table: "users".to_owned(),
-            alias: Some("u".to_owned()),
-        },
+        from: FromClause::table("users".to_owned(), Some("u".to_owned())),
         joins: Some(vec![JoinClause {
             join_type: JoinType::Cross,
-            right_table: FromClause {
-                table: "products".to_owned(),
-                alias: Some("p".to_owned()),
-            },
+            right_table: FromClause::table("products".to_owned(), Some("p".to_owned())),
             // CROSS JOIN 不需要 ON 条件
             on: Predicate::Comparison {
                 left: Expression::Literal {
@@ -1529,16 +1448,10 @@ fn build_self_join_plan() -> QueryPlan {
                 alias: Some("manager_name".to_owned()),
             },
         ],
-        from: FromClause {
-            table: "employees".to_owned(),
-            alias: Some("e".to_owned()),
-        },
+        from: FromClause::table("employees".to_owned(), Some("e".to_owned())),
         joins: Some(vec![JoinClause {
             join_type: JoinType::Left,
-            right_table: FromClause {
-                table: "employees".to_owned(),
-                alias: Some("m".to_owned()),
-            },
+            right_table: FromClause::table("employees".to_owned(), Some("m".to_owned())),
             on: Predicate::Comparison {
                 left: Expression::ColumnRef {
                     table: Some("e".to_owned()),
@@ -1622,10 +1535,7 @@ fn build_date_trunc_plan() -> QueryPlan {
                 alias: Some("total_amount".to_owned()),
             },
         ],
-        from: FromClause {
-            table: "orders".to_owned(),
-            alias: Some("o".to_owned()),
-        },
+        from: FromClause::table("orders".to_owned(), Some("o".to_owned())),
         group_by: Some(vec![month_expr.clone()]),
         order_by: Some(vec![OrderByTerm {
             expr: month_expr,
@@ -1693,17 +1603,11 @@ fn build_string_agg_plan() -> QueryPlan {
                 alias: Some("total_items".to_owned()),
             },
         ],
-        from: FromClause {
-            table: "orders".to_owned(),
-            alias: Some("o".to_owned()),
-        },
+        from: FromClause::table("orders".to_owned(), Some("o".to_owned())),
         joins: Some(vec![
             JoinClause {
                 join_type: JoinType::Inner,
-                right_table: FromClause {
-                    table: "order_items".to_owned(),
-                    alias: Some("oi".to_owned()),
-                },
+                right_table: FromClause::table("order_items".to_owned(), Some("oi".to_owned())),
                 on: Predicate::Comparison {
                     left: Expression::ColumnRef {
                         table: Some("orders".to_owned()),
@@ -1718,10 +1622,7 @@ fn build_string_agg_plan() -> QueryPlan {
             },
             JoinClause {
                 join_type: JoinType::Inner,
-                right_table: FromClause {
-                    table: "products".to_owned(),
-                    alias: Some("p".to_owned()),
-                },
+                right_table: FromClause::table("products".to_owned(), Some("p".to_owned())),
                 on: Predicate::Comparison {
                     left: Expression::ColumnRef {
                         table: Some("order_items".to_owned()),
@@ -1801,17 +1702,11 @@ fn build_distinct_count_plan() -> QueryPlan {
                 alias: Some("total_sold".to_owned()),
             },
         ],
-        from: FromClause {
-            table: "products".to_owned(),
-            alias: Some("p".to_owned()),
-        },
+        from: FromClause::table("products".to_owned(), Some("p".to_owned())),
         joins: Some(vec![
             JoinClause {
                 join_type: JoinType::Inner,
-                right_table: FromClause {
-                    table: "order_items".to_owned(),
-                    alias: Some("oi".to_owned()),
-                },
+                right_table: FromClause::table("order_items".to_owned(), Some("oi".to_owned())),
                 on: Predicate::Comparison {
                     left: Expression::ColumnRef {
                         table: Some("products".to_owned()),
@@ -1826,10 +1721,7 @@ fn build_distinct_count_plan() -> QueryPlan {
             },
             JoinClause {
                 join_type: JoinType::Inner,
-                right_table: FromClause {
-                    table: "orders".to_owned(),
-                    alias: Some("o".to_owned()),
-                },
+                right_table: FromClause::table("orders".to_owned(), Some("o".to_owned())),
                 on: Predicate::Comparison {
                     left: Expression::ColumnRef {
                         table: Some("order_items".to_owned()),
@@ -1897,10 +1789,7 @@ fn build_complex_not_plan() -> QueryPlan {
                 alias: None,
             },
         ],
-        from: FromClause {
-            table: "orders".to_owned(),
-            alias: Some("o".to_owned()),
-        },
+        from: FromClause::table("orders".to_owned(), Some("o".to_owned())),
         r#where: Some(Predicate::And {
             left: Box::new(Predicate::Not {
                 child: Box::new(Predicate::Comparison {
@@ -2012,10 +1901,7 @@ fn build_case_when_plan() -> QueryPlan {
                 alias: None,
             },
         ],
-        from: FromClause {
-            table: "orders".to_owned(),
-            alias: None,
-        },
+        from: FromClause::table("orders".to_owned(), None),
         r#where: None,
         group_by: None,
         having: None,
@@ -2053,10 +1939,7 @@ fn build_select_distinct_plan() -> QueryPlan {
         ],
         distinct: true,
         distinct_on: None,
-        from: FromClause {
-            table: "users".to_owned(),
-            alias: None,
-        },
+        from: FromClause::table("users".to_owned(), None),
         r#where: Some(Predicate::Exists {
             query: Box::new(QueryPlan {
                 select: vec![Projection::Expr {
@@ -2066,10 +1949,7 @@ fn build_select_distinct_plan() -> QueryPlan {
                     },
                     alias: None,
                 }],
-                from: FromClause {
-                    table: "orders".to_owned(),
-                    alias: None,
-                },
+                from: FromClause::table("orders".to_owned(), None),
                 r#where: Some(Predicate::Comparison {
                     left: Expression::ColumnRef {
                         table: Some("orders".to_owned()),
@@ -2154,16 +2034,10 @@ fn build_window_function_plan() -> QueryPlan {
                 alias: Some("rank".to_owned()),
             },
         ],
-        from: FromClause {
-            table: "products".to_owned(),
-            alias: Some("p".to_owned()),
-        },
+        from: FromClause::table("products".to_owned(), Some("p".to_owned())),
         joins: Some(vec![JoinClause {
             join_type: JoinType::Left,
-            right_table: FromClause {
-                table: "order_items".to_owned(),
-                alias: Some("oi".to_owned()),
-            },
+            right_table: FromClause::table("order_items".to_owned(), Some("oi".to_owned())),
             on: Predicate::Comparison {
                 left: Expression::ColumnRef {
                     table: Some("products".to_owned()),
@@ -2218,10 +2092,7 @@ fn build_union_all_plan() -> QueryPlan {
                 alias: None,
             },
         ],
-        from: FromClause {
-            table: "orders".to_owned(),
-            alias: None,
-        },
+        from: FromClause::table("orders".to_owned(), None),
         r#where: Some(Predicate::Comparison {
             left: Expression::ColumnRef {
                 table: Some("orders".to_owned()),
@@ -2264,10 +2135,7 @@ fn build_union_all_plan() -> QueryPlan {
                 alias: None,
             },
         ],
-        from: FromClause {
-            table: "orders".to_owned(),
-            alias: None,
-        },
+        from: FromClause::table("orders".to_owned(), None),
         r#where: Some(Predicate::Comparison {
             left: Expression::ColumnRef {
                 table: Some("orders".to_owned()),
@@ -2322,10 +2190,7 @@ fn build_recursive_cte_plan() -> QueryPlan {
                 alias: Some("level".to_owned()),
             },
         ],
-        from: FromClause {
-            table: "employees".to_owned(),
-            alias: None,
-        },
+        from: FromClause::table("employees".to_owned(), None),
         r#where: Some(Predicate::IsNull {
             expr: Expression::ColumnRef {
                 table: Some("employees".to_owned()),
@@ -2375,16 +2240,10 @@ fn build_recursive_cte_plan() -> QueryPlan {
                         alias: Some("level".to_owned()),
                     },
                 ],
-                from: FromClause {
-                    table: "employees".to_owned(),
-                    alias: Some("emp".to_owned()),
-                },
+                from: FromClause::table("employees".to_owned(), Some("emp".to_owned())),
                 joins: Some(vec![JoinClause {
                     join_type: JoinType::Inner,
-                    right_table: FromClause {
-                        table: "org_tree".to_owned(),
-                        alias: None,
-                    },
+                    right_table: FromClause::table("org_tree".to_owned(), None),
                     on: Predicate::Comparison {
                         left: Expression::ColumnRef {
                             table: Some("emp".to_owned()),
@@ -2429,10 +2288,7 @@ fn build_recursive_cte_plan() -> QueryPlan {
                 alias: None,
             },
         ],
-        from: FromClause {
-            table: "org_tree".to_owned(),
-            alias: None,
-        },
+        from: FromClause::table("org_tree".to_owned(), None),
         distinct: false,
         distinct_on: None,
         order_by: Some(vec![OrderByTerm {

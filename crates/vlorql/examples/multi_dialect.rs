@@ -73,10 +73,7 @@ fn canonical_plan() -> QueryPlan {
                 alias: Some("display_name".to_owned()),
             },
         ],
-        from: FromClause {
-            table: "users".to_owned(),
-            alias: None,
-        },
+        from: FromClause::table("users".to_owned(), None),
         r#where: Some(Predicate::Comparison {
             left: Expression::ColumnRef {
                 table: Some("users".to_owned()),

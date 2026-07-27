@@ -63,10 +63,7 @@ mod tests {
                     alias: None,
                 })
                 .collect(),
-            from: FromClause {
-                table: "users".to_owned(),
-                alias: None,
-            },
+            from: FromClause::table("users".to_owned(), None),
             r#where: None,
             group_by: None,
             having: None,
@@ -192,7 +189,7 @@ mod tests {
     #[test]
     fn validate_reports_missing_schema_table() {
         let mut plan = plan_with_columns(&["id"]);
-        plan.from.table = "missing".to_owned();
+        plan.from = FromClause::table("missing".to_owned(), None);
         if let Projection::Column { table, .. } = &mut plan.select[0] {
             *table = Some("missing".to_owned());
         }
@@ -226,10 +223,7 @@ mod tests {
         let mut plan = plan_with_columns(&["id"]);
         plan.joins = Some(vec![JoinClause {
             join_type: JoinType::Inner,
-            right_table: FromClause {
-                table: "accounts".to_owned(),
-                alias: Some("a".to_owned()),
-            },
+            right_table: FromClause::table("accounts".to_owned(), Some("a".to_owned())),
             on: Predicate::Comparison {
                 left: column_ref("users", "id"),
                 op: ComparisonOperator::Eq,
@@ -331,10 +325,7 @@ mod extra_tests {
                     alias: None,
                 })
                 .collect(),
-            from: FromClause {
-                table: "users".to_owned(),
-                alias: None,
-            },
+            from: FromClause::table("users".to_owned(), None),
             r#where: None,
             group_by: None,
             having: None,
@@ -470,10 +461,7 @@ mod extra_tests {
                 column: "id".to_owned(),
                 alias: None,
             }],
-            from: FromClause {
-                table: "users".to_owned(),
-                alias: None,
-            },
+            from: FromClause::table("users".to_owned(), None),
             r#where: None,
             group_by: None,
             having: None,
@@ -482,10 +470,7 @@ mod extra_tests {
             offset: None,
             joins: Some(vec![JoinClause {
                 join_type: JoinType::Inner,
-                right_table: FromClause {
-                    table: "accounts".to_owned(),
-                    alias: Some("a".to_owned()),
-                },
+                right_table: FromClause::table("accounts".to_owned(), Some("a".to_owned())),
                 on: Predicate::Comparison {
                     left: Expression::ColumnRef {
                         table: Some("users".to_owned()),

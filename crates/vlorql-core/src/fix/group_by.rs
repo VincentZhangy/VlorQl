@@ -227,10 +227,7 @@ mod tests {
             select,
             distinct: false,
             distinct_on: None,
-            from: FromClause {
-                table: "orders".to_owned(),
-                alias: None,
-            },
+            from: FromClause::table("orders".to_owned(), None),
             r#where: None,
             group_by: None,
             having: None,

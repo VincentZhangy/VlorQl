@@ -105,10 +105,7 @@ fn plan_with_two_columns() -> QueryPlan {
                 alias: Some("display_name".to_owned()),
             },
         ],
-        from: FromClause {
-            table: "users".to_owned(),
-            alias: None,
-        },
+        from: FromClause::table("users".to_owned(), None),
         r#where: None,
         group_by: None,
         having: None,

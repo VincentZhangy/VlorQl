@@ -89,10 +89,7 @@ mod tests {
     fn base_plan() -> QueryPlan {
         QueryPlan {
             select: vec![Projection::Star { table: None }],
-            from: FromClause {
-                table: "users".to_owned(),
-                alias: None,
-            },
+            from: FromClause::table("users".to_owned(), None),
             r#where: None,
             group_by: None,
             having: None,
@@ -131,10 +128,7 @@ mod tests {
         let mut plan = base_plan();
         plan.joins = Some(vec![JoinClause {
             join_type: JoinType::Inner,
-            right_table: FromClause {
-                table: "orders".to_owned(),
-                alias: None,
-            },
+            right_table: FromClause::table("orders".to_owned(), None),
             on: Predicate::And {
                 left: Box::new(Predicate::Comparison {
                     left: col("user_id"),
@@ -188,10 +182,7 @@ mod tests {
             recursive: false,
             query: Box::new(QueryPlan {
                 select: vec![Projection::Star { table: None }],
-                from: FromClause {
-                    table: "users".to_owned(),
-                    alias: None,
-                },
+                from: FromClause::table("users".to_owned(), None),
                 r#where: Some(Predicate::And {
                     left: Box::new(Predicate::Comparison {
                         left: col("status"),

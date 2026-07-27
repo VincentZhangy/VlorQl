@@ -33,10 +33,7 @@ fn build_chain_join_plan(n: usize) -> QueryPlan {
         let cur = format!("t{}", i);
         joins.push(JoinClause {
             join_type: JoinType::Inner,
-            right_table: FromClause {
-                table: cur.clone(),
-                alias: None,
-            },
+            right_table: FromClause::table(cur.clone(), None),
             on: Predicate::Comparison {
                 left: Expression::ColumnRef {
                     table: Some(prev),
@@ -53,10 +50,7 @@ fn build_chain_join_plan(n: usize) -> QueryPlan {
 
     QueryPlan {
         select: vec![Projection::Star { table: None }],
-        from: FromClause {
-            table: "t0".to_owned(),
-            alias: None,
-        },
+        from: FromClause::table("t0".to_owned(), None),
         r#where: None,
         group_by: None,
         having: None,

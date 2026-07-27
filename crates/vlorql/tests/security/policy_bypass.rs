@@ -125,10 +125,7 @@ fn denied_table_cannot_be_referenced_via_case_insensitive_alias() {
             column: "name".to_owned(),
             alias: None,
         }],
-        from: FromClause {
-            table: "USERS".to_owned(),
-            alias: Some("u".to_owned()),
-        },
+        from: FromClause::table("USERS".to_owned(), Some("u".to_owned())),
         r#where: None,
         group_by: None,
         having: None,
@@ -167,10 +164,7 @@ fn denied_table_cannot_be_referenced_via_trailing_whitespace() {
             column: "id".to_owned(),
             alias: None,
         }],
-        from: FromClause {
-            table: "users ".to_owned(),
-            alias: None,
-        },
+        from: FromClause::table("users ".to_owned(), None),
         r#where: None,
         group_by: None,
         having: None,
@@ -204,10 +198,7 @@ fn denied_table_cannot_be_referenced_via_unicode_lookalike() {
             column: "id".to_owned(),
             alias: None,
         }],
-        from: FromClause {
-            table: "\u{037E}users".to_owned(),
-            alias: None,
-        },
+        from: FromClause::table("\u{037E}users".to_owned(), None),
         r#where: None,
         group_by: None,
         having: None,
@@ -242,10 +233,7 @@ fn denied_secrets_table_is_rejected_even_when_aliased() {
             column: "value".to_owned(),
             alias: None,
         }],
-        from: FromClause {
-            table: "secrets".to_owned(),
-            alias: Some("s".to_owned()),
-        },
+        from: FromClause::table("secrets".to_owned(), Some("s".to_owned())),
         r#where: None,
         group_by: None,
         having: None,
@@ -282,10 +270,7 @@ fn table_denied_column_is_rejected() {
             column: "password_hash".to_owned(),
             alias: None,
         }],
-        from: FromClause {
-            table: "users".to_owned(),
-            alias: None,
-        },
+        from: FromClause::table("users".to_owned(), None),
         r#where: None,
         group_by: None,
         having: None,
@@ -320,10 +305,7 @@ fn globally_denied_column_is_rejected_from_any_table() {
             column: "password_hash".to_owned(),
             alias: None,
         }],
-        from: FromClause {
-            table: "users".to_owned(),
-            alias: None,
-        },
+        from: FromClause::table("users".to_owned(), None),
         r#where: None,
         group_by: None,
         having: None,
@@ -367,10 +349,7 @@ fn column_outside_allowlist_is_rejected() {
             column: "password_hash".to_owned(),
             alias: None,
         }],
-        from: FromClause {
-            table: "users".to_owned(),
-            alias: None,
-        },
+        from: FromClause::table("users".to_owned(), None),
         r#where: None,
         group_by: None,
         having: None,
@@ -414,10 +393,7 @@ fn joining_against_a_denied_table_is_rejected() {
             column: "name".to_owned(),
             alias: None,
         }],
-        from: FromClause {
-            table: "users".to_owned(),
-            alias: None,
-        },
+        from: FromClause::table("users".to_owned(), None),
         r#where: None,
         group_by: None,
         having: None,
@@ -426,10 +402,7 @@ fn joining_against_a_denied_table_is_rejected() {
         offset: None,
         joins: Some(vec![JoinClause {
             join_type: JoinType::Inner,
-            right_table: FromClause {
-                table: "secrets".to_owned(),
-                alias: Some("s".to_owned()),
-            },
+            right_table: FromClause::table("secrets".to_owned(), Some("s".to_owned())),
             on: Predicate::Comparison {
                 left: Expression::ColumnRef {
                     table: Some("users".to_owned()),
@@ -469,10 +442,7 @@ fn selecting_from_a_denied_table_via_join_alias_is_rejected() {
             column: "value".to_owned(),
             alias: None,
         }],
-        from: FromClause {
-            table: "users".to_owned(),
-            alias: None,
-        },
+        from: FromClause::table("users".to_owned(), None),
         r#where: None,
         group_by: None,
         having: None,
@@ -481,10 +451,7 @@ fn selecting_from_a_denied_table_via_join_alias_is_rejected() {
         offset: None,
         joins: Some(vec![JoinClause {
             join_type: JoinType::Inner,
-            right_table: FromClause {
-                table: "secrets".to_owned(),
-                alias: Some("s".to_owned()),
-            },
+            right_table: FromClause::table("secrets".to_owned(), Some("s".to_owned())),
             on: Predicate::Comparison {
                 left: Expression::ColumnRef {
                     table: Some("users".to_owned()),
@@ -524,10 +491,7 @@ fn selecting_a_denied_column_via_join_alias_is_rejected() {
             column: "password_hash".to_owned(),
             alias: None,
         }],
-        from: FromClause {
-            table: "users".to_owned(),
-            alias: Some("u".to_owned()),
-        },
+        from: FromClause::table("users".to_owned(), Some("u".to_owned())),
         r#where: None,
         group_by: None,
         having: None,
@@ -536,10 +500,7 @@ fn selecting_a_denied_column_via_join_alias_is_rejected() {
         offset: None,
         joins: Some(vec![JoinClause {
             join_type: JoinType::Inner,
-            right_table: FromClause {
-                table: "secrets".to_owned(),
-                alias: Some("s".to_owned()),
-            },
+            right_table: FromClause::table("secrets".to_owned(), Some("s".to_owned())),
             on: Predicate::Comparison {
                 left: Expression::ColumnRef {
                     table: Some("u".to_owned()),
@@ -582,10 +543,7 @@ fn globally_denied_column_referenced_via_join_is_rejected() {
         select: vec![Projection::Star {
             table: Some("users".to_owned()),
         }],
-        from: FromClause {
-            table: "users".to_owned(),
-            alias: None,
-        },
+        from: FromClause::table("users".to_owned(), None),
         r#where: None,
         group_by: None,
         having: None,
@@ -594,10 +552,7 @@ fn globally_denied_column_referenced_via_join_is_rejected() {
         offset: None,
         joins: Some(vec![JoinClause {
             join_type: JoinType::Inner,
-            right_table: FromClause {
-                table: "secrets".to_owned(),
-                alias: Some("s".to_owned()),
-            },
+            right_table: FromClause::table("secrets".to_owned(), Some("s".to_owned())),
             on: Predicate::Comparison {
                 left: Expression::ColumnRef {
                     table: Some("users".to_owned()),
@@ -641,10 +596,7 @@ fn row_filter_is_applied_even_when_plan_author_omits_a_where_clause() {
             column: "id".to_owned(),
             alias: None,
         }],
-        from: FromClause {
-            table: "users".to_owned(),
-            alias: None,
-        },
+        from: FromClause::table("users".to_owned(), None),
         r#where: None,
         group_by: None,
         having: None,
@@ -692,10 +644,7 @@ fn row_filter_combines_multiple_conditions_with_and() {
             column: "id".to_owned(),
             alias: None,
         }],
-        from: FromClause {
-            table: "users".to_owned(),
-            alias: None,
-        },
+        from: FromClause::table("users".to_owned(), None),
         r#where: None,
         group_by: None,
         having: None,

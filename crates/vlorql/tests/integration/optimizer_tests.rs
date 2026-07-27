@@ -66,10 +66,7 @@ fn plan_with_joins() -> QueryPlan {
             column: "id".to_owned(),
             alias: None,
         }],
-        from: FromClause {
-            table: "users".to_owned(),
-            alias: None,
-        },
+        from: FromClause::table("users".to_owned(), None),
         r#where: None,
         group_by: None,
         having: None,
@@ -78,10 +75,7 @@ fn plan_with_joins() -> QueryPlan {
         offset: None,
         joins: Some(vec![JoinClause {
             join_type: JoinType::Inner,
-            right_table: FromClause {
-                table: "orders".to_owned(),
-                alias: Some("o".to_owned()),
-            },
+            right_table: FromClause::table("orders".to_owned(), Some("o".to_owned())),
             on: Predicate::Comparison {
                 left: Expression::ColumnRef {
                     table: Some("users".to_owned()),
@@ -194,10 +188,7 @@ async fn optimized_plan_still_enforces_policy() {
             column: "id".to_owned(),
             alias: None,
         }],
-        from: FromClause {
-            table: "secrets".to_owned(),
-            alias: None,
-        },
+        from: FromClause::table("secrets".to_owned(), None),
         r#where: None,
         group_by: None,
         having: None,
@@ -279,7 +270,8 @@ async fn join_reorderer_picks_smallest_base_table_first() {
         "optimised plan must have a select list"
     );
     assert_eq!(
-        opt_plan.from.table, "users",
+        opt_plan.from.table_name().unwrap(),
+        "users",
         "FROM clause should be preserved"
     );
 }

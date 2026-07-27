@@ -71,12 +71,21 @@ impl<'a> QueryBuilder<'a> {
     }
 
     fn collect_aliases(from: &FromClause, map: &mut HashMap<String, String>) {
-        let effective = from.alias.clone().unwrap_or_else(|| from.table.clone());
-        // 保留首次注册的表名→别名映射，避免自连接中后注册的 JOIN 覆盖 FROM 的映射
-        map.entry(from.table.clone())
-            .or_insert_with(|| effective.clone());
-        if let Some(ref alias) = from.alias {
-            map.insert(alias.clone(), effective);
+        match from {
+            FromClause::Table { table, alias } => {
+                let effective = alias.clone().unwrap_or_else(|| table.clone());
+                // 保留首次注册的表名→别名映射，避免自连接中后注册的 JOIN 覆盖 FROM 的映射
+                map.entry(table.clone())
+                    .or_insert_with(|| effective.clone());
+                if let Some(alias) = alias {
+                    map.insert(alias.clone(), effective);
+                }
+            }
+            FromClause::Subquery { alias, .. } => {
+                if let Some(alias) = alias {
+                    map.insert(alias.clone(), alias.clone());
+                }
+            }
         }
     }
 
@@ -574,11 +583,28 @@ impl<'a> QueryBuilder<'a> {
         }
     }
 
-    fn render_from_clause(&self, from: &FromClause) -> Result<String, VlorQLError> {
-        let table = self.quote_identifier(&from.table)?;
-        match &from.alias {
-            Some(alias) => Ok(format!("{table} AS {}", self.quote_identifier(alias)?)),
-            None => Ok(table),
+    fn render_from_clause(&mut self, from: &FromClause) -> Result<String, VlorQLError> {
+        match from {
+            FromClause::Table { table, alias } => {
+                let table = self.quote_identifier(table)?;
+                match alias {
+                    Some(alias) => Ok(format!("{table} AS {}", self.quote_identifier(alias)?)),
+                    None => Ok(table),
+                }
+            }
+            FromClause::Subquery { query, alias } => {
+                let mut sql = String::from("(");
+                self.build_query(query, &mut sql)?;
+                sql.push(')');
+                match alias {
+                    Some(alias) => {
+                        write!(sql, " AS {}", self.quote_identifier(alias)?)
+                            .map_err(formatting_error)?;
+                    }
+                    None => {}
+                }
+                Ok(sql)
+            }
         }
     }
 

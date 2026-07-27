@@ -19,13 +19,13 @@ use super::expr_builder::{BuildError, opt_str, req_obj, req_str};
 /// use serde_json::json;
 ///
 /// let from = build_from_clause(&json!({"table": "users"}), "from").unwrap();
-/// assert_eq!(from.table, "users");
+/// assert_eq!(from.table_name().unwrap(), "users");
 /// ```
 pub fn build_from_clause(val: &Value, parent: &str) -> Result<FromClause, BuildError> {
     let obj = req_obj(val, parent)?;
     let table = req_str(obj, "table", parent)?.to_owned();
     let alias = opt_str(obj, "alias").map(|s| s.to_owned());
-    Ok(FromClause { table, alias })
+    Ok(FromClause::table(table, alias))
 }
 
 #[cfg(test)]
@@ -37,16 +37,16 @@ mod tests {
     fn build_from_clause_with_table() {
         let val = json!({"table": "users"});
         let from = build_from_clause(&val, "from").unwrap();
-        assert_eq!(from.table, "users");
-        assert!(from.alias.is_none());
+        assert_eq!(from.table_name().unwrap(), "users");
+        assert!(from.alias().is_none());
     }
 
     #[test]
     fn build_from_clause_with_alias() {
         let val = json!({"table": "users", "alias": "u"});
         let from = build_from_clause(&val, "from").unwrap();
-        assert_eq!(from.table, "users");
-        assert_eq!(from.alias, Some("u".to_owned()));
+        assert_eq!(from.table_name().unwrap(), "users");
+        assert_eq!(from.alias(), Some("u".to_owned()));
     }
 
     #[test]

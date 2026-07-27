@@ -87,10 +87,7 @@ mod tests {
     fn valid_plan() -> QueryPlan {
         QueryPlan {
             select: vec![Projection::Star { table: None }],
-            from: FromClause {
-                table: "users".to_owned(),
-                alias: None,
-            },
+            from: FromClause::table("users".to_owned(), None),
             r#where: None,
             group_by: None,
             having: None,
@@ -129,7 +126,7 @@ mod tests {
     fn multiple_errors_collected() {
         let mut plan = valid_plan();
         plan.select = vec![];
-        plan.from.table = "".to_owned();
+        plan.from = FromClause::table("".to_owned(), None);
         let result = validate_plan(&plan);
         assert!(result.is_err());
         let errors = result.unwrap_err();

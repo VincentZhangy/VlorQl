@@ -39,10 +39,7 @@ async fn validation_aggregates_multiple_schema_errors() {
     });
     plan.joins = Some(vec![vlorql_core::schema::JoinClause {
         join_type: vlorql_core::schema::JoinType::Inner,
-        right_table: FromClause {
-            table: "missing_table".to_owned(),
-            alias: None,
-        },
+        right_table: FromClause::table("missing_table".to_owned(), None),
         on: Predicate::Comparison {
             left: Expression::ColumnRef {
                 table: Some("users".to_owned()),
@@ -237,10 +234,7 @@ async fn policy_violations_short_circuit_retry_loop() {
             column: "id".to_owned(),
             alias: None,
         }],
-        from: FromClause {
-            table: "orders".to_owned(),
-            alias: None,
-        },
+        from: FromClause::table("orders".to_owned(), None),
         r#where: None,
         group_by: None,
         having: None,

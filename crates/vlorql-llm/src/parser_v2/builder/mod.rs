@@ -24,7 +24,7 @@
 //!
 //! let json = json!({"select":[{"type":"star"}],"from":{"table":"users"}});
 //! let plan = build_plan(&json).unwrap();
-//! assert_eq!(plan.from.table, "users");
+//! assert_eq!(plan.from.table_name().unwrap(), "users");
 //! ```
 
 pub mod expr_builder;

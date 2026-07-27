@@ -63,7 +63,7 @@ impl std::error::Error for ParseError {}
 ///
 /// let raw = r#"{"select": [{"type": "star"}], "from": {"table": "users"}}"#;
 /// let plan = parse_query_plan(raw).unwrap();
-/// assert_eq!(plan.from.table, "users");
+/// assert_eq!(plan.from.table_name().unwrap(), "users");
 /// ```
 pub fn parse_query_plan(raw: &str) -> Result<QueryPlan, ParseError> {
     // Stage 1: Recover — extract JSON from raw text.
@@ -153,7 +153,7 @@ mod tests {
     fn parse_valid_star_plan() {
         let raw = r#"{"select": [{"type": "star"}], "from": {"table": "users"}}"#;
         let plan = parse_query_plan(raw).unwrap();
-        assert_eq!(plan.from.table, "users");
+        assert_eq!(plan.from.table_name().unwrap(), "users");
         assert_eq!(plan.select.len(), 1);
     }
 
@@ -162,14 +162,14 @@ mod tests {
         let raw =
             "```json\n{\"select\": [{\"type\": \"star\"}], \"from\": {\"table\": \"users\"}}\n```";
         let plan = parse_query_plan(raw).unwrap();
-        assert_eq!(plan.from.table, "users");
+        assert_eq!(plan.from.table_name().unwrap(), "users");
     }
 
     #[test]
     fn parse_deepseek_style() {
         let raw = r#"{"select": [{"type": "star"}], "from": {"table": "orders"}, "filter": {"type": "comparison", "left": {"column": "status"}, "op": "eq", "right": {"value": "active"}}}"#;
         let plan = parse_query_plan(raw).unwrap();
-        assert_eq!(plan.from.table, "orders");
+        assert_eq!(plan.from.table_name().unwrap(), "orders");
         assert!(plan.r#where.is_some());
     }
 
@@ -177,7 +177,7 @@ mod tests {
     fn parse_qwen_style() {
         let raw = r#"{"projection": ["id", "name"], "source": "users", "filter": {"type": "comparison", "left": {"column": "age"}, "op": "gt", "right": {"value": 18}}}"#;
         let plan = parse_query_plan(raw).unwrap();
-        assert_eq!(plan.from.table, "users");
+        assert_eq!(plan.from.table_name().unwrap(), "users");
         assert_eq!(plan.select.len(), 2);
         assert!(plan.r#where.is_some());
     }
@@ -186,7 +186,7 @@ mod tests {
     fn parse_llama_style() {
         let raw = "Here is the plan:\n```json\n{\"select\": [{\"type\": \"star\"}], \"from\": {\"table\": \"products\"}, \"where\": [{\"type\": \"comparison\", \"left\": {\"column\": \"price\"}, \"op\": \"lt\", \"right\": {\"value\": 100}}], \"sort\": [{\"expr\": {\"column\": \"name\"}, \"descending\": true}]}\n```";
         let plan = parse_query_plan(raw).unwrap();
-        assert_eq!(plan.from.table, "products");
+        assert_eq!(plan.from.table_name().unwrap(), "products");
         assert!(plan.r#where.is_some());
         assert!(plan.order_by.is_some());
     }
@@ -213,7 +213,7 @@ mod tests {
         // (which would normally fail validation).
         let raw = r#"{"select": [{"type": "star"}], "from": {"table": "users"}, "limit": 0}"#;
         let plan = parse_query_plan_lenient(raw).unwrap();
-        assert_eq!(plan.from.table, "users");
+        assert_eq!(plan.from.table_name().unwrap(), "users");
         // fixer removes limit=0
         assert_eq!(plan.limit, None);
     }
@@ -224,6 +224,6 @@ mod tests {
         let result = parse_query_plan_debug(raw).unwrap();
         assert!(result.json_str.contains("select"));
         assert!(result.canonical.get("select").is_some());
-        assert_eq!(result.plan.from.table, "users");
+        assert_eq!(result.plan.from.table_name().unwrap(), "users");
     }
 }

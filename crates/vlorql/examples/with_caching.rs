@@ -69,10 +69,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 column: "id".to_owned(),
                 alias: None,
             }],
-            from: vlorql_core::schema::FromClause {
-                table: "users".to_owned(),
-                alias: None,
-            },
+            from: vlorql_core::schema::FromClause::table("users".to_owned(), None),
             r#where: None,
             group_by: None,
             having: None,

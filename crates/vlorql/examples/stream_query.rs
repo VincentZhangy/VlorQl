@@ -136,10 +136,7 @@ fn sample_plan() -> QueryPlan {
                 alias: None,
             },
         ],
-        from: FromClause {
-            table: "users".to_owned(),
-            alias: None,
-        },
+        from: FromClause::table("users".to_owned(), None),
         r#where: Some(Predicate::Comparison {
             left: Expression::ColumnRef {
                 table: Some("users".to_owned()),

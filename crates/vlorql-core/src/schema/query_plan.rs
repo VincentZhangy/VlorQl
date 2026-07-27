@@ -40,12 +40,50 @@ pub enum Projection {
 
 /// The source table for a query or join.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct FromClause {
-    /// The table name as it appears in the schema snapshot.
-    pub table: String,
-    /// Optional alias (`AS <alias>`).
-    pub alias: Option<String>,
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum FromClause {
+    /// A named table reference.
+    Table {
+        /// The table name as it appears in the schema snapshot.
+        table: String,
+        /// Optional alias (`AS <alias>`).
+        alias: Option<String>,
+    },
+    /// A subquery reference.
+    Subquery {
+        /// The subquery plan.
+        query: Box<QueryPlan>,
+        /// Optional alias (`AS <alias>`).
+        alias: Option<String>,
+    },
+}
+
+impl FromClause {
+    /// Create a `Table` variant.
+    #[must_use]
+    pub fn table(name: impl Into<String>, alias: Option<String>) -> Self {
+        Self::Table {
+            table: name.into(),
+            alias,
+        }
+    }
+
+    /// Return the table name if this is a `Table` variant.
+    #[must_use]
+    pub fn table_name(&self) -> Option<&str> {
+        match self {
+            Self::Table { table, .. } => Some(table.as_str()),
+            Self::Subquery { .. } => None,
+        }
+    }
+
+    /// Return the alias, if any, regardless of variant.
+    #[must_use]
+    pub fn alias(&self) -> Option<String> {
+        match self {
+            Self::Table { alias, .. } | Self::Subquery { alias, .. } => alias.clone(),
+        }
+    }
 }
 
 /// A join between the current relation and another table.
@@ -127,7 +165,7 @@ pub struct SetOperationClause {
 ///         column: "id".to_owned(),
 ///         alias: None,
 ///     }],
-///     from: FromClause { table: "users".to_owned(), alias: None },
+///     from: FromClause::table("users".to_owned(), None),
 ///     r#where: Some(Predicate::Comparison {
 ///         left: Expression::ColumnRef {
 ///             table: Some("users".to_owned()),

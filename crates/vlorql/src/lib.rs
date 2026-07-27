@@ -122,7 +122,7 @@ pub enum StreamEvent {
 ///     select: vec![Projection::Column {
 ///         table: None, column: "id".to_owned(), alias: None,
 ///     }],
-///     from: FromClause { table: "users".to_owned(), alias: None },
+///     from: FromClause::table("users".to_owned(), None),
 ///     r#where: None, group_by: None, having: None,
 ///     order_by: None, limit: None, offset: None,
 ///     joins: None, ctes: None, distinct: false, distinct_on: None, set_operation: None,
@@ -1234,10 +1234,7 @@ mod tests {
                 column: "id".to_owned(),
                 alias: None,
             }],
-            from: FromClause {
-                table: "users".to_owned(),
-                alias: Some("t1".to_owned()),
-            },
+            from: FromClause::table("users".to_owned(), Some("t1".to_owned())),
             r#where: None,
             group_by: None,
             having: None,

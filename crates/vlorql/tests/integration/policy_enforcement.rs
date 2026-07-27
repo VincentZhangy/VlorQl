@@ -30,10 +30,7 @@ async fn denied_table_surfaces_policy_error() {
             column: "id".to_owned(),
             alias: None,
         }],
-        from: FromClause {
-            table: "orders".to_owned(),
-            alias: None,
-        },
+        from: FromClause::table("orders".to_owned(), None),
         r#where: None,
         group_by: None,
         having: None,
@@ -81,10 +78,7 @@ async fn query_does_not_compile_when_plan_targets_denied_table() {
             column: "id".to_owned(),
             alias: None,
         }],
-        from: FromClause {
-            table: "orders".to_owned(),
-            alias: None,
-        },
+        from: FromClause::table("orders".to_owned(), None),
         r#where: None,
         group_by: None,
         having: None,

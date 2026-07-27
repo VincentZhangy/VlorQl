@@ -37,10 +37,7 @@ fn base_plan() -> QueryPlan {
             column: "id".to_owned(),
             alias: None,
         }],
-        from: FromClause {
-            table: "users".to_owned(),
-            alias: None,
-        },
+        from: FromClause::table("users".to_owned(), None),
         r#where: None,
         group_by: None,
         having: None,
@@ -161,10 +158,7 @@ fn too_many_joins_is_rejected() {
     plan.joins = Some(vec![
         JoinClause {
             join_type: JoinType::Inner,
-            right_table: FromClause {
-                table: "users".to_owned(),
-                alias: Some("u2".to_owned()),
-            },
+            right_table: FromClause::table("users".to_owned(), Some("u2".to_owned())),
             on: Predicate::Comparison {
                 left: Expression::ColumnRef {
                     table: Some("users".to_owned()),
@@ -179,10 +173,7 @@ fn too_many_joins_is_rejected() {
         },
         JoinClause {
             join_type: JoinType::Inner,
-            right_table: FromClause {
-                table: "users".to_owned(),
-                alias: Some("u3".to_owned()),
-            },
+            right_table: FromClause::table("users".to_owned(), Some("u3".to_owned())),
             on: Predicate::Comparison {
                 left: Expression::ColumnRef {
                     table: Some("users".to_owned()),
@@ -197,10 +188,7 @@ fn too_many_joins_is_rejected() {
         },
         JoinClause {
             join_type: JoinType::Inner,
-            right_table: FromClause {
-                table: "users".to_owned(),
-                alias: Some("u4".to_owned()),
-            },
+            right_table: FromClause::table("users".to_owned(), Some("u4".to_owned())),
             on: Predicate::Comparison {
                 left: Expression::ColumnRef {
                     table: Some("users".to_owned()),
@@ -230,10 +218,7 @@ fn disallowed_join_type_is_rejected() {
     let mut plan = base_plan();
     plan.joins = Some(vec![JoinClause {
         join_type: JoinType::Right,
-        right_table: FromClause {
-            table: "users".to_owned(),
-            alias: Some("u2".to_owned()),
-        },
+        right_table: FromClause::table("users".to_owned(), Some("u2".to_owned())),
         on: Predicate::Comparison {
             left: Expression::ColumnRef {
                 table: Some("users".to_owned()),
@@ -408,10 +393,7 @@ fn multiple_dialect_violations_are_collected_together() {
     plan.joins = Some(vec![
         JoinClause {
             join_type: JoinType::Right,
-            right_table: FromClause {
-                table: "users".to_owned(),
-                alias: Some("u2".to_owned()),
-            },
+            right_table: FromClause::table("users".to_owned(), Some("u2".to_owned())),
             on: Predicate::Comparison {
                 left: Expression::ColumnRef {
                     table: Some("users".to_owned()),
@@ -426,10 +408,7 @@ fn multiple_dialect_violations_are_collected_together() {
         },
         JoinClause {
             join_type: JoinType::Right,
-            right_table: FromClause {
-                table: "users".to_owned(),
-                alias: Some("u3".to_owned()),
-            },
+            right_table: FromClause::table("users".to_owned(), Some("u3".to_owned())),
             on: Predicate::Comparison {
                 left: Expression::ColumnRef {
                     table: Some("users".to_owned()),
@@ -444,10 +423,7 @@ fn multiple_dialect_violations_are_collected_together() {
         },
         JoinClause {
             join_type: JoinType::Right,
-            right_table: FromClause {
-                table: "users".to_owned(),
-                alias: Some("u4".to_owned()),
-            },
+            right_table: FromClause::table("users".to_owned(), Some("u4".to_owned())),
             on: Predicate::Comparison {
                 left: Expression::ColumnRef {
                     table: Some("users".to_owned()),
@@ -493,10 +469,7 @@ fn plan_that_respects_every_constraint_passes_validation() {
             column: "id".to_owned(),
             alias: None,
         }],
-        from: FromClause {
-            table: "users".to_owned(),
-            alias: None,
-        },
+        from: FromClause::table("users".to_owned(), None),
         r#where: None,
         group_by: None,
         having: None,

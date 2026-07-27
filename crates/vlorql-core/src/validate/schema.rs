@@ -3,7 +3,7 @@
 use crate::errors::{SchemaErrorKind, VlorQLError};
 use crate::query::{ColumnReference, QueryScope, collect_plan_references};
 use crate::schema::{
-    Expression, InTarget, JoinType, Predicate, Projection, QueryPlan, SchemaSnapshot,
+    Expression, FromClause, InTarget, JoinType, Predicate, Projection, QueryPlan, SchemaSnapshot,
 };
 use serde_json::json;
 use std::collections::HashSet;
@@ -48,6 +48,20 @@ fn validate_plan_with_outer(
     if let Some(ctes) = &plan.ctes {
         for cte in ctes {
             validate_plan_with_outer(&cte.query, schema, errors, None);
+        }
+    }
+
+    // Validate subquery in FROM clause.
+    if let FromClause::Subquery { query, .. } = &plan.from {
+        validate_plan_with_outer(query, schema, errors, None);
+    }
+
+    // Validate subquery in JOIN right tables.
+    if let Some(joins) = &plan.joins {
+        for join in joins {
+            if let FromClause::Subquery { query, .. } = &join.right_table {
+                validate_plan_with_outer(query, schema, errors, None);
+            }
         }
     }
 
@@ -395,10 +409,7 @@ mod tests {
             ],
             distinct: false,
             distinct_on: None,
-            from: FromClause {
-                table: "users".to_owned(),
-                alias: None,
-            },
+            from: FromClause::table("users".to_owned(), None),
             r#where: None,
             group_by: None,
             having: None,
@@ -407,10 +418,7 @@ mod tests {
             offset: None,
             joins: Some(vec![JoinClause {
                 join_type: JoinType::Cross,
-                right_table: FromClause {
-                    table: "products".to_owned(),
-                    alias: None,
-                },
+                right_table: FromClause::table("products".to_owned(), None),
                 // Hallucinated `users.product_id` — invalid, but must be ignored.
                 on: Predicate::Comparison {
                     left: Expression::ColumnRef {
@@ -443,10 +451,7 @@ mod tests {
             }],
             distinct: false,
             distinct_on: None,
-            from: FromClause {
-                table: "users".to_owned(),
-                alias: None,
-            },
+            from: FromClause::table("users".to_owned(), None),
             r#where: None,
             group_by: None,
             having: None,
@@ -455,10 +460,7 @@ mod tests {
             offset: None,
             joins: Some(vec![JoinClause {
                 join_type: JoinType::Inner,
-                right_table: FromClause {
-                    table: "products".to_owned(),
-                    alias: None,
-                },
+                right_table: FromClause::table("products".to_owned(), None),
                 on: Predicate::Comparison {
                     left: Expression::ColumnRef {
                         table: Some("products".to_owned()),

@@ -77,10 +77,7 @@ fn build_query_plan() -> QueryPlan {
             };
             JoinClause {
                 join_type: JoinType::Inner,
-                right_table: FromClause {
-                    table: right_table,
-                    alias: Some(right_alias),
-                },
+                right_table: FromClause::table(right_table, Some(right_alias)),
                 on,
             }
         })
@@ -88,10 +85,7 @@ fn build_query_plan() -> QueryPlan {
 
     QueryPlan {
         select,
-        from: FromClause {
-            table: from_table,
-            alias: Some("t0".to_owned()),
-        },
+        from: FromClause::table(from_table, Some("t0".to_owned())),
         r#where: None,
         group_by: None,
         having: None,

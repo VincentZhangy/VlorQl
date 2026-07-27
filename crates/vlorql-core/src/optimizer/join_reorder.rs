@@ -68,7 +68,12 @@ struct Relation {
 
 impl Relation {
     fn new(from: FromClause) -> Self {
-        let key = from.alias.clone().unwrap_or_else(|| from.table.clone());
+        let key = match &from {
+            FromClause::Table { table, alias } => alias.clone().unwrap_or_else(|| table.clone()),
+            FromClause::Subquery { alias, .. } => {
+                alias.clone().unwrap_or_else(|| "<subquery>".to_owned())
+            }
+        };
         Self { from, key }
     }
 }
@@ -374,7 +379,7 @@ impl JoinReorderer {
     /// let reorderer = JoinReorderer::new(Arc::new(DummyStatisticsProvider::default()));
     /// let plan = QueryPlan {
     ///     select: vec![Projection::Star { table: None }],
-    ///     from: FromClause { table: "t".to_owned(), alias: None },
+    ///     from: FromClause::table("t".to_owned(), None),
     ///     r#where: None, group_by: None, having: None,
     ///     order_by: None, limit: None, offset: None,
     ///     joins: None, ctes: None, distinct: false,
@@ -439,7 +444,11 @@ impl JoinReorderer {
                     .await?;
                 Ok(cost)
             }
-            None => self.cost.estimate_scan(&plan.from.table, None).await,
+            None => {
+                self.cost
+                    .estimate_scan(plan.from.table_name().unwrap(), None)
+                    .await
+            }
         }
     }
 
@@ -455,10 +464,14 @@ impl JoinReorderer {
             base_card.push(
                 self.cost
                     .cardinality()
-                    .estimate_table_cardinality(&relation.from.table)
+                    .estimate_table_cardinality(relation.from.table_name().unwrap())
                     .await?,
             );
-            scan_cost.push(self.cost.estimate_scan(&relation.from.table, None).await?);
+            scan_cost.push(
+                self.cost
+                    .estimate_scan(relation.from.table_name().unwrap(), None)
+                    .await?,
+            );
         }
         Ok((base_card, scan_cost))
     }
@@ -715,10 +728,7 @@ mod tests {
     // --- builders -------------------------------------------------------
 
     fn from(table: &str) -> FromClause {
-        FromClause {
-            table: table.to_owned(),
-            alias: None,
-        }
+        FromClause::table(table.to_owned(), None)
     }
 
     fn col(table: &str, column: &str) -> Expression {
@@ -802,10 +812,10 @@ mod tests {
 
     fn relation_names(plan: &QueryPlan) -> HashSet<String> {
         let mut names = HashSet::new();
-        names.insert(plan.from.table.clone());
+        names.insert(plan.from.table_name().unwrap().to_owned());
         if let Some(joins) = &plan.joins {
             for join in joins {
-                names.insert(join.right_table.table.clone());
+                names.insert(join.right_table.table_name().unwrap().to_owned());
             }
         }
         names
@@ -843,7 +853,7 @@ mod tests {
         let reordered = reorderer.reorder(&plan).await.unwrap();
 
         // Base table is now the smallest relation.
-        assert_eq!(reordered.from.table, "items");
+        assert_eq!(reordered.from.table_name().unwrap(), "items");
 
         // Same relations, same predicates, still two inner joins.
         assert_eq!(relation_names(&reordered), relation_names(&plan));
@@ -902,7 +912,7 @@ mod tests {
 
         // The cheap equi join now runs first: `a` seeds the chain instead
         // of the original `c`.
-        assert_eq!(reordered.from.table, "a");
+        assert_eq!(reordered.from.table_name().unwrap(), "a");
 
         // And the rewrite is a strict improvement.
         let original_cost = reorderer.estimate_plan_cost(&plan).await.unwrap();

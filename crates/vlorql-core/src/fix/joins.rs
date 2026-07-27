@@ -13,10 +13,10 @@ use std::collections::HashSet;
 /// (FROM table + all JOIN right-hand sides).
 fn scope_tables(plan: &QueryPlan) -> HashSet<String> {
     let mut tables = HashSet::new();
-    tables.insert(plan.from.table.clone());
+    tables.insert(plan.from.table_name().unwrap().to_owned());
     if let Some(ref joins) = plan.joins {
         for join in joins {
-            tables.insert(join.right_table.table.clone());
+            tables.insert(join.right_table.table_name().unwrap().to_owned());
         }
     }
     tables
@@ -191,10 +191,7 @@ fn find_join_for(
                 {
                     return Some(JoinClause {
                         join_type: JoinType::Inner,
-                        right_table: FromClause {
-                            table: missing_table.to_owned(),
-                            alias: None,
-                        },
+                        right_table: FromClause::table(missing_table.to_owned(), None),
                         on: Predicate::Comparison {
                             left: Expression::ColumnRef {
                                 table: Some(scope_table.clone()),
@@ -220,10 +217,7 @@ fn find_join_for(
             {
                 return Some(JoinClause {
                     join_type: JoinType::Inner,
-                    right_table: FromClause {
-                        table: missing_table.to_owned(),
-                        alias: None,
-                    },
+                    right_table: FromClause::table(missing_table.to_owned(), None),
                     on: Predicate::Comparison {
                         left: Expression::ColumnRef {
                             table: Some(fk.foreign_table.clone()),
@@ -246,10 +240,7 @@ fn find_join_for(
             if scope.contains(local_table) {
                 return Some(JoinClause {
                     join_type: JoinType::Inner,
-                    right_table: FromClause {
-                        table: missing_table.to_owned(),
-                        alias: None,
-                    },
+                    right_table: FromClause::table(missing_table.to_owned(), None),
                     on: Predicate::Comparison {
                         left: Expression::ColumnRef {
                             table: Some(local_table.clone()),
@@ -284,7 +275,11 @@ pub(crate) fn drop_hallucinated_joins(plan: &mut QueryPlan, schema: &SchemaSnaps
         return false;
     };
     let before = joins.len();
-    joins.retain(|join| schema.get_table(&join.right_table.table).is_some());
+    joins.retain(|join| {
+        schema
+            .get_table(join.right_table.table_name().unwrap())
+            .is_some()
+    });
     let removed = joins.len() != before;
     if joins.is_empty() {
         plan.joins = None;
@@ -537,10 +532,7 @@ mod tests {
             ],
             distinct: false,
             distinct_on: None,
-            from: FromClause {
-                table: "orders".to_owned(),
-                alias: None,
-            },
+            from: FromClause::table("orders".to_owned(), None),
             r#where: None,
             group_by: None,
             having: None,
@@ -556,7 +548,7 @@ mod tests {
         assert!(plan.joins.is_some());
         let joins = plan.joins.as_ref().unwrap();
         assert_eq!(joins.len(), 1);
-        assert_eq!(joins[0].right_table.table, "users");
+        assert_eq!(joins[0].right_table.table_name().unwrap(), "users");
         // Verify the ON condition uses the correct FK: orders.user_id = users.id
         if let Predicate::Comparison {
             ref left,
@@ -607,10 +599,7 @@ mod tests {
             ],
             distinct: false,
             distinct_on: None,
-            from: FromClause {
-                table: "orders".to_owned(),
-                alias: None,
-            },
+            from: FromClause::table("orders".to_owned(), None),
             r#where: None,
             group_by: None,
             having: None,
@@ -619,10 +608,7 @@ mod tests {
             offset: None,
             joins: Some(vec![JoinClause {
                 join_type: JoinType::Inner,
-                right_table: FromClause {
-                    table: "users".to_owned(),
-                    alias: None,
-                },
+                right_table: FromClause::table("users".to_owned(), None),
                 on: Predicate::Comparison {
                     left: Expression::ColumnRef {
                         table: Some("orders".to_owned()),
@@ -666,10 +652,7 @@ mod tests {
             ],
             distinct: false,
             distinct_on: None,
-            from: FromClause {
-                table: "orders".to_owned(),
-                alias: None,
-            },
+            from: FromClause::table("orders".to_owned(), None),
             r#where: None,
             group_by: Some(vec![Expression::ColumnRef {
                 table: Some("orders".to_owned()),
@@ -688,7 +671,9 @@ mod tests {
         let joins = plan.joins.as_ref().unwrap();
         // order_items has FK order_id → orders.id, so the join should be:
         // orders.id = order_items.order_id
-        let found = joins.iter().any(|j| j.right_table.table == "order_items");
+        let found = joins
+            .iter()
+            .any(|j| j.right_table.table_name() == Some("order_items"));
         assert!(found, "order_items should be joined");
     }
 }

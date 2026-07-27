@@ -229,7 +229,7 @@ pub(crate) const DEFAULT_RETRY_DELAY: Duration = Duration::from_secs(1);
 ///     select: vec![Projection::Column {
 ///         table: None, column: "id".to_owned(), alias: None,
 ///     }],
-///     from: FromClause { table: "users".to_owned(), alias: None },
+///     from: FromClause::table("users".to_owned(), None),
 ///     r#where: None, group_by: None, having: None,
 ///     order_by: None, limit: None, offset: None,
 ///     joins: None, ctes: None, distinct: false, distinct_on: None, set_operation: None,
@@ -724,7 +724,7 @@ impl LlmClient for OpenAIClient {
 ///     select: vec![Projection::Column {
 ///         table: None, column: "id".to_owned(), alias: None,
 ///     }],
-///     from: FromClause { table: "users".to_owned(), alias: None },
+///     from: FromClause::table("users".to_owned(), None),
 ///     r#where: None, group_by: None, having: None,
 ///     order_by: None, limit: None, offset: None,
 ///     joins: None, ctes: None, distinct: false, distinct_on: None, set_operation: None,
@@ -1401,10 +1401,7 @@ fn default_plan() -> QueryPlan {
         select: vec![vlorql_core::schema::Projection::Star { table: None }],
         distinct: false,
         distinct_on: None,
-        from: vlorql_core::schema::FromClause {
-            table: "placeholder".to_owned(),
-            alias: None,
-        },
+        from: vlorql_core::schema::FromClause::table("placeholder".to_owned(), None),
         r#where: None,
         group_by: None,
         having: None,
@@ -1432,10 +1429,7 @@ mod tests {
     fn plan() -> QueryPlan {
         QueryPlan {
             select: vec![Projection::Star { table: None }],
-            from: FromClause {
-                table: "users".to_owned(),
-                alias: Some("t1".to_owned()),
-            },
+            from: FromClause::table("users".to_owned(), Some("t1".to_owned())),
             r#where: None,
             group_by: None,
             having: None,
@@ -1618,10 +1612,7 @@ mod tests {
         use futures::stream::StreamExt;
         let plan = QueryPlan {
             select: vec![Projection::Star { table: None }],
-            from: FromClause {
-                table: "users".to_owned(),
-                alias: None,
-            },
+            from: FromClause::table("users".to_owned(), None),
             r#where: None,
             group_by: None,
             having: None,

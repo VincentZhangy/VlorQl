@@ -47,7 +47,7 @@ pub trait PlanRewriter: fmt::Debug + Send + Sync {
 ///         },
 ///         alias: Some("total".to_owned()),
 ///     }],
-///     from: FromClause { table: "t".to_owned(), alias: None },
+///     from: FromClause::table("t".to_owned(), None),
 ///     r#where: None, group_by: None, having: None,
 ///     order_by: None, limit: None, offset: None, joins: None, ctes: None, distinct: false, distinct_on: None, set_operation: None,
 /// };
@@ -133,7 +133,7 @@ impl RewriterPipeline {
     ///         },
     ///         alias: Some("total".to_owned()),
     ///     }],
-    ///     from: FromClause { table: "t".to_owned(), alias: None },
+    ///     from: FromClause::table("t".to_owned(), None),
     ///     r#where: None, group_by: None, having: None,
     ///     order_by: None, limit: None, offset: None, joins: None, ctes: None, distinct: false, distinct_on: None, set_operation: None,
     /// };

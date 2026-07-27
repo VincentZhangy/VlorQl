@@ -222,10 +222,7 @@ mod tests {
                 },
                 alias: Some("three".to_owned()),
             }],
-            from: FromClause {
-                table: "t".to_owned(),
-                alias: None,
-            },
+            from: FromClause::table("t".to_owned(), None),
             r#where: None,
             group_by: None,
             having: None,
@@ -254,10 +251,7 @@ mod tests {
         // age > 20 + 5   -->   age > 25
         let plan = QueryPlan {
             select: vec![column_projection(Some("users"), "age")],
-            from: FromClause {
-                table: "users".to_owned(),
-                alias: None,
-            },
+            from: FromClause::table("users".to_owned(), None),
             r#where: Some(compare(
                 col(Some("users"), "age"),
                 ComparisonOperator::Gt,
@@ -303,10 +297,7 @@ mod tests {
                 expression: expr.clone(),
                 alias: None,
             }],
-            from: FromClause {
-                table: "users".to_owned(),
-                alias: None,
-            },
+            from: FromClause::table("users".to_owned(), None),
             r#where: None,
             group_by: None,
             having: None,
@@ -344,10 +335,7 @@ mod tests {
                     column_projection(Some("orders"), "user_id"),
                     column_projection(Some("orders"), "status"),
                 ],
-                from: FromClause {
-                    table: "orders".to_owned(),
-                    alias: None,
-                },
+                from: FromClause::table("orders".to_owned(), None),
                 r#where: None,
                 group_by: None,
                 having: None,
@@ -363,10 +351,7 @@ mod tests {
         };
         QueryPlan {
             select: vec![column_projection(Some("recent"), "id")],
-            from: FromClause {
-                table: "recent".to_owned(),
-                alias: None,
-            },
+            from: FromClause::table("recent".to_owned(), None),
             r#where: Some(outer_where),
             group_by: None,
             having: None,
@@ -419,10 +404,7 @@ mod tests {
         // The outer FROM is a base table, not a CTE: nothing to push.
         let plan = QueryPlan {
             select: vec![column_projection(Some("users"), "id")],
-            from: FromClause {
-                table: "users".to_owned(),
-                alias: None,
-            },
+            from: FromClause::table("users".to_owned(), None),
             r#where: Some(compare(
                 col(Some("users"), "active"),
                 ComparisonOperator::Eq,
@@ -461,10 +443,7 @@ mod tests {
         // but not attributable to the CTE.
         plan.joins = Some(vec![JoinClause {
             join_type: JoinType::Inner,
-            right_table: FromClause {
-                table: "other".to_owned(),
-                alias: None,
-            },
+            right_table: FromClause::table("other".to_owned(), None),
             on: compare(
                 col(Some("recent"), "user_id"),
                 ComparisonOperator::Eq,
@@ -656,10 +635,7 @@ mod tests {
                 },
                 alias: Some("total".to_owned()),
             }],
-            from: FromClause {
-                table: "t".to_owned(),
-                alias: None,
-            },
+            from: FromClause::table("t".to_owned(), None),
             r#where: None,
             group_by: None,
             having: None,
@@ -719,10 +695,7 @@ mod tests {
                 column: "id".to_owned(),
                 alias: None,
             }],
-            from: FromClause {
-                table: "users".to_owned(),
-                alias: None,
-            },
+            from: FromClause::table("users".to_owned(), None),
             r#where: None,
             group_by: None,
             having: None,
@@ -738,7 +711,7 @@ mod tests {
         let rewritten = optimizer.optimize_async(&plan).await.unwrap();
         // The pipeline may rewrite constants or reorder, but the FROM
         // table should be preserved.
-        assert_eq!(rewritten.from.table, "users");
+        assert_eq!(rewritten.from.table_name().unwrap(), "users");
     }
 
     // ------------------------------------------------------------------
@@ -868,10 +841,7 @@ mod tests {
                         alias: None,
                     },
                 ],
-                from: FromClause {
-                    table: "orders".to_owned(),
-                    alias: None,
-                },
+                from: FromClause::table("orders".to_owned(), None),
                 r#where: None,
                 group_by: None,
                 having: None,
@@ -892,10 +862,7 @@ mod tests {
                 column: "status".to_owned(),
                 alias: None,
             }],
-            from: FromClause {
-                table: "recent".to_owned(),
-                alias: None,
-            },
+            from: FromClause::table("recent".to_owned(), None),
             r#where: None,
             group_by: None,
             having: None,
@@ -949,10 +916,7 @@ mod tests {
         // immediately.
         let plan = QueryPlan {
             select: vec![column_projection(None, "id")],
-            from: FromClause {
-                table: "t".to_owned(),
-                alias: None,
-            },
+            from: FromClause::table("t".to_owned(), None),
             r#where: None,
             group_by: None,
             having: None,
@@ -992,10 +956,7 @@ mod tests {
                 },
                 alias: Some("total".to_owned()),
             }],
-            from: FromClause {
-                table: "t".to_owned(),
-                alias: None,
-            },
+            from: FromClause::table("t".to_owned(), None),
             r#where: None,
             group_by: None,
             having: None,
@@ -1026,10 +987,7 @@ mod tests {
     fn optimize_repeat_exposes_fixpoint_method() {
         let plan = QueryPlan {
             select: vec![column_projection(None, "id")],
-            from: FromClause {
-                table: "t".to_owned(),
-                alias: None,
-            },
+            from: FromClause::table("t".to_owned(), None),
             r#where: None,
             group_by: None,
             having: None,
@@ -1060,10 +1018,7 @@ mod tests {
                 column_projection(None, "id"),
                 column_projection(None, "val"),
             ],
-            from: FromClause {
-                table: "t2".to_owned(),
-                alias: None,
-            },
+            from: FromClause::table("t2".to_owned(), None),
             r#where: None,
             group_by: None,
             having: None,
@@ -1078,10 +1033,7 @@ mod tests {
         };
         let cte1_body = QueryPlan {
             select: vec![Projection::Star { table: None }],
-            from: FromClause {
-                table: "cte2".to_owned(),
-                alias: None,
-            },
+            from: FromClause::table("cte2".to_owned(), None),
             r#where: None,
             group_by: None,
             having: None,
@@ -1096,10 +1048,7 @@ mod tests {
         };
         let plan = QueryPlan {
             select: vec![Projection::Star { table: None }],
-            from: FromClause {
-                table: "cte1".to_owned(),
-                alias: None,
-            },
+            from: FromClause::table("cte1".to_owned(), None),
             r#where: Some(compare(
                 col(Some("cte1"), "val"),
                 ComparisonOperator::Gt,
@@ -1178,10 +1127,7 @@ mod tests {
                 column_projection(None, "id"),
                 column_projection(None, "val"),
             ],
-            from: FromClause {
-                table: "t2".to_owned(),
-                alias: None,
-            },
+            from: FromClause::table("t2".to_owned(), None),
             r#where: None,
             group_by: None,
             having: None,
@@ -1196,10 +1142,7 @@ mod tests {
         };
         let cte1_body = QueryPlan {
             select: vec![Projection::Star { table: None }],
-            from: FromClause {
-                table: "cte2".to_owned(),
-                alias: Some("inner_c".to_owned()),
-            },
+            from: FromClause::table("cte2".to_owned(), Some("inner_c".to_owned())),
             r#where: None,
             group_by: None,
             having: None,
@@ -1214,10 +1157,7 @@ mod tests {
         };
         let plan = QueryPlan {
             select: vec![Projection::Star { table: None }],
-            from: FromClause {
-                table: "cte1".to_owned(),
-                alias: None,
-            },
+            from: FromClause::table("cte1".to_owned(), None),
             r#where: Some(compare(
                 col(Some("cte1"), "val"),
                 ComparisonOperator::Gt,

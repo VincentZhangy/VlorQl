@@ -22,7 +22,7 @@ use super::table_builder::build_from_clause;
 /// use serde_json::json;
 ///
 /// let join = build_join_clause(&json!({"join_type": "inner", "right_table": {"table": "orders"}, "on": {"type": "comparison", "left": {"column": "user_id"}, "op": "eq", "right": {"column": "id"}}})).unwrap();
-/// assert_eq!(join.right_table.table, "orders");
+/// assert_eq!(join.right_table.table_name().unwrap(), "orders");
 /// ```
 pub fn build_join_clause(val: &Value) -> Result<JoinClause, BuildError> {
     let obj = req_obj(val, "join")?;
@@ -71,28 +71,28 @@ mod tests {
     fn build_inner_join() {
         let val = json!({"join_type": "inner", "right_table": {"table": "orders"}, "on": {"type": "comparison", "left": {"column": "user_id"}, "op": "eq", "right": {"column": "id"}}});
         let join = build_join_clause(&val).unwrap();
-        assert_eq!(join.right_table.table, "orders");
+        assert_eq!(join.right_table.table_name().unwrap(), "orders");
     }
 
     #[test]
     fn build_left_join() {
         let val = json!({"join_type": "left", "right_table": {"table": "orders"}, "on": {"type": "comparison", "left": {"column": "user_id"}, "op": "eq", "right": {"column": "id"}}});
         let join = build_join_clause(&val).unwrap();
-        assert_eq!(join.right_table.table, "orders");
+        assert_eq!(join.right_table.table_name().unwrap(), "orders");
     }
 
     #[test]
     fn build_cross_join_without_on() {
         let val = json!({"join_type": "cross", "right_table": {"table": "orders"}});
         let join = build_join_clause(&val).unwrap();
-        assert_eq!(join.right_table.table, "orders");
+        assert_eq!(join.right_table.table_name().unwrap(), "orders");
     }
 
     #[test]
     fn build_cross_join_with_on() {
         let val = json!({"join_type": "cross", "right_table": {"table": "orders"}, "on": {"type": "comparison", "left": {"column": "user_id"}, "op": "eq", "right": {"column": "id"}}});
         let join = build_join_clause(&val).unwrap();
-        assert_eq!(join.right_table.table, "orders");
+        assert_eq!(join.right_table.table_name().unwrap(), "orders");
     }
 
     #[test]

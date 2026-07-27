@@ -33,7 +33,8 @@ fn run_golden_test(case: &golden::GoldenTestCase) {
 
     // Check FROM table.
     assert_eq!(
-        plan.from.table, case.expected_from_table,
+        plan.from.table_name().unwrap_or(""),
+        case.expected_from_table,
         "{}: FROM table mismatch",
         case.name,
     );
@@ -80,7 +81,7 @@ fn run_golden_test(case: &golden::GoldenTestCase) {
 
     // Check FROM alias.
     assert_eq!(
-        plan.from.alias.as_deref(),
+        plan.from.alias().as_deref(),
         case.expected_alias,
         "{}: FROM alias mismatch",
         case.name,
