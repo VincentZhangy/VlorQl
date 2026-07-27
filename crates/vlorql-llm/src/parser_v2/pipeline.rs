@@ -62,10 +62,10 @@ impl std::error::Error for ParseError {}
 /// use vlorql_llm::parser_v2::parse_query_plan;
 ///
 /// let raw = r#"{"select": [{"type": "star"}], "from": {"table": "users"}}"#;
-/// let plan = parse_query_plan(raw).unwrap();
+/// let plan = parse_query_plan(raw, None).unwrap();
 /// assert_eq!(plan.from.table_name().unwrap(), "users");
 /// ```
-pub fn parse_query_plan(raw: &str) -> Result<QueryPlan, ParseError> {
+pub fn parse_query_plan(raw: &str, model_name: Option<&str>) -> Result<QueryPlan, ParseError> {
     // Stage 1: Recover — extract JSON from raw text.
     let json_str = extract_json_content(raw);
 
@@ -73,10 +73,10 @@ pub fn parse_query_plan(raw: &str) -> Result<QueryPlan, ParseError> {
     // append the required closing characters so serde can parse it.
     let json_str = repair_truncated_json(json_str);
 
-    // Stage 2: Normalize — canonicalize the JSON.
+    // Stage 2: Normalize — canonicalize the JSON (model-aware).
     let mut value: serde_json::Value =
         serde_json::from_str(&json_str).map_err(|e| ParseError::InvalidJson(e.to_string()))?;
-    let _ = normalize_pipeline::normalize(&mut value);
+    let _ = normalize_pipeline::normalize_for_model(&mut value, model_name);
 
     // Stage 3: Build — canonical JSON → QueryPlan AST.
     let mut plan =
@@ -100,12 +100,15 @@ pub fn parse_query_plan(raw: &str) -> Result<QueryPlan, ParseError> {
 /// Run the full pipeline but skip validation (for debugging / lenient mode).
 ///
 /// Useful when you want to see the plan even if it has minor issues.
-pub fn parse_query_plan_lenient(raw: &str) -> Result<QueryPlan, ParseError> {
+pub fn parse_query_plan_lenient(
+    raw: &str,
+    model_name: Option<&str>,
+) -> Result<QueryPlan, ParseError> {
     let json_str = extract_json_content(raw);
     let json_str = repair_truncated_json(json_str);
     let mut value: serde_json::Value =
         serde_json::from_str(&json_str).map_err(|e| ParseError::InvalidJson(e.to_string()))?;
-    let _ = normalize_pipeline::normalize(&mut value);
+    let _ = normalize_pipeline::normalize_for_model(&mut value, model_name);
     let mut plan =
         query_builder::build_plan(&value).map_err(|e| ParseError::BuildError(e.to_string()))?;
     let _ = fixer::fix_plan(&mut plan);
@@ -124,11 +127,14 @@ pub struct ParseResult {
 }
 
 /// Parse with full debug output.
-pub fn parse_query_plan_debug(raw: &str) -> Result<ParseResult, ParseError> {
+pub fn parse_query_plan_debug(
+    raw: &str,
+    model_name: Option<&str>,
+) -> Result<ParseResult, ParseError> {
     let json_str = extract_json_content(raw).to_owned();
     let mut value: serde_json::Value =
         serde_json::from_str(&json_str).map_err(|e| ParseError::InvalidJson(e.to_string()))?;
-    let _ = normalize_pipeline::normalize(&mut value);
+    let _ = normalize_pipeline::normalize_for_model(&mut value, model_name);
     let canonical = value.clone();
     let mut plan =
         query_builder::build_plan(&value).map_err(|e| ParseError::BuildError(e.to_string()))?;
@@ -152,7 +158,7 @@ mod tests {
     #[test]
     fn parse_valid_star_plan() {
         let raw = r#"{"select": [{"type": "star"}], "from": {"table": "users"}}"#;
-        let plan = parse_query_plan(raw).unwrap();
+        let plan = parse_query_plan(raw, None).unwrap();
         assert_eq!(plan.from.table_name().unwrap(), "users");
         assert_eq!(plan.select.len(), 1);
     }
@@ -161,14 +167,14 @@ mod tests {
     fn parse_with_markdown_fence() {
         let raw =
             "```json\n{\"select\": [{\"type\": \"star\"}], \"from\": {\"table\": \"users\"}}\n```";
-        let plan = parse_query_plan(raw).unwrap();
+        let plan = parse_query_plan(raw, None).unwrap();
         assert_eq!(plan.from.table_name().unwrap(), "users");
     }
 
     #[test]
     fn parse_deepseek_style() {
         let raw = r#"{"select": [{"type": "star"}], "from": {"table": "orders"}, "filter": {"type": "comparison", "left": {"column": "status"}, "op": "eq", "right": {"value": "active"}}}"#;
-        let plan = parse_query_plan(raw).unwrap();
+        let plan = parse_query_plan(raw, None).unwrap();
         assert_eq!(plan.from.table_name().unwrap(), "orders");
         assert!(plan.r#where.is_some());
     }
@@ -176,7 +182,7 @@ mod tests {
     #[test]
     fn parse_qwen_style() {
         let raw = r#"{"projection": ["id", "name"], "source": "users", "filter": {"type": "comparison", "left": {"column": "age"}, "op": "gt", "right": {"value": 18}}}"#;
-        let plan = parse_query_plan(raw).unwrap();
+        let plan = parse_query_plan(raw, None).unwrap();
         assert_eq!(plan.from.table_name().unwrap(), "users");
         assert_eq!(plan.select.len(), 2);
         assert!(plan.r#where.is_some());
@@ -185,7 +191,7 @@ mod tests {
     #[test]
     fn parse_llama_style() {
         let raw = "Here is the plan:\n```json\n{\"select\": [{\"type\": \"star\"}], \"from\": {\"table\": \"products\"}, \"where\": [{\"type\": \"comparison\", \"left\": {\"column\": \"price\"}, \"op\": \"lt\", \"right\": {\"value\": 100}}], \"sort\": [{\"expr\": {\"column\": \"name\"}, \"descending\": true}]}\n```";
-        let plan = parse_query_plan(raw).unwrap();
+        let plan = parse_query_plan(raw, None).unwrap();
         assert_eq!(plan.from.table_name().unwrap(), "products");
         assert!(plan.r#where.is_some());
         assert!(plan.order_by.is_some());
@@ -194,7 +200,7 @@ mod tests {
     #[test]
     fn parse_invalid_json() {
         let raw = "this is not json";
-        let result = parse_query_plan(raw);
+        let result = parse_query_plan(raw, None);
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), ParseError::InvalidJson(_)));
     }
@@ -202,7 +208,7 @@ mod tests {
     #[test]
     fn parse_missing_from() {
         let raw = r#"{"select": [{"type": "star"}]}"#;
-        let result = parse_query_plan(raw);
+        let result = parse_query_plan(raw, None);
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), ParseError::BuildError(_)));
     }
@@ -212,7 +218,7 @@ mod tests {
         // Lenient mode should still produce a plan even with limit=0
         // (which would normally fail validation).
         let raw = r#"{"select": [{"type": "star"}], "from": {"table": "users"}, "limit": 0}"#;
-        let plan = parse_query_plan_lenient(raw).unwrap();
+        let plan = parse_query_plan_lenient(raw, None).unwrap();
         assert_eq!(plan.from.table_name().unwrap(), "users");
         // fixer removes limit=0
         assert_eq!(plan.limit, None);
@@ -221,7 +227,7 @@ mod tests {
     #[test]
     fn parse_debug_returns_intermediates() {
         let raw = r#"{"select": [{"type": "star"}], "from": {"table": "users"}}"#;
-        let result = parse_query_plan_debug(raw).unwrap();
+        let result = parse_query_plan_debug(raw, None).unwrap();
         assert!(result.json_str.contains("select"));
         assert!(result.canonical.get("select").is_some());
         assert_eq!(result.plan.from.table_name().unwrap(), "users");

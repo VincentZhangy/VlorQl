@@ -59,7 +59,7 @@ pub use parser_v2::recover::{detect_template_leak, extract_json_content};
 /// It runs the full V2 pipeline (recover → normalize → build → fix → validate → optimize)
 /// and converts errors to the crate's `VlorQLError` type.
 pub(crate) fn parse_llm_response(content: &str) -> Result<QueryPlan, VlorQLError> {
-    parser_v2::pipeline::parse_query_plan(content).map_err(|e| {
+    parser_v2::pipeline::parse_query_plan(content, None).map_err(|e| {
         VlorQLError::llm(
             LlmErrorKind::ParseError {
                 details: e.to_string(),

@@ -58,23 +58,62 @@ pub fn normalize(val: &mut serde_json::Value) -> bool {
     changed
 }
 
-/// Run the full normalization pipeline with model-specific aliases.
+/// Selects a model-specific normalize pipeline.
+///
+/// Runs the full standard normalization pipeline first, then applies
+/// model-specific extra normalizations for models known to produce
+/// less-structured output (e.g. small models <3B params).
 #[must_use]
-pub fn normalize_for_model(val: &mut serde_json::Value, model: &str) -> bool {
+pub fn normalize_for_model(raw: &mut serde_json::Value, model_fingerprint: Option<&str>) -> bool {
+    let base = normalize(raw);
+
+    let Some(fp) = model_fingerprint else {
+        return base;
+    };
+
+    match fp {
+        fp if fp.contains("llama3.2") || fp.contains("qwen2.5") => {
+            // Small models: more aggressive normalization
+            normalize_small_model(raw) || base
+        }
+        _ => base,
+    }
+}
+
+/// Small-model-specific normalizations:
+///
+/// - Inject missing `type` fields in select projections
+/// - (Future: ensure FROM clause always has a table, remove uncommon fields)
+#[must_use]
+fn normalize_small_model(raw: &mut serde_json::Value) -> bool {
     let mut changed = false;
 
-    // Stage 1: Field name aliases (with model awareness).
-    changed |= aliases::normalize_field_names_for_model(val, model);
-
-    // Stage 2: Structure normalization.
-    changed |= array::normalize(val);
-    changed |= select::normalize(val);
-    changed |= table::normalize(val);
-    changed |= where_::normalize(val);
-    changed |= join::normalize(val);
-    changed |= query::normalize(val);
-
-    // Future stages...
+    // Ensure select items have type fields.
+    if let Some(select) = raw.get_mut("select").and_then(|v| v.as_array_mut()) {
+        for proj in select.iter_mut() {
+            if let Some(obj) = proj.as_object_mut()
+                && !obj.contains_key("type")
+            {
+                if obj.contains_key("column") || obj.contains_key("columns") {
+                    obj.insert(
+                        "type".to_owned(),
+                        serde_json::Value::String("column_ref".to_owned()),
+                    );
+                } else if obj.contains_key("expression") || obj.contains_key("expr") {
+                    obj.insert(
+                        "type".to_owned(),
+                        serde_json::Value::String("expr".to_owned()),
+                    );
+                } else {
+                    obj.insert(
+                        "type".to_owned(),
+                        serde_json::Value::String("star".to_owned()),
+                    );
+                }
+                changed = true;
+            }
+        }
+    }
 
     changed
 }

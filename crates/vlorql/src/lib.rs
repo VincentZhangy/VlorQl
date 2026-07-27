@@ -1200,7 +1200,7 @@ fn process_assembled_text(
             }),
         ));
     }
-    let plan: QueryPlan = match vlorql_llm::parse_query_plan(&buffer) {
+    let plan: QueryPlan = match vlorql_llm::parse_query_plan(&buffer, None) {
         Ok(plan) => plan,
         Err(error) => {
             return StreamEvent::Error(VlorQLError::llm(

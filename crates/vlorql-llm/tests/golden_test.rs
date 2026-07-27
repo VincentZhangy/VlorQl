@@ -12,7 +12,7 @@ mod golden;
 
 /// Run a single golden test case.
 fn run_golden_test(case: &golden::GoldenTestCase) {
-    let result = parse_query_plan(case.input);
+    let result = parse_query_plan(case.input, None);
     let plan = match result {
         Ok(plan) => plan,
         Err(e) => {
