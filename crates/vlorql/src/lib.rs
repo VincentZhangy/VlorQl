@@ -21,6 +21,7 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::Instrument;
+use vlorql_core::cache::{LlmCacheKey, LlmResponseCache};
 use vlorql_core::compile::{SqlCompiler, get_compiler};
 use vlorql_core::errors::{
     ConfigErrorKind, LlmErrorKind, SchemaErrorKind, ValidationErrorKind, VlorQLError,
@@ -142,6 +143,7 @@ pub struct VlorQl {
     schema_cache: Option<Arc<SchemaCache>>,
     compile_cache: Option<Arc<CompileCache>>,
     prompt_cache: Option<Arc<PromptCache>>,
+    llm_cache: LlmResponseCache,
     telemetry_guard: Option<TelemetryGuard>,
     metrics: Option<Arc<VlorqMetrics>>,
 }
@@ -160,6 +162,7 @@ impl std::fmt::Debug for VlorQl {
             .field("has_schema_cache", &self.schema_cache.is_some())
             .field("has_compile_cache", &self.compile_cache.is_some())
             .field("has_prompt_cache", &self.prompt_cache.is_some())
+            .field("llm_cache_size", &self.llm_cache.size())
             .field("max_retries", &self.max_retries)
             .finish()
     }
@@ -220,19 +223,48 @@ impl VlorQl {
                 None => prompt_builder.build_system_prompt(question),
             };
 
+            // Build cache key and check the LLM response cache.
+            let model_fingerprint =
+                format!("{}:{}", client.config().provider, client.config().model);
+            let cache_key = LlmCacheKey {
+                normalized_question: question.to_lowercase(),
+                schema_version: self.schema.metadata.version.clone().unwrap_or_default(),
+                model_fingerprint,
+            };
+            let cached_plan: Option<QueryPlan> =
+                self.llm_cache.get(&cache_key).await.map(|a| (*a).clone());
+
             let mut llm_question = question.to_owned();
             for attempt in 0..=self.max_retries {
                 let temperature = retry_temperature(client.config().temperature, attempt);
-                let plan = match client
-                    .generate_plan(&llm_question, &system_prompt, temperature)
-                    .await
-                {
-                    Ok(plan) => plan,
-                    Err(e) if e.is_retryable() && attempt < self.max_retries => {
-                        llm_question = format_retry_question_str(&llm_question, &e);
-                        continue;
+                let plan = if attempt == 0 {
+                    if let Some(p) = cached_plan.clone() {
+                        p
+                    } else {
+                        match client
+                            .generate_plan(&llm_question, &system_prompt, temperature)
+                            .await
+                        {
+                            Ok(plan) => plan,
+                            Err(e) if e.is_retryable() && attempt < self.max_retries => {
+                                llm_question = format_retry_question_str(&llm_question, &e);
+                                continue;
+                            }
+                            Err(e) => return Err(e),
+                        }
                     }
-                    Err(e) => return Err(e),
+                } else {
+                    match client
+                        .generate_plan(&llm_question, &system_prompt, temperature)
+                        .await
+                    {
+                        Ok(plan) => plan,
+                        Err(e) if e.is_retryable() && attempt < self.max_retries => {
+                            llm_question = format_retry_question_str(&llm_question, &e);
+                            continue;
+                        }
+                        Err(e) => return Err(e),
+                    }
                 };
                 match self.build_pipeline().validate_repairing(&plan) {
                     Ok(validated_plan) => {
@@ -280,6 +312,11 @@ impl VlorQl {
                                 .insert(&plan_for_compile, &self.dialect, compiled.clone())
                                 .await;
                         }
+
+                        // Insert into the LLM response cache.
+                        self.llm_cache
+                            .insert(cache_key, Arc::new(plan.clone()))
+                            .await;
 
                         let elapsed = start.elapsed().as_secs_f64();
                         if let Some(ref m) = self.metrics {
@@ -557,6 +594,7 @@ pub struct VlorQlBuilder {
     schema_cache: Option<Arc<SchemaCache>>,
     compile_cache: Option<Arc<CompileCache>>,
     prompt_cache: Option<Arc<PromptCache>>,
+    llm_cache: Option<LlmResponseCache>,
     telemetry_endpoint: Option<String>,
     telemetry_guard: Option<TelemetryGuard>,
     metrics: Option<Arc<VlorqMetrics>>,
@@ -578,6 +616,7 @@ impl Default for VlorQlBuilder {
             schema_cache: None,
             compile_cache: None,
             prompt_cache: None,
+            llm_cache: None,
             telemetry_endpoint: None,
             telemetry_guard: None,
             metrics: None,
@@ -704,6 +743,17 @@ impl VlorQlBuilder {
         self
     }
 
+    /// Configures an [`LlmResponseCache`] with the given capacity and TTL.
+    ///
+    /// Caches LLM-generated [`QueryPlan`] values keyed by question text,
+    /// schema version, and model fingerprint, avoiding redundant LLM
+    /// invocations for identical questions.
+    #[must_use]
+    pub fn with_llm_cache(mut self, max_entries: u64, ttl_seconds: u64) -> Self {
+        self.llm_cache = Some(LlmResponseCache::new(max_entries, ttl_seconds));
+        self
+    }
+
     /// Configures OpenTelemetry tracing and metrics with the given OTLP
     /// endpoint (e.g. `http://localhost:4317`).
     ///
@@ -780,6 +830,9 @@ impl VlorQlBuilder {
             schema_cache: self.schema_cache,
             compile_cache: self.compile_cache,
             prompt_cache: self.prompt_cache,
+            llm_cache: self
+                .llm_cache
+                .unwrap_or_else(|| LlmResponseCache::new(1000, 3600)),
             telemetry_guard: self.telemetry_guard,
             metrics: self.metrics,
         })

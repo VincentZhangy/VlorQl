@@ -17,6 +17,7 @@
 
 mod compile_cache;
 mod key;
+mod llm_cache;
 mod normalize;
 mod prompt_cache;
 mod schema_cache;
@@ -24,6 +25,7 @@ mod traits;
 
 pub use compile_cache::CompileCache;
 pub use key::{CompileCacheKey, SchemaCacheKey};
+pub use llm_cache::{LlmCacheKey, LlmResponseCache};
 pub use normalize::normalize_plan;
 pub(crate) use prompt_cache::hash_policy;
 pub use prompt_cache::{PromptCache, PromptCacheKey};
