@@ -219,21 +219,35 @@ impl ValidationPipeline {
         // validation.  The fixer repairs common LLM mistakes (missing joins,
         // nested aggregates, broken GROUP BY) using the real schema metadata.
         let mut plan = plan.clone();
+        let _span = tracing::info_span!("vlorql.validate.fix").entered();
         let _ = fix::schema_aware_fix(&mut plan, &self.schema);
+        drop(_span);
 
         let mut errors = Vec::new();
 
-        if let Err(stage_errors) = self.validate_schema(&plan) {
-            extend_unique(&mut errors, stage_errors);
+        {
+            let _span = tracing::info_span!("vlorql.validate.schema").entered();
+            if let Err(stage_errors) = self.validate_schema(&plan) {
+                extend_unique(&mut errors, stage_errors);
+            }
         }
-        if let Err(stage_errors) = self.policy.validate(&plan, &self.schema) {
-            extend_unique(&mut errors, stage_errors);
+        {
+            let _span = tracing::info_span!("vlorql.validate.policy").entered();
+            if let Err(stage_errors) = self.policy.validate(&plan, &self.schema) {
+                extend_unique(&mut errors, stage_errors);
+            }
         }
-        if let Err(stage_errors) = OperandValidator::validate(&plan, &self.schema) {
-            extend_unique(&mut errors, stage_errors);
+        {
+            let _span = tracing::info_span!("vlorql.validate.operand").entered();
+            if let Err(stage_errors) = OperandValidator::validate(&plan, &self.schema) {
+                extend_unique(&mut errors, stage_errors);
+            }
         }
-        if let Err(stage_errors) = DialectValidator::validate(&plan, &self.dialect) {
-            extend_unique(&mut errors, stage_errors);
+        {
+            let _span = tracing::info_span!("vlorql.validate.dialect").entered();
+            if let Err(stage_errors) = DialectValidator::validate(&plan, &self.dialect) {
+                extend_unique(&mut errors, stage_errors);
+            }
         }
 
         // SQL injection audit stage.

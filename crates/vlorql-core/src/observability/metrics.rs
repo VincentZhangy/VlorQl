@@ -27,6 +27,10 @@ pub struct VlorqMetrics {
     pub cache_hit_counter: Counter<u64>,
     /// Number of compile-cache misses.
     pub cache_miss_counter: Counter<u64>,
+    /// Number of schema-cache hits.
+    pub schema_cache_hits: Counter<u64>,
+    /// Number of schema-cache misses.
+    pub schema_cache_misses: Counter<u64>,
     /// Gauge of currently in-flight queries.
     pub active_queries: UpDownCounter<i64>,
 }
@@ -47,6 +51,8 @@ impl VlorqMetrics {
             llm_duration_histogram: meter.f64_histogram("vlorql.llm.duration").build(),
             cache_hit_counter: meter.u64_counter("vlorql.cache.hits").build(),
             cache_miss_counter: meter.u64_counter("vlorql.cache.misses").build(),
+            schema_cache_hits: meter.u64_counter("vlorql.schema_cache.hits").build(),
+            schema_cache_misses: meter.u64_counter("vlorql.schema_cache.misses").build(),
             active_queries: meter.i64_up_down_counter("vlorql.queries.active").build(),
         }
     }

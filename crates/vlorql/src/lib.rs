@@ -246,10 +246,14 @@ impl VlorQl {
                     if let Some(p) = cached_plan.clone() {
                         p
                     } else {
-                        match client
+                        let llm_start = std::time::Instant::now();
+                        let result = client
                             .generate_plan(&llm_question, &system_prompt, temperature)
-                            .await
-                        {
+                            .await;
+                        if let Some(ref m) = self.metrics {
+                            m.llm_duration_histogram.record(llm_start.elapsed().as_secs_f64(), &[]);
+                        }
+                        match result {
                             Ok(plan) => plan,
                             Err(e) if e.is_retryable() && attempt < self.max_retries => {
                                 llm_question = format_retry_question_str(&llm_question, &e);
