@@ -51,7 +51,7 @@ pub use vlorql_llm::{
     parse_query_plan_lenient,
 };
 
-const DEFAULT_MAX_RETRIES: usize = 2;
+const DEFAULT_MAX_RETRIES: usize = 3;
 
 /// Maximum number of validation errors surfaced in a single retry
 /// feedback message. Smaller models degrade when flooded with every
