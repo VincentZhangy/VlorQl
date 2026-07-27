@@ -14,6 +14,8 @@
 
 #![deny(missing_docs)]
 
+pub mod execute;
+
 use futures::StreamExt;
 use futures::stream::Stream;
 use serde_json::json;
@@ -26,6 +28,7 @@ use vlorql_core::compile::{SqlCompiler, get_compiler};
 use vlorql_core::errors::{
     ConfigErrorKind, LlmErrorKind, SchemaErrorKind, ValidationErrorKind, VlorQLError,
 };
+use vlorql_core::execute::{DatabaseExecutor, QueryResult};
 use vlorql_core::observability::{TelemetryGuard, VlorqMetrics, init_telemetry};
 use vlorql_core::optimizer::QueryOptimizer;
 use vlorql_core::policy::{PolicyConfig, PolicyEngine};
@@ -146,6 +149,7 @@ pub struct VlorQl {
     llm_cache: LlmResponseCache,
     telemetry_guard: Option<TelemetryGuard>,
     metrics: Option<Arc<VlorqMetrics>>,
+    executor: Option<Arc<dyn DatabaseExecutor>>,
 }
 
 impl std::fmt::Debug for VlorQl {
@@ -164,6 +168,7 @@ impl std::fmt::Debug for VlorQl {
             .field("has_prompt_cache", &self.prompt_cache.is_some())
             .field("llm_cache_size", &self.llm_cache.size())
             .field("max_retries", &self.max_retries)
+            .field("has_executor", &self.executor.is_some())
             .finish()
     }
 }
@@ -365,6 +370,30 @@ impl VlorQl {
         }
         .instrument(span)
         .await
+    }
+
+    /// Runs a complete natural-language query pipeline: plan → validate →
+    /// compile → execute.
+    ///
+    /// This is a convenience method that chains [`Self::query`] with the
+    /// configured [`DatabaseExecutor`]. It requires an executor to have
+    /// been set (via [`VlorQlBuilder::with_executor`]) — if none is
+    /// configured the call will return an error immediately.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`VlorQLError`] if the executor is not configured, or if
+    /// any step of the pipeline (LLM plan generation, validation,
+    /// compilation, or database execution) fails.
+    pub async fn run(&self, question: &str) -> Result<QueryResult, VlorQLError> {
+        let compiled = self.query(question).await?;
+        match &self.executor {
+            Some(executor) => executor.execute(&compiled).await,
+            None => Err(VlorQLError::config(
+                ConfigErrorKind::MissingLlmClient,
+                json!({"message": "no database executor configured; call with_executor() on the builder"}),
+            )),
+        }
     }
 
     /// Streams the assistant response and emits high-level events.
@@ -598,6 +627,7 @@ pub struct VlorQlBuilder {
     telemetry_endpoint: Option<String>,
     telemetry_guard: Option<TelemetryGuard>,
     metrics: Option<Arc<VlorqMetrics>>,
+    executor: Option<Arc<dyn DatabaseExecutor>>,
 }
 
 impl Default for VlorQlBuilder {
@@ -620,6 +650,7 @@ impl Default for VlorQlBuilder {
             telemetry_endpoint: None,
             telemetry_guard: None,
             metrics: None,
+            executor: None,
         }
     }
 }
@@ -785,6 +816,38 @@ impl VlorQlBuilder {
         self
     }
 
+    /// Supplies a [`DatabaseExecutor`] that can run compiled SQL queries.
+    ///
+    /// When an executor is configured, you can use [`VlorQl::run`] to
+    /// perform the full plan → validate → compile → execute pipeline
+    /// in a single call.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use vlorql::execute::PgExecutor;
+    /// use std::sync::Arc;
+    ///
+    /// let (client, connection) = tokio_postgres::connect(
+    ///     "host=localhost user=postgres", tokio_postgres::NoTls,
+    /// )
+    /// .await
+    /// .expect("connect");
+    /// tokio::spawn(async move { connection.await.expect("connection") });
+    ///
+    /// let vlorql = VlorQl::builder()
+    ///     .with_schema(schema)
+    ///     .with_dialect_name("postgres")
+    ///     .with_executor(Arc::new(PgExecutor::new(client)))
+    ///     .build()
+    ///     .expect("facade");
+    /// ```
+    #[must_use]
+    pub fn with_executor(mut self, executor: Arc<dyn DatabaseExecutor>) -> Self {
+        self.executor = Some(executor);
+        self
+    }
+
     /// Builds the facade and verifies the required schema and dialect/compiler setup.
     pub fn build(self) -> Result<VlorQl, VlorQLError> {
         vlorql_core::observability::init_console_logging();
@@ -835,6 +898,7 @@ impl VlorQlBuilder {
                 .unwrap_or_else(|| LlmResponseCache::new(1000, 3600)),
             telemetry_guard: self.telemetry_guard,
             metrics: self.metrics,
+            executor: self.executor,
         })
     }
 }

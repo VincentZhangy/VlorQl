@@ -596,12 +596,9 @@ impl<'a> QueryBuilder<'a> {
                 let mut sql = String::from("(");
                 self.build_query(query, &mut sql)?;
                 sql.push(')');
-                match alias {
-                    Some(alias) => {
-                        write!(sql, " AS {}", self.quote_identifier(alias)?)
-                            .map_err(formatting_error)?;
-                    }
-                    None => {}
+                if let Some(alias) = alias {
+                    write!(sql, " AS {}", self.quote_identifier(alias)?)
+                        .map_err(formatting_error)?;
                 }
                 Ok(sql)
             }

@@ -5,7 +5,7 @@
 //! it only reports errors.
 
 use vlorql_core::schema::{
-    Expression, FromClause, InTarget, JoinClause, JoinType, Predicate, Projection, QueryPlan,
+    Expression, InTarget, JoinClause, JoinType, Predicate, Projection, QueryPlan,
 };
 
 use super::validator::{ValidationError, ValidationErrorKind};
@@ -170,6 +170,7 @@ fn validate_join(join: &JoinClause, errors: &mut Vec<ValidationError>) {
     }
 
     // Check that right_table has a table name.
+    #[allow(clippy::unnecessary_map_or)]
     if join.right_table.table_name().map_or(true, |n| n.is_empty()) {
         errors.push(ValidationError::new(
             ValidationErrorKind::MissingJoinCondition,
