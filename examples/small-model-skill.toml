@@ -8,6 +8,7 @@ instructions = [
   "Use count(DISTINCT col) syntax, NOT count_distinct(col) function.",
   "Window functions (row_number, rank, lag) MUST include OVER clause.",
   "For EXTRACT(field FROM col), field must be a literal like 'month', never a parameter.",
+  "Do NOT assume tables contain pre-computed aggregate values (e.g. order_count, total_sales). Use COUNT/SUM with JOIN instead.",
 ]
 simplify_schema = true
 forbid_features = ["set_operation", "window_functions", "distinct_on"]
@@ -32,3 +33,15 @@ plan.ctes = [
   } }
 plan.select = [{ type = "column_ref", column = "id" }, { type = "column_ref", column = "name" }]
 plan.from = { table = "org_tree" }
+
+[[examples]]
+question = "Count orders per customer, show only customers with more than 2 orders"
+plan.select = [
+  { type = "column_ref", table = "users", column = "name", alias = "customer_name" },
+  { type = "expr", expression = { type = "function_call", name = "count", args = [{ type = "star" }], distinct = false }, alias = "order_count" }
+]
+plan.from = { table = "users", alias = "u" }
+plan.joins = [{ join_type = "inner", right_table = { table = "orders", alias = "o" }, on = { type = "comparison", left = { type = "column_ref", table = "u", column = "id" }, op = "eq", right = { type = "column_ref", table = "o", column = "user_id" } } }]
+plan.group_by = [{ type = "column_ref", table = "users", column = "name" }]
+plan.having = { type = "comparison", left = { type = "function_call", name = "count", args = [{ type = "star" }], distinct = false }, op = "gt", right = { type = "literal", value = 2, data_type = "int" } }
+plan.order_by = [{ expr = { type = "expr", expression = { type = "function_call", name = "count", args = [{ type = "star" }], distinct = false } }, descending = true }]
