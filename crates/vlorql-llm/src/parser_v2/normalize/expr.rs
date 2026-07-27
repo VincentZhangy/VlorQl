@@ -381,10 +381,10 @@ pub fn normalize_predicate(val: &mut Value) -> bool {
             }
         }
 
-        // Rename `left` to `expr` for `like` / `is_null` predicates.
+        // Rename `left` to `expr` for `like` / `is_null` / `between` predicates.
         // The LLM sometimes uses `left` (from comparison convention) instead
         // of the canonical `expr` field name for these predicate types.
-        if (pred_type == "like" || pred_type == "is_null")
+        if (pred_type == "like" || pred_type == "is_null" || pred_type == "between")
             && obj.contains_key("left")
             && !obj.contains_key("expr")
             && let Some(left) = obj.remove("left")
