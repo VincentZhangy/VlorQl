@@ -935,7 +935,7 @@ fn simplified_query_plan_schema() -> Value {
                         "properties": {
                             "type": { "type": "string", "enum": ["literal"] },
                             "value": { "type": ["string", "number", "boolean", "null"] },
-                            "data_type": { "type": "string", "enum": ["int", "float", "string", "boolean", "date", "timestamp", "json", "uuid"] }
+                            "data_type": { "type": "string", "enum": ["int", "float", "string", "boolean", "date", "timestamp", "json", "uuid", "decimal", "array", "jsonb", "blob"] }
                         },
                         "required": ["type", "value", "data_type"]
                     },
