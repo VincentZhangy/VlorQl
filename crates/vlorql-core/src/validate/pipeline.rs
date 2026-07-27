@@ -1,5 +1,6 @@
 //! End-to-end validation pipeline orchestration.
 
+use super::audit::AuditStage;
 use super::dialect::DialectValidator;
 use super::operand::OperandValidator;
 use super::schema::validate_schema;
@@ -118,6 +119,11 @@ impl Deref for OptimizedPlan {
 
 /// Runs all validation stages while sharing an immutable schema snapshot.
 ///
+/// The pipeline runs schema validation, policy checks, operand validation,
+/// dialect validation, and an optional SQL injection audit stage.  If
+/// configured via [`with_audit`](Self::with_audit), critical audit findings
+/// short-circuit the pipeline immediately.
+///
 /// # Examples
 ///
 /// ```
@@ -142,7 +148,8 @@ impl Deref for OptimizedPlan {
 ///     schema,
 ///     DialectProfile::default(),
 ///     PolicyEngine::new(PolicyConfig::default()),
-/// );
+/// )
+/// .with_audit(true);
 /// let plan = QueryPlan {
 ///     select: vec![Projection::Column {
 ///         table: None, column: "id".to_owned(), alias: None,
@@ -160,6 +167,7 @@ pub struct ValidationPipeline {
     dialect: DialectProfile,
     policy: PolicyEngine,
     optimizer: Option<QueryOptimizer>,
+    audit_stage: Option<AuditStage>,
 }
 
 impl ValidationPipeline {
@@ -170,6 +178,7 @@ impl ValidationPipeline {
             dialect,
             policy,
             optimizer: None,
+            audit_stage: None,
         }
     }
 
@@ -181,6 +190,22 @@ impl ValidationPipeline {
     #[must_use]
     pub fn with_optimizer(mut self, optimizer: QueryOptimizer) -> Self {
         self.optimizer = Some(optimizer);
+        self
+    }
+
+    /// Attaches an optional [`AuditStage`] to the pipeline.
+    ///
+    /// When enabled, [`Self::validate`] and [`Self::validate_repairing`] will
+    /// run an SQL-injection audit on the plan after dialect validation and
+    /// return critical errors immediately without proceeding to policy
+    /// injection.
+    #[must_use]
+    pub fn with_audit(mut self, enable: bool) -> Self {
+        if enable {
+            self.audit_stage = Some(AuditStage::new());
+        } else {
+            self.audit_stage = None;
+        }
         self
     }
 
@@ -209,6 +234,20 @@ impl ValidationPipeline {
         }
         if let Err(stage_errors) = DialectValidator::validate(&plan, &self.dialect) {
             extend_unique(&mut errors, stage_errors);
+        }
+
+        // SQL injection audit stage.
+        if let Some(ref audit) = self.audit_stage
+            && let Err(audit_errors) = audit.audit(&plan, &self.schema)
+        {
+            // SuspiciousPattern (critical) errors are NOT retryable;
+            // separate them so the pipeline can short-circuit.
+            let (critical, others): (Vec<_>, Vec<_>) =
+                audit_errors.into_iter().partition(|e| !e.is_retryable());
+            if !critical.is_empty() {
+                return Err(ValidationErrors(critical));
+            }
+            extend_unique(&mut errors, others);
         }
 
         if !errors.is_empty() {
@@ -252,6 +291,22 @@ impl ValidationPipeline {
     pub fn validate_repairing(&self, plan: &QueryPlan) -> Result<ValidatedPlan, ValidationErrors> {
         let mut repaired = plan.clone();
         let _ = fix::drop_hallucinated_joins(&mut repaired, &self.schema);
+
+        // SQL injection audit stage — run on the repaired plan before
+        // proceeding to the full validation pipeline.
+        if let Some(ref audit) = self.audit_stage
+            && let Err(audit_errors) = audit.audit(&repaired, &self.schema)
+        {
+            let (critical, others): (Vec<_>, Vec<_>) =
+                audit_errors.into_iter().partition(|e| !e.is_retryable());
+            if !critical.is_empty() {
+                return Err(ValidationErrors(critical));
+            }
+            if !others.is_empty() {
+                return Err(ValidationErrors(others));
+            }
+        }
+
         self.validate(&repaired)
     }
 

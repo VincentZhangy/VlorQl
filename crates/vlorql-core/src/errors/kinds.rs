@@ -174,6 +174,28 @@ pub enum LlmErrorKind {
     },
 }
 
+/// Errors raised by the SQL-injection audit stage.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Error)]
+#[serde(rename_all = "snake_case")]
+pub enum AuditErrorKind {
+    /// A referenced identifier (table or column) was not found in the schema.
+    #[error("identifier `{identifier}` not found in schema ({context})")]
+    IdentifierNotFound {
+        /// The identifier that could not be resolved.
+        identifier: String,
+        /// Human-readable context describing where the lookup failed.
+        context: String,
+    },
+    /// An identifier contains a known SQL-injection pattern.
+    #[error("identifier `{identifier}` contains suspicious pattern `{pattern}`")]
+    SuspiciousPattern {
+        /// The identifier that triggered the pattern match.
+        identifier: String,
+        /// The matched suspicious pattern (e.g. `";"`, `"DROP "`).
+        pattern: String,
+    },
+}
+
 /// Errors caused by an incomplete or invalid VlorQl configuration.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Error)]
 #[serde(rename_all = "snake_case")]

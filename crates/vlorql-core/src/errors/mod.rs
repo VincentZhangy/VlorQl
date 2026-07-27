@@ -11,8 +11,8 @@ use serde_json::{Value, json};
 use thiserror::Error;
 
 pub use kinds::{
-    CompilationErrorKind, ConfigErrorKind, LlmErrorKind, PolicyErrorKind, SchemaErrorKind,
-    ValidationErrorKind,
+    AuditErrorKind, CompilationErrorKind, ConfigErrorKind, LlmErrorKind, PolicyErrorKind,
+    SchemaErrorKind, ValidationErrorKind,
 };
 
 /// The response shape exposed by API and LLM-facing layers.
@@ -72,6 +72,14 @@ pub enum VlorQLError {
         /// Structured context (table/column names, expected types, …).
         details: Value,
     },
+    /// The query plan failed the SQL-injection audit.
+    #[error("audit error: {kind}")]
+    Audit {
+        /// The typed audit failure.
+        kind: AuditErrorKind,
+        /// Structured context (identifier, pattern, …).
+        details: Value,
+    },
     /// The query plan violates an access-control policy.
     #[error("policy violation: {kind}")]
     Policy {
@@ -118,6 +126,14 @@ impl VlorQLError {
     /// Creates a validation error from any serializable details value.
     pub fn validation<T: Serialize>(kind: ValidationErrorKind, details: T) -> Self {
         Self::Validation {
+            kind,
+            details: details_to_value(details),
+        }
+    }
+
+    /// Creates an audit error from any serializable details value.
+    pub fn audit<T: Serialize>(kind: AuditErrorKind, details: T) -> Self {
+        Self::Audit {
             kind,
             details: details_to_value(details),
         }
@@ -177,6 +193,10 @@ impl VlorQLError {
                 ValidationErrorKind::TooManyJoins { .. } => "V008",
                 ValidationErrorKind::AggregationMismatch { .. } => "V009",
                 ValidationErrorKind::MultipleErrors { .. } => "V010",
+            },
+            Self::Audit { kind, .. } => match kind {
+                AuditErrorKind::IdentifierNotFound { .. } => "A001",
+                AuditErrorKind::SuspiciousPattern { .. } => "A002",
             },
             Self::Policy { kind, .. } => match kind {
                 PolicyErrorKind::TableDenied { .. } => "P001",
@@ -238,6 +258,7 @@ impl VlorQLError {
                     | ValidationErrorKind::TypeMismatch { .. }
                     | ValidationErrorKind::AggregationMismatch { .. }
             ),
+            Self::Audit { kind, .. } => matches!(kind, AuditErrorKind::IdentifierNotFound { .. }),
             Self::Schema { kind, .. } => matches!(
                 kind,
                 SchemaErrorKind::TableNotFound { .. }
@@ -253,6 +274,7 @@ impl VlorQLError {
     pub fn details(&self) -> &Value {
         match self {
             Self::Validation { details, .. }
+            | Self::Audit { details, .. }
             | Self::Policy { details, .. }
             | Self::Compilation { details, .. }
             | Self::Schema { details, .. }
@@ -265,6 +287,7 @@ impl VlorQLError {
     pub fn kind_name(&self) -> &'static str {
         match self {
             Self::Validation { .. } => "validation",
+            Self::Audit { .. } => "audit",
             Self::Policy { .. } => "policy",
             Self::Compilation { .. } => "compilation",
             Self::Schema { .. } => "schema",
@@ -396,6 +419,14 @@ impl VlorQLError {
                         "Return only a JSON object matching the QueryPlan schema. No markdown fences, no extra text, no comments."
                     };
                     Some(tip.to_owned())
+                }
+            },
+            Self::Audit { kind, .. } => match kind {
+                AuditErrorKind::IdentifierNotFound { .. } => {
+                    Some("Use a valid table or column name from the schema snapshot.".to_owned())
+                }
+                AuditErrorKind::SuspiciousPattern { .. } => {
+                    Some("Remove SQL-injection patterns from identifiers.".to_owned())
                 }
             },
             Self::Config { .. } => None,

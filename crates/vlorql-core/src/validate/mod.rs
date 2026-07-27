@@ -1,10 +1,12 @@
 //! Aggregating schema, policy, operand, and dialect validation.
 
+pub mod audit;
 pub mod dialect;
 pub mod operand;
 pub mod pipeline;
 mod schema;
 
+pub use audit::AuditStage;
 pub use dialect::{BoundDialectValidator, DialectValidator};
 pub use operand::OperandValidator;
 pub use pipeline::{OptimizedPlan, ValidatedPlan, ValidationPipeline};
