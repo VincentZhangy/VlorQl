@@ -85,6 +85,20 @@ impl<'a> OperandValidator<'a> {
             for expression in expressions {
                 self.validate_expression_inner(expression, &scope, errors);
             }
+            // Reject aggregate functions in GROUP BY (e.g. GROUP BY array_agg(...)).
+            for expression in expressions {
+                if is_aggregate_call(expression) {
+                    errors.push(VlorQLError::validation(
+                        ValidationErrorKind::AggregationMismatch {
+                            message: format!(
+                                "aggregate function `{}` is not allowed in GROUP BY",
+                                aggregate_name(expression).unwrap_or("<unknown>"),
+                            ),
+                        },
+                        json!({"expression": expression, "clause": "group_by"}),
+                    ));
+                }
+            }
         }
         if let Some(predicate) = &plan.having {
             self.validate_predicate_inner(predicate, &scope, errors);
@@ -704,6 +718,40 @@ fn is_any_of_ignore_case(name: &str, candidates: &[&str]) -> bool {
 fn frame_bound_expr(bound: &WindowFrameBound) -> Option<&Expression> {
     match bound {
         WindowFrameBound::Preceding(expr) | WindowFrameBound::Following(expr) => Some(expr),
+        _ => None,
+    }
+}
+
+/// Known aggregate function names that are invalid in GROUP BY expressions.
+const AGGREGATE_FUNCTIONS: &[&str] = &[
+    "count",
+    "sum",
+    "avg",
+    "min",
+    "max",
+    "array_agg",
+    "string_agg",
+    "json_agg",
+    "jsonb_agg",
+    "bool_and",
+    "bool_or",
+    "every",
+];
+
+/// Returns `true` if `expr` is a function call with an aggregate name.
+fn is_aggregate_call(expr: &Expression) -> bool {
+    match expr {
+        Expression::FunctionCall { name, .. } => AGGREGATE_FUNCTIONS
+            .iter()
+            .any(|agg| agg.eq_ignore_ascii_case(name)),
+        _ => false,
+    }
+}
+
+/// Returns the function name if `expr` is an aggregate call.
+fn aggregate_name(expr: &Expression) -> Option<&str> {
+    match expr {
+        Expression::FunctionCall { name, .. } => Some(name.as_str()),
         _ => None,
     }
 }
