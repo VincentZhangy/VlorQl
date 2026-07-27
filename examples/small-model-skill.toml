@@ -5,6 +5,9 @@ instructions = [
   "Always use table aliases (first letter of table name).",
   "Prefer LEFT JOIN over NOT IN / NOT EXISTS.",
   "GROUP BY must include every non-aggregated column in SELECT.",
+  "Use count(DISTINCT col) syntax, NOT count_distinct(col) function.",
+  "Window functions (row_number, rank, lag) MUST include OVER clause.",
+  "For EXTRACT(field FROM col), field must be a literal like 'month', never a parameter.",
 ]
 simplify_schema = true
 forbid_features = ["set_operation", "window_functions", "distinct_on"]
