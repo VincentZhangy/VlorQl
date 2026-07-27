@@ -123,7 +123,7 @@ fn bench_compile_cache_miss(c: &mut Criterion) {
 
 fn bench_schema_cache(c: &mut Criterion) {
     let rt = tokio::runtime::Runtime::new().unwrap();
-    let cache = SchemaCache::new(100, 300);
+    let cache = SchemaCache::new(100, 300, None);
     let schema = build_schema();
     let key = SchemaCacheKey {
         version: "v1".to_owned(),

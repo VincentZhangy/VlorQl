@@ -13,7 +13,7 @@ use opentelemetry::metrics::{Counter, Histogram, UpDownCounter};
 /// Create one instance via [`VlorqMetrics::new`] (which reads the
 /// global meter) and share it across the application as an
 /// `Arc<VlorqMetrics>`.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct VlorqMetrics {
     /// Total number of queries started (including retries).
     pub query_counter: Counter<u64>,
@@ -31,6 +31,10 @@ pub struct VlorqMetrics {
     pub schema_cache_hits: Counter<u64>,
     /// Number of schema-cache misses.
     pub schema_cache_misses: Counter<u64>,
+    /// Total number of prompt tokens sent to the LLM.
+    pub llm_prompt_tokens: Counter<u64>,
+    /// Total number of completion tokens received from the LLM.
+    pub llm_completion_tokens: Counter<u64>,
     /// Gauge of currently in-flight queries.
     pub active_queries: UpDownCounter<i64>,
 }
@@ -53,6 +57,8 @@ impl VlorqMetrics {
             cache_miss_counter: meter.u64_counter("vlorql.cache.misses").build(),
             schema_cache_hits: meter.u64_counter("vlorql.schema_cache.hits").build(),
             schema_cache_misses: meter.u64_counter("vlorql.schema_cache.misses").build(),
+            llm_prompt_tokens: meter.u64_counter("vlorql.llm.prompt_tokens").build(),
+            llm_completion_tokens: meter.u64_counter("vlorql.llm.completion_tokens").build(),
             active_queries: meter.i64_up_down_counter("vlorql.queries.active").build(),
         }
     }
@@ -119,6 +125,18 @@ mod tests {
     fn cache_miss_counter_does_not_panic() {
         let m = setup_metrics();
         m.cache_miss_counter.add(1, &[]);
+    }
+
+    #[test]
+    fn llm_prompt_tokens_does_not_panic() {
+        let m = setup_metrics();
+        m.llm_prompt_tokens.add(42, &[]);
+    }
+
+    #[test]
+    fn llm_completion_tokens_does_not_panic() {
+        let m = setup_metrics();
+        m.llm_completion_tokens.add(128, &[]);
     }
 
     #[test]

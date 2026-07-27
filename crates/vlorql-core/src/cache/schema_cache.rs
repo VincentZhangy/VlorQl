@@ -6,6 +6,7 @@
 //! `invalidate_version` for bulk removal by version string.
 
 use crate::cache::SchemaCacheKey;
+use crate::observability::VlorqMetrics;
 use crate::schema::SchemaSnapshot;
 use moka::future::Cache as MokaCache;
 use std::future::Future;
@@ -22,7 +23,7 @@ use std::time::Duration;
 /// use std::sync::Arc;
 ///
 /// # async fn example() {
-/// let cache = SchemaCache::new(10, 60);
+/// let cache = SchemaCache::new(10, 60, None);
 /// let schema = Arc::new(SchemaSnapshot::new(vec![], SchemaMetadata::default()));
 /// let key = vlorql_core::cache::SchemaCacheKey {
 ///     version: "v1".to_owned(),
@@ -39,6 +40,8 @@ use std::time::Duration;
 pub struct SchemaCache {
     inner: MokaCache<SchemaCacheKey, Arc<SchemaSnapshot>>,
     default_ttl: Duration,
+    /// Optional metrics counters for cache hits and misses.
+    metrics: Option<Arc<VlorqMetrics>>,
 }
 
 impl SchemaCache {
@@ -48,17 +51,18 @@ impl SchemaCache {
     ///   least-recently-used items.
     /// * `ttl_seconds` — time-to-live in seconds.  Entries older than
     ///   this are automatically invalidated.
+    /// * `metrics` — optional [`VlorqMetrics`] for recording cache hit/miss counters.
     ///
     /// # Examples
     ///
     /// ```
     /// use vlorql_core::cache::SchemaCache;
     ///
-    /// let cache = SchemaCache::new(100, 300);
+    /// let cache = SchemaCache::new(100, 300, None);
     /// assert_eq!(cache.inner_size(), 0);
     /// ```
     #[must_use]
-    pub fn new(capacity: u64, ttl_seconds: u64) -> Self {
+    pub fn new(capacity: u64, ttl_seconds: u64, metrics: Option<Arc<VlorqMetrics>>) -> Self {
         let mut builder = MokaCache::builder().max_capacity(capacity);
         if ttl_seconds > 0 {
             builder = builder.time_to_live(Duration::from_secs(ttl_seconds));
@@ -71,6 +75,7 @@ impl SchemaCache {
             } else {
                 Duration::from_secs(ttl_seconds)
             },
+            metrics,
         }
     }
 
@@ -94,6 +99,9 @@ impl SchemaCache {
                 key.version,
                 key.source,
             );
+            if let Some(ref m) = self.metrics {
+                m.schema_cache_hits.add(1, &[]);
+            }
             return cached;
         }
         // Cache miss — load the value.
@@ -103,6 +111,9 @@ impl SchemaCache {
             key.version,
             key.source,
         );
+        if let Some(ref m) = self.metrics {
+            m.schema_cache_misses.add(1, &[]);
+        }
         let value = f().await;
         self.inner.insert(key, Arc::clone(&value)).await;
         value
@@ -190,7 +201,7 @@ mod tests {
 
     #[tokio::test]
     async fn cache_hit_returns_cached_value() {
-        let cache = SchemaCache::new(10, 60);
+        let cache = SchemaCache::new(10, 60, None);
         let k = key("v1", "db");
         let schema = dummy_schema("users");
 
@@ -216,7 +227,7 @@ mod tests {
 
     #[tokio::test]
     async fn different_keys_do_not_share_entries() {
-        let cache = SchemaCache::new(10, 60);
+        let cache = SchemaCache::new(10, 60, None);
         let k1 = key("v1", "db");
         let k2 = key("v2", "db");
 
@@ -239,7 +250,7 @@ mod tests {
 
     #[tokio::test]
     async fn invalidate_version_removes_matching_entries() {
-        let cache = SchemaCache::new(10, 60);
+        let cache = SchemaCache::new(10, 60, None);
         let v1_db = key("v1", "db1");
         let v1_other = key("v1", "db2");
         let v2_db = key("v2", "db1");
@@ -279,7 +290,7 @@ mod tests {
 
     #[tokio::test]
     async fn clear_removes_all_entries() {
-        let cache = SchemaCache::new(10, 60);
+        let cache = SchemaCache::new(10, 60, None);
         cache
             .get_or_insert_with(key("a", "db"), || async { dummy_schema("a") })
             .await;
@@ -301,7 +312,7 @@ mod tests {
     #[tokio::test]
     async fn ttl_expiry_causes_reload() {
         // Use a very short TTL (100ms) so the entry expires quickly.
-        let cache = SchemaCache::new(10, 1); // 1 second TTL
+        let cache = SchemaCache::new(10, 1, None); // 1 second TTL
         let k = key("ttl_test", "db");
 
         let first = cache
@@ -322,7 +333,7 @@ mod tests {
 
     #[tokio::test]
     async fn zero_ttl_uses_long_lived_entries() {
-        let cache = SchemaCache::new(10, 0); // 0 = no expiry
+        let cache = SchemaCache::new(10, 0, None); // 0 = no expiry
         let k = key("forever", "db");
 
         cache

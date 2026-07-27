@@ -251,10 +251,18 @@ impl VlorQl {
                             .generate_plan(&llm_question, &system_prompt, temperature)
                             .await;
                         if let Some(ref m) = self.metrics {
-                            m.llm_duration_histogram.record(llm_start.elapsed().as_secs_f64(), &[]);
+                            m.llm_duration_histogram
+                                .record(llm_start.elapsed().as_secs_f64(), &[]);
                         }
                         match result {
-                            Ok(plan) => plan,
+                            Ok(plan) => {
+                                // TODO: Record LLM token usage once the provider exposes it.
+                                // if let Some(ref m) = self.metrics {
+                                //     m.llm_prompt_tokens.add(usage.prompt_tokens, &[]);
+                                //     m.llm_completion_tokens.add(usage.completion_tokens, &[]);
+                                // }
+                                plan
+                            }
                             Err(e) if e.is_retryable() && attempt < self.max_retries => {
                                 llm_question = format_retry_question_str(&llm_question, &e);
                                 continue;
@@ -267,7 +275,14 @@ impl VlorQl {
                         .generate_plan(&llm_question, &system_prompt, temperature)
                         .await
                     {
-                        Ok(plan) => plan,
+                        Ok(plan) => {
+                            // TODO: Record LLM token usage once the provider exposes it.
+                            // if let Some(ref m) = self.metrics {
+                            //     m.llm_prompt_tokens.add(usage.prompt_tokens, &[]);
+                            //     m.llm_completion_tokens.add(usage.completion_tokens, &[]);
+                            // }
+                            plan
+                        }
                         Err(e) if e.is_retryable() && attempt < self.max_retries => {
                             llm_question = format_retry_question_str(&llm_question, &e);
                             continue;
@@ -624,7 +639,7 @@ pub struct VlorQlBuilder {
     llm_config: Option<LlmConfig>,
     max_retries: usize,
     stats_provider: Option<Arc<dyn StatisticsProvider>>,
-    schema_cache: Option<Arc<SchemaCache>>,
+    schema_cache_config: Option<(u64, u64)>,
     compile_cache: Option<Arc<CompileCache>>,
     prompt_cache: Option<Arc<PromptCache>>,
     llm_cache: Option<LlmResponseCache>,
@@ -647,7 +662,7 @@ impl Default for VlorQlBuilder {
             llm_config: None,
             max_retries: DEFAULT_MAX_RETRIES,
             stats_provider: None,
-            schema_cache: None,
+            schema_cache_config: None,
             compile_cache: None,
             prompt_cache: None,
             llm_cache: None,
@@ -753,7 +768,7 @@ impl VlorQlBuilder {
     /// re-parsing or re-fetching.
     #[must_use]
     pub fn with_schema_cache(mut self, capacity: u64, ttl_seconds: u64) -> Self {
-        self.schema_cache = Some(Arc::new(SchemaCache::new(capacity, ttl_seconds)));
+        self.schema_cache_config = Some((capacity, ttl_seconds));
         self
     }
 
@@ -885,6 +900,15 @@ impl VlorQlBuilder {
 
         let optimizer = self.stats_provider.map(QueryOptimizer::new);
 
+        // Build the schema cache (deferred so metrics — if any — are available).
+        let schema_cache = self.schema_cache_config.map(|(capacity, ttl_seconds)| {
+            Arc::new(SchemaCache::new(
+                capacity,
+                ttl_seconds,
+                self.metrics.clone(),
+            ))
+        });
+
         Ok(VlorQl {
             schema,
             dialect,
@@ -894,7 +918,7 @@ impl VlorQlBuilder {
             llm_client,
             max_retries: self.max_retries,
             optimizer,
-            schema_cache: self.schema_cache,
+            schema_cache,
             compile_cache: self.compile_cache,
             prompt_cache: self.prompt_cache,
             llm_cache: self
