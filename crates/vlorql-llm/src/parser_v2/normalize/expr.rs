@@ -331,6 +331,29 @@ pub fn normalize_predicate(val: &mut Value) -> bool {
     // also exposes nested "string" args to subsequent normalize_impl recursion.
     changed |= fix_literal_type_aliases(val);
 
+    // Fix: `{"type": "expr", "expression": {...}}` is an Expression format, not a valid
+    // predicate. The LLM sometimes uses this format in having/where clauses (e.g.
+    // `{"type":"expr","expression":{"type":"function_call","name":"count",...}}`).
+    // Convert it to a comparison predicate: `{"type":"comparison","left":<expression>,"op":"gt","right":{"type":"literal","value":0,"data_type":"int"}}`
+    // so the builder doesn't fail with "unknown Predicate variant `expr`".
+    if let Some(obj) = val.as_object()
+        && obj.get("type").and_then(|t| t.as_str()) == Some("expr")
+        && obj.contains_key("expression")
+        && let Some(inner) = obj.get("expression").cloned()
+    {
+        let comparison = serde_json::json!({
+            "type": "comparison",
+            "left": inner,
+            "op": "gt",
+            "right": {"type": "literal", "value": 0, "data_type": "int"}
+        });
+        *val = comparison;
+        changed = true;
+        // Recurse so the new comparison goes through the full predicate pipeline.
+        changed |= normalize_predicate(val);
+        return changed;
+    }
+
     // Inject missing type tag.
     changed |= repair_predicate_type(val);
 
