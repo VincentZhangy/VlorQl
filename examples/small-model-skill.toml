@@ -8,7 +8,7 @@ instructions = [
 ]
 simplify_schema = true
 forbid_features = ["set_operation", "window_functions", "distinct_on"]
-disable_output_fields = ["set_operation", "distinct_on"]
+disable_output_fields = ["set_operation", "ctes", "distinct_on"]
 
 [[examples]]
 question = "Show user names"
