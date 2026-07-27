@@ -55,6 +55,19 @@ pub fn normalize(val: &mut serde_json::Value) -> bool {
     // Stage 4: Order-by normalization (after aliases, structure, and expr).
     changed |= order::normalize(val); // normalize order_by items
 
+    // Stage 5: Recurse into CTE sub-queries.
+    // CTE sub-plans are independent QueryPlan JSON objects that need
+    // the full normalize pipeline applied to them.
+    if let Some(obj) = val.as_object_mut()
+        && let Some(ctes) = obj.get_mut("ctes").and_then(|v| v.as_array_mut())
+    {
+        for cte in ctes.iter_mut() {
+            if let Some(query) = cte.get_mut("query") {
+                changed |= normalize(query);
+            }
+        }
+    }
+
     changed
 }
 
