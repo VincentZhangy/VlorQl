@@ -7,9 +7,25 @@ instructions = [
   "GROUP BY must include every non-aggregated column in SELECT.",
 ]
 simplify_schema = true
-forbid_features = ["set_operation", "window_functions", "ctes", "distinct_on"]
-disable_output_fields = ["set_operation", "ctes", "distinct_on"]
+forbid_features = ["set_operation", "window_functions", "distinct_on"]
+disable_output_fields = ["set_operation", "distinct_on"]
 
 [[examples]]
 question = "Show user names"
 plan = { select = [{ type = "column_ref", table = "users", column = "name", alias = null }], from = { table = "users", alias = null } }
+
+[[examples]]
+question = "Recursive org chart from manager name"
+plan.ctes = [
+  { name = "org_tree", recursive = true, query = {
+    select = [{ type = "column_ref", table = "employees", column = "id" }, { type = "column_ref", table = "employees", column = "name" }, { type = "column_ref", table = "employees", column = "manager_id" }],
+    from = { table = "employees" },
+    where = { type = "comparison", left = { type = "column_ref", column = "name" }, op = "eq", right = { type = "literal", value = "赵总", data_type = "string" } }
+  } },
+  { name = "org_tree", recursive = true, query = {
+    select = [{ type = "column_ref", table = "org_tree", column = "id" }, { type = "column_ref", table = "org_tree", column = "name" }, { type = "column_ref", table = "employees", column = "manager_id" }],
+    from = { table = "org_tree" },
+    joins = [{ join_type = "inner", right_table = { table = "employees" }, on = { type = "comparison", left = { type = "column_ref", table = "org_tree", column = "id" }, op = "eq", right = { type = "column_ref", table = "employees", column = "manager_id" } } }]
+  } }
+plan.select = [{ type = "column_ref", column = "id" }, { type = "column_ref", column = "name" }]
+plan.from = { table = "org_tree" }
