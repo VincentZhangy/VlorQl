@@ -67,8 +67,12 @@ and every SQL feature is gated by an explicit dialect profile.
 - **📐 Strict structured outputs** — `QueryPlan` is described by a `schemars`-derived JSON Schema,
   enforced via provider-specific strict modes (OpenAI `strict: true`, Anthropic `json_schema`,
   GLM-4.7+, vLLM xgrammar, Ollama `format: <schema>`).
-- **🛡️ Multi-layer validation** — Schema → Policy → Operand type-checking → Dialect capability gates.
+- **🛡️ Multi-layer validation** — Schema → Policy → Operand type-checking → Dialect capability gates → SQL Injection Audit.
   All errors are aggregated and returned together so a single retry fixes everything.
+- **🔍 SQL injection audit** — `AuditStage` checks every identifier against the schema;
+  identifiers matching injection patterns are rejected outright.
+- **🧩 FROM subquery support** — derived tables (`FROM (SELECT ...) AS t`) fully supported
+  across compile, validate, and optimize pipelines.
 - **⚙️ Controlled feature set** — `DialectProfile` lets you disable CTEs, OFFSET, specific functions,
   join types, `DISTINCT`, window functions, and more.
 - **🔐 Always parameterized** — every literal value is bound as a placeholder (`$1`, `?`).
