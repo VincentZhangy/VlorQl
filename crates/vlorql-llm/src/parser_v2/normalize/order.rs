@@ -111,6 +111,8 @@ pub fn normalize(val: &mut serde_json::Value) -> bool {
         for item in arr.iter_mut() {
             changed |= normalize_item(item);
         }
+        // Remove items that still don't have `expr` after normalization.
+        arr.retain(|item| item.as_object().is_some_and(|o| o.contains_key("expr")));
     }
 
     // Normalize group_by items: LLMs often emit them as
