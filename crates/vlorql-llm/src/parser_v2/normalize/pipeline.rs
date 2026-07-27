@@ -68,6 +68,23 @@ pub fn normalize(val: &mut serde_json::Value) -> bool {
         }
     }
 
+    // Stage 6: Downgrade recursive CTE flags.
+    // Small models sometimes set `recursive: true` on CTEs, which the
+    // current builder/compiler does not support.  Downgrade to `false`
+    // with a warning so the plan can still compile (as non-recursive).
+    if let Some(obj) = val.as_object_mut()
+        && let Some(ctes) = obj.get_mut("ctes").and_then(|v| v.as_array_mut())
+    {
+        for cte in ctes.iter_mut() {
+            if let Some(recursive) = cte.get_mut("recursive")
+                && recursive.as_bool() == Some(true)
+            {
+                *recursive = serde_json::Value::Bool(false);
+                changed = true;
+            }
+        }
+    }
+
     changed
 }
 
