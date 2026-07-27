@@ -117,6 +117,41 @@ pub fn repair_expression_value(val: &mut Value) -> bool {
         return true;
     }
 
+    // Fix: LLM sometimes uses aggregate shorthand like `{"type": "count", "expr": "*"}`
+    // instead of canonical `{"type": "function_call", "name": "count", "args": [{"type": "star"}]}`.
+    // Common aggregate names: count, sum, avg, min, max, array_agg, string_agg.
+    if let Some(type_val) = obj
+        .get("type")
+        .and_then(|t| t.as_str())
+        .map(|s| s.to_owned())
+        && (type_val == "count"
+            || type_val == "sum"
+            || type_val == "avg"
+            || type_val == "min"
+            || type_val == "max"
+            || type_val == "array_agg"
+            || type_val == "string_agg"
+            || type_val == "json_agg"
+            || type_val == "jsonb_agg")
+    {
+        let name = type_val.clone();
+        obj.insert("type".to_owned(), Value::String("function_call".to_owned()));
+        obj.insert("name".to_owned(), Value::String(name));
+        // Ensure args array exists (may be derived from `expr` field).
+        if !obj.contains_key("args") {
+            let expr_val = obj.remove("expr").unwrap_or(Value::Null);
+            let args = if expr_val.is_string() && expr_val.as_str() == Some("*") {
+                vec![serde_json::json!({"type": "star"})]
+            } else if !expr_val.is_null() {
+                vec![expr_val]
+            } else {
+                Vec::new()
+            };
+            obj.insert("args".to_owned(), Value::Array(args));
+        }
+        return true;
+    }
+
     if obj.contains_key("type") {
         return false;
     }
