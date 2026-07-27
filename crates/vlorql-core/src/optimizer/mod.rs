@@ -27,13 +27,13 @@
 //! rewrite is safe it leaves that part of the plan untouched, so the
 //! output is always semantically equivalent to the input.
 
-mod analyze;
+pub mod analyze;
 mod fold;
 mod join_reorder;
 mod prune;
 mod pushdown;
 mod rules;
-pub(crate) mod visitor;
+pub mod visitor;
 
 pub use fold::ConstantFolding;
 pub use join_reorder::{JoinGraph, JoinReorderer, MAX_DP_RELATIONS};

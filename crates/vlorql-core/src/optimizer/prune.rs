@@ -51,6 +51,13 @@ use super::visitor::ExpressionFold;
 /// Construct with [`ColumnPruning::new`] for structural pruning, or
 /// [`ColumnPruning::with_schema`] to additionally preserve primary- and
 /// foreign-key columns of each CTE's base table.
+///
+/// # Examples
+///
+/// ```
+/// use vlorql_core::optimizer::ColumnPruning;
+/// let pruning = ColumnPruning::new();
+/// ```
 #[derive(Debug, Clone, Default)]
 pub struct ColumnPruning {
     /// Optional schema snapshot used to identify primary/foreign keys.
@@ -59,12 +66,27 @@ pub struct ColumnPruning {
 
 impl ColumnPruning {
     /// Creates a pruner with no schema.
+    ///
+    /// # Examples
+    ///
+    /// See the [`ColumnPruning`] struct-level documentation for usage.
     pub fn new() -> Self {
         Self { schema: None }
     }
 
     /// Creates a pruner that consults `schema` to preserve primary-key
     /// and foreign-key columns of each CTE's base table.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use vlorql_core::optimizer::ColumnPruning;
+    /// use std::sync::Arc;
+    /// use vlorql_core::schema::SchemaSnapshot;
+    ///
+    /// let schema = Arc::new(SchemaSnapshot::default());
+    /// let pruning = ColumnPruning::with_schema(schema);
+    /// ```
     pub fn with_schema(schema: ArcSchemaSnapshot) -> Self {
         Self {
             schema: Some(schema),

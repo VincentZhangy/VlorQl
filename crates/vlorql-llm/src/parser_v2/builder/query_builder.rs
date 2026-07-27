@@ -19,6 +19,17 @@ use super::table_builder::build_from_clause;
 /// The input must be a JSON object with the standard QueryPlan fields.
 /// All fields must already be in canonical form (normalized by the
 /// normalize pipeline).
+///
+/// # Examples
+///
+/// ```
+/// use vlorql_llm::parser_v2::builder::query_builder::build_plan;
+/// use serde_json::json;
+///
+/// let json = json!({"select": [{"type": "star"}], "from": {"table": "users"}});
+/// let plan = build_plan(&json).unwrap();
+/// assert_eq!(plan.from.table, "users");
+/// ```
 pub fn build_plan(value: &Value) -> Result<QueryPlan, BuildError> {
     let obj = req_obj(value, "plan")?;
     build_plan_from_obj(obj)

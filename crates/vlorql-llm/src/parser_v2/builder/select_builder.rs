@@ -11,6 +11,15 @@ use super::expr_builder::{BuildError, build_expression, opt_str, req_obj, req_st
 /// - `{"type": "column_ref", "table": "users", "column": "id", "alias": "u"}`
 /// - `{"type": "expr", "expression": {...}, "alias": "total"}`
 /// - `{"type": "star", "table": "users"}`
+///
+/// # Examples
+///
+/// ```
+/// use vlorql_llm::parser_v2::builder::select_builder::build_projection;
+/// use serde_json::json;
+///
+/// let proj = build_projection(&json!({"type": "star"})).unwrap();
+/// ```
 pub fn build_projection(val: &Value) -> Result<Projection, BuildError> {
     let obj = val.as_object().ok_or_else(|| {
         BuildError::new(
@@ -62,6 +71,16 @@ pub fn build_projection(val: &Value) -> Result<Projection, BuildError> {
 }
 
 /// Build a vector of [`Projection`] from a canonical JSON array.
+///
+/// # Examples
+///
+/// ```
+/// use vlorql_llm::parser_v2::builder::select_builder::build_projections;
+/// use serde_json::json;
+///
+/// let projs = build_projections(&json!([{"type": "star"}]).as_array().unwrap()).unwrap();
+/// assert_eq!(projs.len(), 1);
+/// ```
 pub fn build_projections(arr: &[Value]) -> Result<Vec<Projection>, BuildError> {
     arr.iter()
         .enumerate()

@@ -14,6 +14,7 @@
 //!
 //! Both patterns eliminate the duplicated recursion that would
 //! otherwise appear in every rule.
+#![allow(missing_docs)]
 
 use crate::schema::{
     CommonTableExpression, Expression, InTarget, JoinClause, OrderByTerm, Predicate, Projection,
@@ -28,6 +29,18 @@ use crate::schema::{
 /// rebuilding nodes. The default implementation for every method is the
 /// identity — call one of the [`default_*`] functions inside your
 /// override to recurse into children.
+///
+/// # Examples
+///
+/// ```
+/// use vlorql_core::optimizer::visitor::ExpressionFold;
+/// use vlorql_core::schema::Expression;
+///
+/// struct MyFold;
+/// impl ExpressionFold for MyFold {
+///     fn fold_expression(&mut self, expr: &Expression) -> Expression { expr.clone() }
+/// }
+/// ```
 pub trait ExpressionFold {
     fn fold_expression(&mut self, expr: &Expression) -> Expression {
         default_fold_expression(self, expr)
@@ -228,6 +241,24 @@ pub fn default_fold_plan<F: ExpressionFold + ?Sized>(
 /// Read-only traversal over an expression/predicate/plan tree. The
 /// default implementation of every method recurses into every child.
 /// Override specific methods to observe nodes of interest.
+///
+/// # Examples
+///
+/// ```
+/// use vlorql_core::optimizer::visitor::ExpressionVisit;
+/// use vlorql_core::schema::Expression;
+/// use std::collections::HashSet;
+///
+/// struct MyVisitor;
+/// impl ExpressionVisit for MyVisitor {
+///     type Ctx = HashSet<String>;
+///     fn visit_expression(&mut self, expr: &Expression, ctx: &mut Self::Ctx) {
+///         if let Expression::ColumnRef { column, .. } = expr {
+///             ctx.insert(column.clone());
+///         }
+///     }
+/// }
+/// ```
 pub trait ExpressionVisit {
     type Ctx;
 

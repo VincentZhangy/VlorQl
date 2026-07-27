@@ -14,6 +14,16 @@ use super::table_builder::build_from_clause;
 /// ```
 ///
 /// For `CROSS JOIN`, the `on` field is optional (not used).
+///
+/// # Examples
+///
+/// ```
+/// use vlorql_llm::parser_v2::builder::join_builder::build_join_clause;
+/// use serde_json::json;
+///
+/// let join = build_join_clause(&json!({"join_type": "inner", "right_table": {"table": "orders"}, "on": {"type": "comparison", "left": {"column": "user_id"}, "op": "eq", "right": {"column": "id"}}})).unwrap();
+/// assert_eq!(join.right_table.table, "orders");
+/// ```
 pub fn build_join_clause(val: &Value) -> Result<JoinClause, BuildError> {
     let obj = req_obj(val, "join")?;
 

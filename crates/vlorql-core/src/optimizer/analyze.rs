@@ -4,6 +4,7 @@
 //! rewriters need — which columns an expression touches, how a `WHERE`
 //! tree splits into independent conjuncts, and how to recombine
 //! predicates with `AND`.
+#![allow(missing_docs)]
 
 use std::collections::HashSet;
 
@@ -19,6 +20,21 @@ pub type ColumnRef = (Option<String>, String);
 ///
 /// `a AND (b AND c)` flattens to `[a, b, c]`. Any non-`And` predicate
 /// yields a single-element vector.
+///
+/// # Examples
+///
+/// ```
+/// use vlorql_core::schema::{Expression, Predicate, ComparisonOperator, DataType};
+/// use vlorql_core::optimizer::analyze::split_conjuncts;
+///
+/// let pred = Predicate::Comparison {
+///     left: Expression::ColumnRef { table: None, column: "x".to_owned() },
+///     op: ComparisonOperator::Eq,
+///     right: Expression::Literal { value: 1.into(), data_type: DataType::Int },
+/// };
+/// let conjuncts = split_conjuncts(&pred);
+/// assert_eq!(conjuncts.len(), 1);
+/// ```
 pub fn split_conjuncts(pred: &Predicate) -> Vec<Predicate> {
     let mut out = Vec::new();
     collect_conjuncts(pred, &mut out);
@@ -36,6 +52,21 @@ fn collect_conjuncts(pred: &Predicate, out: &mut Vec<Predicate>) {
 }
 
 /// Recombines conjuncts into a single `AND` tree, or `None` when empty.
+///
+/// # Examples
+///
+/// ```
+/// use vlorql_core::schema::{Expression, Predicate, ComparisonOperator, DataType};
+/// use vlorql_core::optimizer::analyze::combine_conjuncts;
+///
+/// let pred = Predicate::Comparison {
+///     left: Expression::ColumnRef { table: None, column: "x".to_owned() },
+///     op: ComparisonOperator::Eq,
+///     right: Expression::Literal { value: 1.into(), data_type: DataType::Int },
+/// };
+/// let result = combine_conjuncts(vec![pred]);
+/// assert!(result.is_some());
+/// ```
 pub fn combine_conjuncts(mut conjuncts: Vec<Predicate>) -> Option<Predicate> {
     let first = conjuncts.first().cloned()?;
     let rest = conjuncts.split_off(1);

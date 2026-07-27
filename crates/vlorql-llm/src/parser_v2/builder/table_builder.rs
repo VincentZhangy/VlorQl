@@ -11,6 +11,16 @@ use super::expr_builder::{BuildError, opt_str, req_obj, req_str};
 /// ```json
 /// {"table": "users", "alias": "u"}
 /// ```
+///
+/// # Examples
+///
+/// ```
+/// use vlorql_llm::parser_v2::builder::table_builder::build_from_clause;
+/// use serde_json::json;
+///
+/// let from = build_from_clause(&json!({"table": "users"}), "from").unwrap();
+/// assert_eq!(from.table, "users");
+/// ```
 pub fn build_from_clause(val: &Value, parent: &str) -> Result<FromClause, BuildError> {
     let obj = req_obj(val, parent)?;
     let table = req_str(obj, "table", parent)?.to_owned();

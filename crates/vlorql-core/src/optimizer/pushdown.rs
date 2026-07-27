@@ -39,10 +39,38 @@ use super::visitor::ExpressionFold;
 ///
 /// See the [module documentation](super) for the exact rules and the
 /// limitations imposed by the plan model.
+///
+/// # Examples
+///
+/// ```
+/// use vlorql_core::optimizer::PredicatePushdown;
+/// let pushdown = PredicatePushdown;
+/// ```
 #[derive(Debug, Clone, Copy, Default)]
 pub struct PredicatePushdown;
 
 impl PlanRewriter for PredicatePushdown {
+    /// Rewrites `plan` by pushing single-relation predicates down into CTEs.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use vlorql_core::optimizer::PredicatePushdown;
+    /// use vlorql_core::optimizer::PlanRewriter;
+    /// use vlorql_core::schema::{FromClause, Projection, QueryPlan};
+    ///
+    /// let pushdown = PredicatePushdown;
+    /// let plan = QueryPlan {
+    ///     select: vec![Projection::Star { table: None }],
+    ///     from: FromClause { table: "t".to_owned(), alias: None },
+    ///     r#where: None, group_by: None, having: None,
+    ///     order_by: None, limit: None, offset: None,
+    ///     joins: None, ctes: None, distinct: false,
+    ///     distinct_on: None, set_operation: None,
+    /// };
+    /// let result = pushdown.rewrite(&plan);
+    /// assert!(result.is_ok());
+    /// ```
     fn rewrite(&self, plan: &QueryPlan) -> Result<QueryPlan, VlorQLError> {
         Ok(push_plan(plan))
     }

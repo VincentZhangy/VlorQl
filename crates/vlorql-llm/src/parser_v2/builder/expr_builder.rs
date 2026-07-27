@@ -169,6 +169,16 @@ pub fn parse_join_type(s: &str) -> Result<vlorql_core::schema::JoinType, BuildEr
 }
 
 /// Parse a data type string.
+///
+/// # Examples
+///
+/// ```
+/// use vlorql_llm::parser_v2::builder::expr_builder::parse_data_type;
+/// use vlorql_core::schema::DataType;
+///
+/// assert_eq!(parse_data_type("int").unwrap(), DataType::Int);
+/// assert_eq!(parse_data_type("decimal").unwrap(), DataType::Decimal);
+/// ```
 pub fn parse_data_type(s: &str) -> Result<DataType, BuildError> {
     use DataType::*;
     match s {
@@ -257,6 +267,15 @@ fn build_literal_from_obj(obj: &serde_json::Map<String, Value>) -> Result<Expres
 ///
 /// Accepts both objects (with `type` discriminator) and bare values
 /// (numbers, strings, booleans, nulls) which are inferred as literals.
+///
+/// # Examples
+///
+/// ```
+/// use vlorql_llm::parser_v2::builder::expr_builder::build_expression;
+/// use serde_json::json;
+///
+/// let expr = build_expression(&json!({"type": "column_ref", "column": "id"})).unwrap();
+/// ```
 pub fn build_expression(val: &Value) -> Result<Expression, BuildError> {
     let obj = match val.as_object() {
         Some(o) => o,
@@ -474,6 +493,15 @@ pub fn build_expression(val: &Value) -> Result<Expression, BuildError> {
 // ── Predicate builder ─────────────────────────────────────────────
 
 /// Build a [`Predicate`] from a canonical JSON value.
+///
+/// # Examples
+///
+/// ```
+/// use vlorql_llm::parser_v2::builder::expr_builder::build_predicate;
+/// use serde_json::json;
+///
+/// let pred = build_predicate(&json!({"type": "comparison", "left": {"column": "age"}, "op": "gt", "right": {"column": "id"}})).unwrap();
+/// ```
 pub fn build_predicate(val: &Value) -> Result<Predicate, BuildError> {
     let obj = val.as_object().ok_or_else(|| {
         BuildError::new(

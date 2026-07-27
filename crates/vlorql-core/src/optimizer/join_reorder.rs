@@ -293,6 +293,15 @@ impl JoinGraph {
 /// provider) and rewrites a [`QueryPlan`]'s join order to minimize
 /// estimated cost. See the [module docs](super) for the algorithm and the
 /// safety guarantees.
+///
+/// # Examples
+///
+/// ```
+/// use vlorql_core::optimizer::JoinReorderer;
+/// let reorderer = JoinReorderer::new(std::sync::Arc::new(
+///     vlorql_core::statistics::DummyStatisticsProvider::default(),
+/// ));
+/// ```
 #[derive(Debug, Clone)]
 pub struct JoinReorderer {
     cost: CostEstimator,
@@ -312,6 +321,16 @@ struct DpEntry {
 
 impl JoinReorderer {
     /// Creates a reorderer backed by `stats_provider`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use vlorql_core::optimizer::JoinReorderer;
+    /// use std::sync::Arc;
+    /// use vlorql_core::statistics::DummyStatisticsProvider;
+    ///
+    /// let reorderer = JoinReorderer::new(Arc::new(DummyStatisticsProvider::default()));
+    /// ```
     pub fn new(stats_provider: Arc<dyn StatisticsProvider>) -> Self {
         Self {
             cost: CostEstimator::new(stats_provider),
@@ -319,6 +338,18 @@ impl JoinReorderer {
     }
 
     /// Creates a reorderer that reuses an existing [`CostEstimator`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use vlorql_core::optimizer::JoinReorderer;
+    /// use vlorql_core::statistics::CostEstimator;
+    /// use std::sync::Arc;
+    /// use vlorql_core::statistics::DummyStatisticsProvider;
+    ///
+    /// let estimator = CostEstimator::new(Arc::new(DummyStatisticsProvider::default()));
+    /// let reorderer = JoinReorderer::with_cost_estimator(estimator);
+    /// ```
     pub fn with_cost_estimator(cost: CostEstimator) -> Self {
         Self { cost }
     }
@@ -331,6 +362,30 @@ impl JoinReorderer {
     /// the appropriate search (DP for `≤ `[`MAX_DP_RELATIONS`] relations,
     /// greedy otherwise), and only rewrites the plan when the new order
     /// is both different and cheaper than the original.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use vlorql_core::optimizer::JoinReorderer;
+    /// use std::sync::Arc;
+    /// use vlorql_core::statistics::DummyStatisticsProvider;
+    /// use vlorql_core::schema::{FromClause, Projection, QueryPlan};
+    ///
+    /// let reorderer = JoinReorderer::new(Arc::new(DummyStatisticsProvider::default()));
+    /// let plan = QueryPlan {
+    ///     select: vec![Projection::Star { table: None }],
+    ///     from: FromClause { table: "t".to_owned(), alias: None },
+    ///     r#where: None, group_by: None, having: None,
+    ///     order_by: None, limit: None, offset: None,
+    ///     joins: None, ctes: None, distinct: false,
+    ///     distinct_on: None, set_operation: None,
+    /// };
+    /// // reorder is async; call via a runtime:
+    /// let result = tokio::runtime::Runtime::new()
+    ///     .unwrap()
+    ///     .block_on(reorderer.reorder(&plan));
+    /// assert!(result.is_ok());
+    /// ```
     pub async fn reorder(&self, plan: &QueryPlan) -> Result<QueryPlan, VlorQLError> {
         let Some(graph) = JoinGraph::build(plan) else {
             return Ok(plan.clone());

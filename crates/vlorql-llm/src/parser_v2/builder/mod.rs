@@ -13,6 +13,19 @@
 //! - **select_builder** — Projection / SELECT building
 //! - **join_builder** — JoinClause building
 //! - **query_builder** — QueryPlan building (orchestrator)
+//!
+//! # Examples
+//!
+//! The builder module converts JSON query plans into `QueryPlan` structs:
+//!
+//! ```
+//! use vlorql_llm::parser_v2::builder::query_builder::build_plan;
+//! use serde_json::json;
+//!
+//! let json = json!({"select":[{"type":"star"}],"from":{"table":"users"}});
+//! let plan = build_plan(&json).unwrap();
+//! assert_eq!(plan.from.table, "users");
+//! ```
 
 pub mod expr_builder;
 pub mod join_builder;
