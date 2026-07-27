@@ -487,6 +487,35 @@ pub fn normalize_predicate(val: &mut Value) -> bool {
                 return changed;
             }
 
+            // Fix: LLM sometimes nests op/right inside the left field of a comparison
+            // instead of at the top level. E.g.:
+            //   {"type":"comparison","left":{"type":"expr","expression":...,"op":"=","right":...}}
+            // → {"type":"comparison","left":...,"op":"=","right":...}
+            if !obj.contains_key("op") {
+                let promoted = obj
+                    .get("left")
+                    .and_then(|v| v.as_object())
+                    .and_then(|left_obj| {
+                        let op_val = left_obj.get("op").and_then(|v| v.as_str())?;
+                        if !left_obj.contains_key("right") {
+                            return None;
+                        }
+                        Some((
+                            op_val.to_owned(),
+                            left_obj.get("right").cloned().unwrap_or(Value::Null),
+                        ))
+                    });
+                if let Some((op_str, right_val)) = promoted {
+                    if let Some(left) = obj.get_mut("left").and_then(|v| v.as_object_mut()) {
+                        left.remove("op");
+                        left.remove("right");
+                    }
+                    obj.insert("op".to_owned(), Value::String(op_str));
+                    obj.insert("right".to_owned(), right_val);
+                    changed = true;
+                }
+            }
+
             if let Some(op_val) = obj.get("op").and_then(|v| v.as_str()) {
                 if op_val == "is_null" || op_val == "is null" {
                     // Extract the expression from `left` or `expr`.
