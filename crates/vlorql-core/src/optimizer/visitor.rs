@@ -148,6 +148,8 @@ pub fn default_fold_predicate<F: ExpressionFold + ?Sized>(
         Predicate::IsNull { expr } => Predicate::IsNull {
             expr: folder.fold_expression(expr),
         },
+        Predicate::True => Predicate::True,
+        Predicate::False => Predicate::False,
     }
 }
 
@@ -367,6 +369,7 @@ pub fn default_visit_predicate<F: ExpressionVisit + ?Sized>(
         Predicate::Like { expr, .. } | Predicate::IsNull { expr } => {
             visitor.visit_expression(expr, ctx)
         }
+        Predicate::True | Predicate::False => {}
     }
 }
 

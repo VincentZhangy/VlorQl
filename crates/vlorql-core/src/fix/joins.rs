@@ -100,6 +100,7 @@ fn collect_tables_in_pred(pred: &Predicate, tables: &mut HashSet<String>) {
         Predicate::Exists { query } => {
             collect_tables_in_plan(query, tables);
         }
+        Predicate::True | Predicate::False => {}
     }
 }
 

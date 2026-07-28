@@ -537,6 +537,7 @@ fn audit_predicate(pred: &Predicate, schema: &Arc<SchemaSnapshot>, report: &mut 
                 }
             }
         }
+        Predicate::True | Predicate::False => {}
     }
 }
 

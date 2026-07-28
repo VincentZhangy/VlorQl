@@ -182,6 +182,7 @@ fn has_aggregate_in_pred(pred: &crate::schema::Predicate) -> bool {
         crate::schema::Predicate::Like { expr, .. } => has_aggregate(expr),
         crate::schema::Predicate::IsNull { expr } => has_aggregate(expr),
         crate::schema::Predicate::Exists { query } => plan_has_aggregates(query),
+        crate::schema::Predicate::True | crate::schema::Predicate::False => false,
     }
 }
 

@@ -1503,7 +1503,7 @@ mod tests {
             .with_llm_config(config)
             .build()
             .expect("facade should build with config");
-        assert_eq!(v.max_retries(), 2);
+        assert_eq!(v.max_retries(), 3);
     }
 
     #[test]

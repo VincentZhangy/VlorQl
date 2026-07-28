@@ -217,6 +217,7 @@ pub(crate) fn collect_predicate_references(
             }
         }
         Predicate::Exists { .. } => {}
+        Predicate::True | Predicate::False => {}
         Predicate::Like { expr, .. } | Predicate::IsNull { expr } => {
             collect_expression_references(expr, references);
         }

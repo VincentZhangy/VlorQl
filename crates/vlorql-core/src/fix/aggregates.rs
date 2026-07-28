@@ -108,6 +108,7 @@ fn dedup_pred(pred: &mut Predicate) -> bool {
         Predicate::Like { expr, .. } => dedup_expr(expr),
         Predicate::IsNull { expr } => dedup_expr(expr),
         Predicate::Exists { query } => dedup_plan(query),
+        Predicate::True | Predicate::False => false,
     }
 }
 

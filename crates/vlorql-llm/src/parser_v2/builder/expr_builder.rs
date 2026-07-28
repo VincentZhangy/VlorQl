@@ -650,6 +650,8 @@ pub fn build_predicate(val: &Value) -> Result<Predicate, BuildError> {
             .map_err(|e| e.at("expr"))?;
             Ok(Predicate::IsNull { expr })
         }
+        "true" => Ok(Predicate::True),
+        "false" => Ok(Predicate::False),
         "exists" => {
             let sub = req_obj(
                 obj.get("query")

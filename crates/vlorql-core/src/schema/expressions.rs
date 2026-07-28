@@ -271,4 +271,16 @@ pub enum Predicate {
         /// The subquery to check.
         query: Box<QueryPlan>,
     },
+    /// A constant `true` value (used internally by the optimizer).
+    #[serde(skip_serializing)]
+    True,
+    /// A constant `false` value (used internally by the optimizer).
+    #[serde(skip_serializing)]
+    False,
+}
+
+impl Default for Predicate {
+    fn default() -> Self {
+        Predicate::True
+    }
 }

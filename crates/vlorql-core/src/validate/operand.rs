@@ -295,6 +295,7 @@ impl<'a> OperandValidator<'a> {
             Predicate::IsNull { expr } => {
                 self.validate_expression_inner(expr, scope, errors);
             }
+            Predicate::True | Predicate::False => {}
         }
     }
 

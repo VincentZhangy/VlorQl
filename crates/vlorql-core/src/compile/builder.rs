@@ -324,6 +324,14 @@ impl<'a> QueryBuilder<'a> {
                 buf.push_str(" IS NULL");
                 Ok(())
             }
+            Predicate::True => {
+                buf.push_str("TRUE");
+                Ok(())
+            }
+            Predicate::False => {
+                buf.push_str("FALSE");
+                Ok(())
+            }
         }
     }
 

@@ -249,6 +249,7 @@ fn validate_predicate(predicate: &Predicate, errors: &mut Vec<ValidationError>) 
         Predicate::Exists { query } => {
             validate_plan(query, errors);
         }
+        Predicate::True | Predicate::False => {}
     }
 }
 

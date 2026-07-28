@@ -390,6 +390,7 @@ fn contains_aggregate(pred: &Predicate) -> bool {
         Predicate::Or { left, right } => contains_aggregate(left) || contains_aggregate(right),
         Predicate::Not { child } => contains_aggregate(child),
         Predicate::Exists { .. } => false,
+        Predicate::True | Predicate::False => false,
     }
 }
 
@@ -564,6 +565,7 @@ fn replace_alias_in_predicate(
         Predicate::Exists { query } => {
             changed |= fix_where_alias_refs(query);
         }
+        Predicate::True | Predicate::False => {}
     }
     changed
 }

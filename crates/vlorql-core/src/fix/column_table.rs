@@ -132,6 +132,7 @@ fn fix_pred(pred: &mut Predicate, schema: &SchemaSnapshot) -> bool {
         Predicate::Like { expr, .. } => fix_expr(expr, schema),
         Predicate::IsNull { expr } => fix_expr(expr, schema),
         Predicate::Exists { query } => fix_plan(query, schema),
+        Predicate::True | Predicate::False => false,
     }
 }
 

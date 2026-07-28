@@ -246,6 +246,7 @@ fn fix_pred(pred: &mut Predicate) -> bool {
         Predicate::Like { expr, .. } => fix_expr(expr),
         Predicate::IsNull { expr } => fix_expr(expr),
         Predicate::Exists { query } => fix_plan(query),
+        Predicate::True | Predicate::False => false,
     }
 }
 

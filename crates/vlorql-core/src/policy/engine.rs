@@ -271,6 +271,7 @@ impl PolicyEngine {
             Predicate::Like { expr, .. } | Predicate::IsNull { expr } => {
                 self.validate_subqueries_in_expression(expr, schema, errors, outer_scope);
             }
+            Predicate::True | Predicate::False => {}
         }
     }
 

@@ -9,7 +9,6 @@
 //! - `AND FALSE` → `FALSE` (short-circuit)
 //! - `OR TRUE` → `TRUE` (short-circuit)
 
-use serde_json::Value;
 use vlorql_core::schema::{ComparisonOperator, DataType, Expression, Predicate};
 
 /// Run all predicate simplification rules on a predicate tree.
@@ -81,6 +80,9 @@ fn simplify_recursive(predicate: &mut Predicate) -> bool {
         Predicate::Exists { .. } => {
             // Subquery optimization is not yet implemented.
         }
+        Predicate::True | Predicate::False => {
+            // Constants cannot be simplified further.
+        }
     }
 
     changed
@@ -95,51 +97,11 @@ fn simplify_expression(_expr: &mut Expression) -> bool {
 fn simplify_and_true(predicate: &mut Predicate) -> bool {
     if let Predicate::And { left, right } = predicate {
         if is_true_predicate(left) {
-            *predicate = std::mem::replace(
-                right,
-                Predicate::And {
-                    left: Box::new(Predicate::Comparison {
-                        left: Expression::Literal {
-                            value: Value::Bool(true),
-                            data_type: DataType::Boolean,
-                        },
-                        op: ComparisonOperator::Eq,
-                        right: Expression::Literal {
-                            value: Value::Bool(true),
-                            data_type: DataType::Boolean,
-                        },
-                    }),
-                    right: Box::new(Predicate::Comparison {
-                        left: Expression::Literal {
-                            value: Value::Bool(true),
-                            data_type: DataType::Boolean,
-                        },
-                        op: ComparisonOperator::Eq,
-                        right: Expression::Literal {
-                            value: Value::Bool(true),
-                            data_type: DataType::Boolean,
-                        },
-                    }),
-                },
-            );
+            *predicate = std::mem::take(right);
             return true;
         }
         if is_true_predicate(right) {
-            let replacement = std::mem::replace(
-                left,
-                Box::new(Predicate::Comparison {
-                    left: Expression::Literal {
-                        value: Value::Bool(true),
-                        data_type: DataType::Boolean,
-                    },
-                    op: ComparisonOperator::Eq,
-                    right: Expression::Literal {
-                        value: Value::Bool(true),
-                        data_type: DataType::Boolean,
-                    },
-                }),
-            );
-            *predicate = *replacement;
+            *predicate = std::mem::take(left);
             return true;
         }
     }
@@ -151,17 +113,7 @@ fn simplify_and_false(predicate: &mut Predicate) -> bool {
     if let Predicate::And { left, right } = predicate
         && (is_false_predicate(left) || is_false_predicate(right))
     {
-        *predicate = Predicate::Comparison {
-            left: Expression::Literal {
-                value: Value::Bool(false),
-                data_type: DataType::Boolean,
-            },
-            op: ComparisonOperator::Eq,
-            right: Expression::Literal {
-                value: Value::Bool(true),
-                data_type: DataType::Boolean,
-            },
-        };
+        *predicate = Predicate::False;
         return true;
     }
     false
@@ -171,39 +123,11 @@ fn simplify_and_false(predicate: &mut Predicate) -> bool {
 fn simplify_or_false(predicate: &mut Predicate) -> bool {
     if let Predicate::Or { left, right } = predicate {
         if is_false_predicate(left) {
-            let replacement = std::mem::replace(
-                right,
-                Box::new(Predicate::Comparison {
-                    left: Expression::Literal {
-                        value: Value::Bool(true),
-                        data_type: DataType::Boolean,
-                    },
-                    op: ComparisonOperator::Eq,
-                    right: Expression::Literal {
-                        value: Value::Bool(true),
-                        data_type: DataType::Boolean,
-                    },
-                }),
-            );
-            *predicate = *replacement;
+            *predicate = std::mem::take(right);
             return true;
         }
         if is_false_predicate(right) {
-            let replacement = std::mem::replace(
-                left,
-                Box::new(Predicate::Comparison {
-                    left: Expression::Literal {
-                        value: Value::Bool(true),
-                        data_type: DataType::Boolean,
-                    },
-                    op: ComparisonOperator::Eq,
-                    right: Expression::Literal {
-                        value: Value::Bool(true),
-                        data_type: DataType::Boolean,
-                    },
-                }),
-            );
-            *predicate = *replacement;
+            *predicate = std::mem::take(left);
             return true;
         }
     }
@@ -215,17 +139,7 @@ fn simplify_or_true(predicate: &mut Predicate) -> bool {
     if let Predicate::Or { left, right } = predicate
         && (is_true_predicate(left) || is_true_predicate(right))
     {
-        *predicate = Predicate::Comparison {
-            left: Expression::Literal {
-                value: Value::Bool(true),
-                data_type: DataType::Boolean,
-            },
-            op: ComparisonOperator::Eq,
-            right: Expression::Literal {
-                value: Value::Bool(true),
-                data_type: DataType::Boolean,
-            },
-        };
+        *predicate = Predicate::True;
         return true;
     }
     false
@@ -289,17 +203,7 @@ fn fold_constant_comparison(predicate: &mut Predicate) -> bool {
             _ => None,
         };
         if let Some(result) = result {
-            *predicate = Predicate::Comparison {
-                left: Expression::Literal {
-                    value: Value::Bool(result),
-                    data_type: DataType::Boolean,
-                },
-                op: ComparisonOperator::Eq,
-                right: Expression::Literal {
-                    value: Value::Bool(true),
-                    data_type: DataType::Boolean,
-                },
-            };
+            *predicate = if result { Predicate::True } else { Predicate::False };
             return true;
         }
     }
@@ -316,17 +220,7 @@ fn simplify_trivial_comparison(predicate: &mut Predicate) -> bool {
             op,
             ComparisonOperator::Eq | ComparisonOperator::Gte | ComparisonOperator::Lte
         );
-        *predicate = Predicate::Comparison {
-            left: Expression::Literal {
-                value: Value::Bool(is_eq),
-                data_type: DataType::Boolean,
-            },
-            op: ComparisonOperator::Eq,
-            right: Expression::Literal {
-                value: Value::Bool(true),
-                data_type: DataType::Boolean,
-            },
-        };
+        *predicate = if is_eq { Predicate::True } else { Predicate::False };
         return true;
     }
     false
@@ -337,20 +231,7 @@ fn simplify_duplicate_and(predicate: &mut Predicate) -> bool {
     if let Predicate::And { left, right } = predicate
         && predicates_equal(left, right)
     {
-        let replacement = std::mem::replace(
-            left,
-            Box::new(Predicate::Comparison {
-                left: Expression::Literal {
-                    value: Value::Bool(true),
-                    data_type: DataType::Boolean,
-                },
-                op: ComparisonOperator::Eq,
-                right: Expression::Literal {
-                    value: Value::Bool(true),
-                    data_type: DataType::Boolean,
-                },
-            }),
-        );
+        let replacement = std::mem::take(left);
         *predicate = *replacement;
         return true;
     }
@@ -362,20 +243,7 @@ fn simplify_duplicate_or(predicate: &mut Predicate) -> bool {
     if let Predicate::Or { left, right } = predicate
         && predicates_equal(left, right)
     {
-        let replacement = std::mem::replace(
-            left,
-            Box::new(Predicate::Comparison {
-                left: Expression::Literal {
-                    value: Value::Bool(true),
-                    data_type: DataType::Boolean,
-                },
-                op: ComparisonOperator::Eq,
-                right: Expression::Literal {
-                    value: Value::Bool(true),
-                    data_type: DataType::Boolean,
-                },
-            }),
-        );
+        let replacement = std::mem::take(left);
         *predicate = *replacement;
         return true;
     }
@@ -386,20 +254,12 @@ fn simplify_duplicate_or(predicate: &mut Predicate) -> bool {
 
 /// Check if a predicate is a constant TRUE.
 fn is_true_predicate(pred: &Predicate) -> bool {
-    matches!(pred, Predicate::Comparison {
-        left: Expression::Literal { value: lv, .. },
-        op: ComparisonOperator::Eq,
-        right: Expression::Literal { value: rv, .. },
-    } if lv.as_bool() == Some(true) && rv.as_bool() == Some(true))
+    matches!(pred, Predicate::True)
 }
 
 /// Check if a predicate is a constant FALSE.
 fn is_false_predicate(pred: &Predicate) -> bool {
-    matches!(pred, Predicate::Comparison {
-        left: Expression::Literal { value: lv, .. },
-        op: ComparisonOperator::Eq,
-        right: Expression::Literal { value: rv, .. },
-    } if lv.as_bool() == Some(false) && rv.as_bool() == Some(true))
+    matches!(pred, Predicate::False)
 }
 
 /// Extract a constant value from an expression, if possible.
@@ -504,6 +364,8 @@ fn predicates_equal(a: &Predicate, b: &Predicate) -> bool {
         (Predicate::Exists { .. }, Predicate::Exists { .. }) => {
             false // Subquery plans are compared by pointer, not structurally
         }
+        (Predicate::True, Predicate::True) => true,
+        (Predicate::False, Predicate::False) => true,
         _ => false,
     }
 }
@@ -592,19 +454,11 @@ mod tests {
     }
 
     fn true_pred() -> Predicate {
-        Predicate::Comparison {
-            left: lit_bool(true),
-            op: ComparisonOperator::Eq,
-            right: lit_bool(true),
-        }
+        Predicate::True
     }
 
     fn false_pred() -> Predicate {
-        Predicate::Comparison {
-            left: lit_bool(false),
-            op: ComparisonOperator::Eq,
-            right: lit_bool(true),
-        }
+        Predicate::False
     }
 
     // ── AND TRUE simplification ──────────────────────────────────

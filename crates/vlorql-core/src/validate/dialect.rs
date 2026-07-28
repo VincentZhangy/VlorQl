@@ -352,6 +352,7 @@ impl BoundDialectValidator<'_> {
             Predicate::Like { expr, .. } | Predicate::IsNull { expr } => {
                 self.validate_expression(expr, errors);
             }
+            Predicate::True | Predicate::False => {}
         }
     }
 

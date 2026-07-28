@@ -147,6 +147,8 @@ impl CardinalityEstimator {
                 Predicate::Like { .. } => LIKE_SELECTIVITY,
                 Predicate::IsNull { expr } => self.null_selectivity(table, expr).await?,
                 Predicate::Exists { .. } => LIKE_SELECTIVITY, // EXISTS selectivity is approximated as LIKE
+                Predicate::True => 1.0,
+                Predicate::False => 0.0,
             };
             Ok(clamp01(selectivity))
         })
