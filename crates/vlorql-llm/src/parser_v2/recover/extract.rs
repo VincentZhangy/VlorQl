@@ -15,6 +15,33 @@ use super::bracket;
 use super::json;
 use super::markdown;
 
+/// Finds the longest valid JSON object in `text` by scanning every `{` start
+/// position, checking for a balanced bracket pair, and keeping only the
+/// longest candidate that actually parses as JSON.
+#[must_use]
+fn find_longest_valid_json(text: &str) -> Option<&str> {
+    let bytes = text.as_bytes();
+    let mut best: Option<&str> = None;
+    let mut best_len = 0;
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'{' {
+            if let Some(end) = bracket::find_balanced_object_end(text, i) {
+                let candidate = &text[i..=end];
+                if candidate.len() > best_len
+                    && serde_json::from_str::<serde_json::Value>(candidate).is_ok()
+                {
+                    best = Some(candidate);
+                    best_len = candidate.len();
+                }
+                i = end;
+            }
+        }
+        i += 1;
+    }
+    best
+}
+
 /// Attempts to extract valid JSON from an LLM response text.
 ///
 /// Small LLMs often wrap JSON in markdown fences or include extra
@@ -83,9 +110,9 @@ pub fn extract_json_content(raw: &str) -> &str {
     if let Some(obj) = bracket::find_best_json_obj(trimmed) {
         return obj;
     }
-    // 4b. Fallback: first balanced object (may be recoverable by later repair).
-    if let Some(obj) = bracket::find_outermost_json_obj(trimmed) {
-        return obj;
+    // 4b. Fallback: longest valid JSON object.
+    if let Some(best) = find_longest_valid_json(trimmed) {
+        return best;
     }
 
     trimmed
@@ -177,6 +204,21 @@ mod tests {
         assert!(parsed.is_object());
         assert!(parsed.get("select").is_some());
         assert!(parsed.get("from").is_some());
+    }
+
+    #[test]
+    fn longest_valid_json_when_multiple_objects() {
+        let input = r#"{"a":1} followed by {"select":[{"type":"star"}],"from":{"table":"users"}}"#;
+        let result = extract_json_content(input);
+        let parsed: serde_json::Value = serde_json::from_str(result).unwrap();
+        assert!(parsed.get("select").is_some());
+    }
+
+    #[test]
+    fn longest_valid_json_no_valid_objects() {
+        let input = "just text {broken: json}";
+        let result = extract_json_content(input);
+        assert_eq!(result, input);
     }
 
     #[test]

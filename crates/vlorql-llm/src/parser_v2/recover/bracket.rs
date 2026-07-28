@@ -98,6 +98,17 @@ fn find_matching_close(text: &str, open: char, close: char) -> Option<usize> {
     None
 }
 
+/// Finds the end index of a balanced JSON object starting at `start`.
+///
+/// `text` must have a `{` at byte position `start`. Returns the byte
+/// index of the matching `}`, or `None` if no match is found.
+#[must_use]
+pub(crate) fn find_balanced_object_end(text: &str, start: usize) -> Option<usize> {
+    let rest = &text[start..];
+    let rel_end = find_matching_close(rest, '{', '}')?;
+    Some(start + rel_end)
+}
+
 /// Strips whitespace from the start and end of text, then checks
 /// whether the text starts with `{` and ends with `}` at the same
 /// brace-depth level.
