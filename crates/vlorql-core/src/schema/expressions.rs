@@ -91,7 +91,7 @@ pub enum Expression {
         else_result: Option<Box<Expression>>,
     },
     /// A window function call with an OVER clause, e.g. `ROW_NUMBER() OVER (PARTITION BY ... ORDER BY ...)`.
-    /// The `name` and `args` fields work identically to [`FunctionCall`], but the result is
+    /// The `name` and `args` fields work identically to [`FunctionCall`](crate::schema::Expression::FunctionCall), but the result is
     /// computed over a window frame rather than grouped rows.
     WindowFunction {
         /// Function name (e.g. `"row_number"`, `"lag"`, `"sum"`).

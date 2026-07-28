@@ -128,7 +128,30 @@ let client = create_llm_client(config)?;
 
 ## 2. 生产部署
 
-### 2.1 使用 `Arc` 共享状态
+### 2.1 使用 `VlorQl::run` 执行查询
+
+VlorQl 支持完整的"查询计划生成 → 验证 → 编译 → 执行"流水线。配置一个 [`DatabaseExecutor`]（例如 PostgreSQL），调用 `VlorQl::run` 即可直接获得查询结果：
+
+```rust
+use vlorql::execute::PgExecutor;
+use std::sync::Arc;
+
+let executor = PgExecutor::new(client);
+let vlorql = VlorQl::builder()
+    .with_schema(schema)
+    .with_dialect_name("postgres")
+    .with_llm_client(llm_client)
+    .with_executor(Arc::new(executor))
+    .build()?;
+
+let result = vlorql.run("显示所有用户").await?;
+// result.columns: Vec<String>
+// result.rows: Vec<Vec<Value>>
+```
+
+对于 MySQL 和 SQLite，请使用 `MysqlExecutor` / `SqliteExecutor`。
+
+### 2.2 使用 `Arc` 共享状态
 
 VlorQl 提供的每个组件都可以廉价克隆并在线程间共享：
 

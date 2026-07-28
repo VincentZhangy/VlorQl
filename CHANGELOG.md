@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.5.0] - 2026-07-28
+
+### Added
+
+- **CTE 类型断言方言扩展：** `render_cte_cast` 方法支持 PostgreSQL/MySQL/SQLite 三方言的显式类型转换，覆盖 Int/Float/Boolean/Decimal/Date/Timestamp/Json 等 10+ 种数据类型。
+- **小模型 normalize 管道扩展：** `normalize_small_model` 新增 `from` 字符串→对象修复、LIMIT/offset 字符串→数字转换、WHERE 缺失 type 注入；覆盖 llama-3.2/qwen2.5/phi-3/deepseek-coder/gemma-2 等多种小模型。
+- **`extract_json_content` 最长有效 JSON 回退：** 新增 `find_longest_valid_json` 策略，在多个 JSON 对象中优先选择最长有效解析结果。
+- **`normalize_predicate` catch-all 分支：** 添加未知 predicate 类型的 `tracing::debug!` 日志和空操作处理，提升未来兼容性。
+- **重试策略增强：** `format_retry_question_str` 新增 `attempt` 参数，首次仅提供错误摘要，后续逐步增加细节，减少小模型信息过载。
+- **统一数据类型映射：** 新建 `common.rs` 统一 `canonical_data_type()` 和 `resolve_sql_type_alias()` 入口，消除 `expr.rs` 与 `value.rs` 间的重复维护。
+- **架构文档：** 为 `parser_v2` 模块撰写完整流水线架构文档，包括数据流图、错误处理和多模型支持说明。
+- **部署指南：** 中英文部署指南补充 `VlorQl::run()` 执行器使用说明。
+
+### Fixed
+
+- **`normalize_impl` 字段保护：** `std::mem::take` 后 `normalize_predicate` 的重建操作不再丢失非 predicate 字段（如 `data_type`）。
+- **cargo doc 警告消除：** 修复 `vlorql-core` 中 3 个 unresolved link 警告（`VlorQlBuilder::build`、`default_*`、`FunctionCall`）。
+- **DISTINCT + GROUP BY 严格性放宽：** 从硬错误降为 `tracing::warn!` 警告，兼容 MySQL `SELECT DISTINCT ... GROUP BY` 语义。
+- **SELECT * + GROUP BY 语义检测：** 新增验证器检查，拦截 `*` 展开后可能不完全在 GROUP BY 中的场景。
+
+### Changed
+
+- **编译器验证：** CTE 字面量 CAST 覆盖更多数据类型（Date/Timestamp/Json/Null/Uuid），新增 MySQL/SQLite 方言 CTE 类型断言。
+- **文档完善：** `parser_v2/mod.rs` 模块文档从 16 行扩展至 67 行，包含完整流水线图和多模型支持说明。
+
 ## [0.4.0] - 2026-07-28
 
 ### Added

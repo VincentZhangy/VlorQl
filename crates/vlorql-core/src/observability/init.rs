@@ -28,7 +28,7 @@ impl FormatTime for SpringBootTimer {
 /// Initializes a human-readable tracing subscriber (Spring Boot-style)
 /// if no global subscriber is already registered.
 ///
-/// This is called automatically by [`VlorQlBuilder::build`] so that
+/// This is called automatically by `VlorQlBuilder::build` so that
 /// [`tracing::error!`] / [`tracing::warn!`] / [`tracing::info!`]
 /// output is visible by default.
 pub fn init_console_logging() {

@@ -17,6 +17,35 @@ use crate::sse::{
     drive_sse_consumer_with, is_retryable, response_message, retry_backoff, sse_lines,
     transport_error, truncate,
 };
+use crate::TokenUsage;
+
+fn parse_usage_from_response(text: &str) -> TokenUsage {
+    use serde_json::Value;
+    match serde_json::from_str::<Value>(text) {
+        Ok(val) => {
+            let usage = val
+                .get("usage")
+                .or_else(|| val.get("message").and_then(|m| m.get("usage")));
+            match usage {
+                Some(u) => TokenUsage {
+                    prompt_tokens: u
+                        .get("prompt_tokens")
+                        .or_else(|| u.get("input_tokens"))
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(0),
+                    completion_tokens: u
+                        .get("completion_tokens")
+                        .or_else(|| u.get("output_tokens"))
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(0),
+                },
+                None => TokenUsage::default(),
+            }
+        }
+        Err(_) => TokenUsage::default(),
+    }
+}
+
 use crate::DEFAULT_RETRY_DELAY;
 
 /// A retryable HTTP client that can send requests to an LLM provider.

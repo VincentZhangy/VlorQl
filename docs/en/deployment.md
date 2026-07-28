@@ -147,7 +147,30 @@ factory will read it automatically.
 
 ## 2. Production deployment
 
-### 2.1 Share state with `Arc`
+### 2.1 Execute queries with `VlorQl::run`
+
+VlorQl supports a full "plan generation → validation → compilation → execution" pipeline. Configure a [`DatabaseExecutor`] (e.g. PostgreSQL) and call `VlorQl::run` to get query results directly:
+
+```rust
+use vlorql::execute::PgExecutor;
+use std::sync::Arc;
+
+let executor = PgExecutor::new(client);
+let vlorql = VlorQl::builder()
+    .with_schema(schema)
+    .with_dialect_name("postgres")
+    .with_llm_client(llm_client)
+    .with_executor(Arc::new(executor))
+    .build()?;
+
+let result = vlorql.run("show all users").await?;
+// result.columns: Vec<String>
+// result.rows: Vec<Vec<Value>>
+```
+
+For MySQL and SQLite, use `MysqlExecutor` / `SqliteExecutor`.
+
+### 2.2 Share state with `Arc`
 
 Every component VlorQl hands you is cheap to clone and can be
 shared across threads:

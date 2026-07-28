@@ -27,7 +27,7 @@ use crate::schema::{
 
 /// Transforms an expression/predicate/plan tree by recursively
 /// rebuilding nodes. The default implementation for every method is the
-/// identity — call one of the [`default_*`] functions inside your
+/// identity — call one of the `default_*` functions inside your
 /// override to recurse into children.
 ///
 /// # Examples
