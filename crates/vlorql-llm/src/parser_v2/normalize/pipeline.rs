@@ -101,45 +101,117 @@ pub fn normalize_for_model(raw: &mut serde_json::Value, model_fingerprint: Optio
         return base;
     };
 
-    match fp {
-        fp if fp.contains("llama3.2") || fp.contains("qwen2.5") => {
-            // Small models: more aggressive normalization
-            normalize_small_model(raw) || base
-        }
-        _ => base,
+    if is_small_model(fp) {
+        normalize_small_model(raw) || base
+    } else {
+        base
     }
+}
+
+/// Check whether a model fingerprint identifies a small model (<3B params)
+/// that typically produces less-structured output.
+fn is_small_model(fp: &str) -> bool {
+    let fp_lower = fp.to_lowercase();
+    fp_lower.contains("llama-3.2")
+        || fp_lower.contains("qwen2.5")
+        || fp_lower.contains("phi-3")
+        || fp_lower.contains("deepseek-coder")
+        || fp_lower.contains("gemma-2")
+        || fp_lower.contains("tiny")
+}
+
+/// Fix missing `type` discriminators on select-projection objects.
+///
+/// Injects a reasonable default `type` field for select items that lack one:
+/// - `"column_ref"` if `column` or `columns` keys are present,
+/// - `"expr"` if `expression` or `expr` keys are present,
+/// - `"star"` otherwise.
+///
+/// Returns `true` if any change was made.
+fn fix_select_types(obj: &mut serde_json::Map<String, serde_json::Value>) -> bool {
+    let mut changed = false;
+
+    let select = match obj.get_mut("select").and_then(|v| v.as_array_mut()) {
+        Some(arr) => arr,
+        None => return false,
+    };
+
+    for proj in select.iter_mut() {
+        let Some(proj_obj) = proj.as_object_mut() else {
+            continue;
+        };
+        if proj_obj.contains_key("type") {
+            continue;
+        }
+        if proj_obj.contains_key("column") || proj_obj.contains_key("columns") {
+            proj_obj.insert(
+                "type".to_owned(),
+                serde_json::Value::String("column_ref".to_owned()),
+            );
+        } else if proj_obj.contains_key("expression") || proj_obj.contains_key("expr") {
+            proj_obj.insert(
+                "type".to_owned(),
+                serde_json::Value::String("expr".to_owned()),
+            );
+        } else {
+            proj_obj.insert(
+                "type".to_owned(),
+                serde_json::Value::String("star".to_owned()),
+            );
+        }
+        changed = true;
+    }
+
+    changed
 }
 
 /// Small-model-specific normalizations:
 ///
 /// - Inject missing `type` fields in select projections
-/// - (Future: ensure FROM clause always has a table, remove uncommon fields)
+/// - Fix `"from": "table_name"` (string) → `"from": {"table": "table_name"}`
+/// - Fix LIMIT/offset as string → number
+/// - Fix WHERE with missing `type` discriminator on predicates
 #[must_use]
 fn normalize_small_model(raw: &mut serde_json::Value) -> bool {
     let mut changed = false;
 
-    // Ensure select items have type fields.
-    if let Some(select) = raw.get_mut("select").and_then(|v| v.as_array_mut()) {
-        for proj in select.iter_mut() {
-            if let Some(obj) = proj.as_object_mut()
-                && !obj.contains_key("type")
-            {
-                if obj.contains_key("column") || obj.contains_key("columns") {
-                    obj.insert(
-                        "type".to_owned(),
-                        serde_json::Value::String("column_ref".to_owned()),
-                    );
-                } else if obj.contains_key("expression") || obj.contains_key("expr") {
-                    obj.insert(
-                        "type".to_owned(),
-                        serde_json::Value::String("expr".to_owned()),
-                    );
-                } else {
-                    obj.insert(
-                        "type".to_owned(),
-                        serde_json::Value::String("star".to_owned()),
-                    );
+    let obj = match raw.as_object_mut() {
+        Some(o) => o,
+        None => return false,
+    };
+
+    // 1. Ensure select items have type fields (existing logic).
+    changed |= fix_select_types(obj);
+
+    // 2. Fix `"from": "table_name"` (string) → `"from": {"table": "table_name"}`.
+    {
+        let table_name = obj.get("from").and_then(|v| v.as_str()).map(|s| s.to_owned());
+        if let Some(name) = table_name {
+            obj["from"] = serde_json::json!({"table": name});
+            changed = true;
+        }
+    }
+
+    // 3. Fix LIMIT/offset as string → number.
+    for &field in &["limit", "offset"] {
+        if let Some(v) = obj.get(field) {
+            if let Some(s) = v.as_str() {
+                if let Ok(n) = s.parse::<u64>() {
+                    obj[field] = serde_json::json!(n);
+                    changed = true;
                 }
+            }
+        }
+    }
+
+    // 4. Fix WHERE with missing `type` discriminator on predicates.
+    if let Some(where_val) = obj.get_mut("where") {
+        if let Some(where_obj) = where_val.as_object_mut() {
+            if !where_obj.contains_key("type")
+                && where_obj.contains_key("left")
+                && where_obj.contains_key("op")
+            {
+                where_obj.insert("type".to_owned(), "comparison".into());
                 changed = true;
             }
         }
@@ -323,5 +395,66 @@ mod tests {
         let input = "not json at all";
         let result = normalize_str(input);
         assert_eq!(result.as_ref(), input);
+    }
+
+    // ── small-model tests ──────────────────────────────────────────────
+
+    #[test]
+    fn small_model_fixes_select_types() {
+        let mut val = json!({"select": [{"column": "id"}], "from": {"table": "users"}});
+        assert!(normalize_small_model(&mut val));
+        assert_eq!(val["select"][0]["type"], "column_ref");
+    }
+
+    #[test]
+    fn small_model_fixes_from_string() {
+        let mut val = json!({"select": [{"column": "id"}], "from": "users"});
+        assert!(normalize_small_model(&mut val));
+        assert_eq!(val["from"]["table"], "users");
+    }
+
+    #[test]
+    fn small_model_fixes_limit_string() {
+        let mut val = json!({"select": [{"column": "id"}], "from": {"table": "users"}, "limit": "10"});
+        assert!(normalize_small_model(&mut val));
+        assert_eq!(val["limit"], 10);
+    }
+
+    #[test]
+    fn small_model_fixes_where_missing_type() {
+        let mut val = json!({"select": [{"column": "id"}], "from": {"table": "users"}, "where": {"left": {"column": "age"}, "op": "gt", "right": {"literal": 18}}});
+        assert!(normalize_small_model(&mut val));
+        assert_eq!(val["where"]["type"], "comparison");
+    }
+
+    #[test]
+    fn small_model_no_change_for_canonical() {
+        let mut val = json!({
+            "select": [{"type": "column_ref", "column": "id"}],
+            "from": {"table": "users"},
+            "where": {"type": "comparison", "left": {"column": "age"}, "op": "gt", "right": {"literal": 18}},
+            "limit": 10
+        });
+        assert!(!normalize_small_model(&mut val));
+    }
+
+    #[test]
+    fn is_small_model_detects_small_models() {
+        assert!(is_small_model("llama-3.2-3b-instruct"));
+        assert!(is_small_model("qwen2.5-1.5b"));
+        assert!(is_small_model("phi-3-mini"));
+        assert!(is_small_model("deepseek-coder-1.3b"));
+        assert!(is_small_model("gemma-2-2b"));
+        assert!(is_small_model("tiny-llama"));
+        assert!(!is_small_model("llama-3.1-8b"));
+        assert!(!is_small_model("gpt-4"));
+    }
+
+    #[test]
+    fn normalize_for_model_runs_small_pipeline_for_small_models() {
+        let mut val = json!({"select": [{"column": "id"}], "from": "users", "limit": "5"});
+        assert!(normalize_for_model(&mut val, Some("llama-3.2-3b")));
+        assert_eq!(val["from"]["table"], "users");
+        assert_eq!(val["limit"], 5);
     }
 }
