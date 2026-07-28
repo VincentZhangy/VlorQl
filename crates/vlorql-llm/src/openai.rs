@@ -1,13 +1,13 @@
 use async_trait::async_trait;
-use futures::stream::Stream;
 use serde_json::{Value, json};
+use std::sync::Arc;
 use std::time::Duration;
 use tracing::Instrument;
 use vlorql_core::errors::{LlmErrorKind, VlorQLError};
 use vlorql_core::schema::QueryPlan;
-use crate::{RetryableHttpClient, LlmClient, LlmConfig, LlmProvider};
+use crate::{RetryableHttpClient, LlmClient, LlmConfig, LlmProvider, StreamResult, TokenUsage};
 use crate::schema::compact_query_plan_schema;
-use crate::sse::{extract_delta_content, transport_error, truncate};
+use crate::sse::{transport_error, truncate};
 use crate::{DEFAULT_API_BASE, DEFAULT_MAX_ATTEMPTS};
 
 /// OpenAI-compatible chat-completions client.
@@ -259,7 +259,7 @@ impl LlmClient for OpenAIClient {
         question: &str,
         system_prompt: &str,
         temperature: Option<f32>,
-    ) -> Result<QueryPlan, VlorQLError> {
+    ) -> Result<(QueryPlan, TokenUsage), VlorQLError> {
         let span = tracing::info_span!(
             "llm.generate_plan",
             provider = ?self.provider(),
@@ -280,8 +280,7 @@ impl LlmClient for OpenAIClient {
         &self,
         question: String,
         system_prompt: String,
-    ) -> Result<Box<dyn Stream<Item = Result<String, VlorQLError>> + Send + Unpin>, VlorQLError>
-    {
+    ) -> Result<StreamResult, VlorQLError> {
         let span = tracing::info_span!(
             "llm.stream_plan",
             provider = ?self.provider(),
@@ -292,7 +291,21 @@ impl LlmClient for OpenAIClient {
         async move {
             let endpoint = self.endpoint();
             let body = self.streaming_request_body(&question, &system_prompt);
-            self.stream_with_sse(&endpoint, &body, extract_delta_content).await
+            let usage = Arc::new(tokio::sync::Mutex::new(None));
+            let usage_clone = Arc::clone(&usage);
+            let extract = move |data: &Value| {
+                if let Some(u) = data.get("usage") {
+                    if let Ok(mut guard) = usage_clone.try_lock() {
+                        *guard = Some(TokenUsage {
+                            prompt_tokens: u.get("prompt_tokens").and_then(|v| v.as_u64()).unwrap_or(0),
+                            completion_tokens: u.get("completion_tokens").and_then(|v| v.as_u64()).unwrap_or(0),
+                        });
+                    }
+                }
+                data.pointer("/choices/0/delta/content").and_then(|v| v.as_str().map(String::from))
+            };
+            let stream = self.stream_with_sse(&endpoint, &body, extract).await?;
+            Ok(StreamResult { stream, usage })
         }
         .instrument(span)
         .await

@@ -1,15 +1,15 @@
 //! Anthropic Claude Messages API client.
 
 use async_trait::async_trait;
-use futures::stream::Stream;
 use serde_json::{Value, json};
+use std::sync::Arc;
 use std::time::Duration;
 use vlorql_core::errors::{ConfigErrorKind, LlmErrorKind, VlorQLError};
 use vlorql_core::schema::QueryPlan;
 
 use crate::schema::compact_query_plan_schema;
 use crate::sse::{transport_error, truncate};
-use crate::{LlmClient, LlmConfig, LlmProvider, RetryableHttpClient};
+use crate::{LlmClient, LlmConfig, LlmProvider, RetryableHttpClient, StreamResult, TokenUsage};
 
 const DEFAULT_API_BASE: &str = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_VERSION: &str = "2023-06-01";
@@ -147,7 +147,7 @@ impl LlmClient for AnthropicClient {
         question: &str,
         system_prompt: &str,
         temperature: Option<f32>,
-    ) -> Result<QueryPlan, VlorQLError> {
+    ) -> Result<(QueryPlan, TokenUsage), VlorQLError> {
         let endpoint = self.endpoint();
         let body = self.build_request_body(question, system_prompt, false, temperature);
         self.generate_with_retry(&endpoint, &body).await
@@ -157,11 +157,33 @@ impl LlmClient for AnthropicClient {
         &self,
         question: String,
         system_prompt: String,
-    ) -> Result<Box<dyn Stream<Item = Result<String, VlorQLError>> + Send + Unpin>, VlorQLError>
-    {
+    ) -> Result<StreamResult, VlorQLError> {
         let endpoint = self.endpoint();
         let body = self.build_request_body(&question, &system_prompt, true, None);
-        self.stream_with_sse(&endpoint, &body, extract_delta_text).await
+        let usage = Arc::new(tokio::sync::Mutex::new(None));
+        let usage_clone = Arc::clone(&usage);
+        let extract = move |data: &Value| {
+            // Anthropic: input_tokens in message_start, output_tokens in message_delta
+            if let Some(u) = data.get("usage") {
+                if let Ok(mut guard) = usage_clone.try_lock() {
+                    let current = guard.get_or_insert(TokenUsage::default());
+                    current.prompt_tokens = u.get("input_tokens").and_then(|v| v.as_u64()).unwrap_or(current.prompt_tokens);
+                    current.completion_tokens = u.get("output_tokens").and_then(|v| v.as_u64()).unwrap_or(current.completion_tokens);
+                }
+            }
+            if let Some(msg) = data.get("message")
+                && let Some(u) = msg.get("usage")
+            {
+                if let Ok(mut guard) = usage_clone.try_lock() {
+                    let current = guard.get_or_insert(TokenUsage::default());
+                    current.prompt_tokens = u.get("input_tokens").and_then(|v| v.as_u64()).unwrap_or(current.prompt_tokens);
+                    current.completion_tokens = u.get("output_tokens").and_then(|v| v.as_u64()).unwrap_or(current.completion_tokens);
+                }
+            }
+            extract_delta_text(data)
+        };
+        let stream = self.stream_with_sse(&endpoint, &body, extract).await?;
+        Ok(StreamResult { stream, usage })
     }
 
     fn provider(&self) -> LlmProvider {

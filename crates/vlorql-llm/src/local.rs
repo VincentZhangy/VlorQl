@@ -36,6 +36,7 @@
 use async_trait::async_trait;
 use futures::stream::Stream;
 use serde_json::{Value, json};
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::time::sleep;
@@ -50,7 +51,7 @@ use crate::sse::{
 };
 use crate::{
     DEFAULT_MAX_ATTEMPTS, DEFAULT_RETRY_DELAY, LlmClient, LlmConfig, LlmProvider,
-    RetryableHttpClient, detect_template_leak,
+    RetryableHttpClient, StreamResult, TokenUsage, detect_template_leak,
 };
 
 /// Default base URL for vLLM (without the `/chat/completions` suffix).
@@ -346,6 +347,27 @@ impl RetryableHttpClient for LocalClient {
     }
 }
 
+/// Parse token usage from a local provider response.
+fn parse_local_usage(body: &str, backend: LocalBackend) -> TokenUsage {
+    use serde_json::Value;
+    match serde_json::from_str::<Value>(body) {
+        Ok(val) => match backend {
+            LocalBackend::VLLM => val
+                .get("usage")
+                .map(|u| TokenUsage {
+                    prompt_tokens: u.get("prompt_tokens").and_then(|v| v.as_u64()).unwrap_or(0),
+                    completion_tokens: u.get("completion_tokens").and_then(|v| v.as_u64()).unwrap_or(0),
+                })
+                .unwrap_or_default(),
+            LocalBackend::Ollama => TokenUsage {
+                prompt_tokens: val.get("prompt_eval_count").and_then(|v| v.as_u64()).unwrap_or(0),
+                completion_tokens: val.get("eval_count").and_then(|v| v.as_u64()).unwrap_or(0),
+            },
+        },
+        Err(_) => TokenUsage::default(),
+    }
+}
+
 /// Returns `true` for HTTP errors that suggest the engine rejected the
 /// JSON Schema payload (and that a fallback to `json_object` / `"json"`
 /// may succeed).
@@ -366,7 +388,7 @@ impl LlmClient for LocalClient {
         question: &str,
         system_prompt: &str,
         temperature: Option<f32>,
-    ) -> Result<QueryPlan, VlorQLError> {
+    ) -> Result<(QueryPlan, TokenUsage), VlorQLError> {
         let endpoint = self.endpoint();
         let primary = self.build_request_body(question, system_prompt, false, temperature);
         let max_attempts = self.max_attempts();
@@ -384,7 +406,9 @@ impl LlmClient for LocalClient {
                         .await
                         .map_err(|error| transport_error(&error))?;
                     if status.is_success() {
-                        return parse_completion_payload(&text, self.backend);
+                        let plan = parse_completion_payload(&text, self.backend)?;
+                        let usage = parse_local_usage(&text, self.backend);
+                        return Ok((plan, usage));
                     }
                     let error = VlorQLError::llm(
                         LlmErrorKind::ApiError {
@@ -462,14 +486,27 @@ impl LlmClient for LocalClient {
         &self,
         question: String,
         system_prompt: String,
-    ) -> Result<Box<dyn Stream<Item = Result<String, VlorQLError>> + Send + Unpin>, VlorQLError>
-    {
+    ) -> Result<StreamResult, VlorQLError> {
         let endpoint = self.endpoint();
         let body = self.build_request_body(&question, &system_prompt, true, None);
 
         match self.backend {
             LocalBackend::VLLM => {
-                self.stream_with_sse(&endpoint, &body, extract_delta_content).await
+                let usage = Arc::new(tokio::sync::Mutex::new(None));
+                let usage_clone = Arc::clone(&usage);
+                let extract = move |data: &Value| {
+                    if let Some(u) = data.get("usage") {
+                        if let Ok(mut guard) = usage_clone.try_lock() {
+                            *guard = Some(TokenUsage {
+                                prompt_tokens: u.get("prompt_tokens").and_then(|v| v.as_u64()).unwrap_or(0),
+                                completion_tokens: u.get("completion_tokens").and_then(|v| v.as_u64()).unwrap_or(0),
+                            });
+                        }
+                    }
+                    extract_delta_content(data)
+                };
+                let stream = self.stream_with_sse(&endpoint, &body, extract).await?;
+                Ok(StreamResult { stream, usage })
             }
             LocalBackend::Ollama => {
                 let response = self.send_request(&endpoint, &body).await?;
@@ -492,6 +529,8 @@ impl LlmClient for LocalClient {
                 let byte_stream = response.bytes_stream();
                 let (tx, rx) = mpsc::unbounded_channel::<Result<String, VlorQLError>>();
                 let line_stream = sse_lines(byte_stream);
+                let usage = Arc::new(tokio::sync::Mutex::new(None));
+                let usage_clone = Arc::clone(&usage);
                 tokio::spawn(async move {
                     if !drive_ollama_ndjson_consumer(line_stream, tx).await {
                         warn!("Ollama NDJSON consumer ended before producing content");
@@ -499,7 +538,10 @@ impl LlmClient for LocalClient {
                 });
 
                 let output = tokio_stream::wrappers::UnboundedReceiverStream::new(rx);
-                Ok(Box::new(Box::pin(output)))
+                Ok(StreamResult {
+                    stream: Box::new(Box::pin(output)) as Box<dyn Stream<Item = Result<String, VlorQLError>> + Send + Unpin>,
+                    usage,
+                })
             }
         }
     }
