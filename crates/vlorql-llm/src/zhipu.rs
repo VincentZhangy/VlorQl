@@ -247,8 +247,8 @@ impl LlmClient for ZhipuClient {
         let usage = Arc::new(tokio::sync::Mutex::new(None));
         let usage_clone = Arc::clone(&usage);
         let extract = move |data: &Value| {
-            if let Some(u) = data.get("usage") {
-                if let Ok(mut guard) = usage_clone.try_lock() {
+            if let Some(u) = data.get("usage")
+                && let Ok(mut guard) = usage_clone.try_lock() {
                     *guard = Some(TokenUsage {
                         prompt_tokens: u.get("prompt_tokens").and_then(|v| v.as_u64()).unwrap_or(0),
                         completion_tokens: u
@@ -257,7 +257,6 @@ impl LlmClient for ZhipuClient {
                             .unwrap_or(0),
                     });
                 }
-            }
             data.pointer("/choices/0/delta/content")
                 .and_then(|v| v.as_str().map(String::from))
         };

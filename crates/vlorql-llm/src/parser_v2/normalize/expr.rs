@@ -380,6 +380,25 @@ pub fn normalize_predicate(val: &mut Value) -> bool {
         return changed;
     }
 
+    // Fix: bare `{"type":"function_call",...}` in a predicate position (e.g.
+    // `having`) — wrap it in a comparison so the builder doesn't fail with
+    // "unknown Predicate variant `function_call`".
+    if let Some(obj) = val.as_object()
+        && obj.get("type").and_then(|t| t.as_str()) == Some("function_call")
+    {
+        let comparison = serde_json::json!({
+            "type": "comparison",
+            "left": val.clone(),
+            "op": "gt",
+            "right": {"type": "literal", "value": 0, "data_type": "int"}
+        });
+        *val = comparison;
+        changed = true;
+        // Recurse so the new comparison goes through the full predicate pipeline.
+        changed |= normalize_predicate(val);
+        return changed;
+    }
+
     // Inject missing type tag.
     changed |= repair_predicate_type(val);
 
@@ -581,6 +600,12 @@ pub fn normalize_predicate(val: &mut Value) -> bool {
                 if let Some(v) = obj.get_mut("child") {
                     changed |= normalize_predicate(v);
                 }
+            }
+            // Known predicate types that don't recurse into sub-predicates
+            // (their children are Expression, not Predicate):
+            "comparison" | "between" | "in" | "like" | "is_null" | "exists"
+            | "true" | "false" => {
+                // no recursive sub-predicates to visit
             }
             other => {
                 tracing::debug!("normalize_predicate: unknown predicate type `{other}`");

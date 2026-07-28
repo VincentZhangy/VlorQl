@@ -84,15 +84,15 @@ pub fn build_plan_from_obj(obj: &serde_json::Map<String, Value>) -> Result<Query
     )?;
 
     let r#where = optional_predicate(obj, "where")?;
-    let group_by = build_array_field(obj, "group_by", |v| build_expression(v))?;
+    let group_by = build_array_field(obj, "group_by", build_expression)?;
     let having = optional_predicate(obj, "having")?;
-    let order_by = build_array_field(obj, "order_by", |v| build_order_by_term(v))?;
+    let order_by = build_array_field(obj, "order_by", build_order_by_term)?;
 
     let limit = obj.get("limit").and_then(|v| v.as_u64());
     let offset = obj.get("offset").and_then(|v| v.as_u64());
 
-    let joins = build_array_field(obj, "joins", |v| build_join_clause(v))?;
-    let ctes = build_array_field(obj, "ctes", |v| build_cte(v))?;
+    let joins = build_array_field(obj, "joins", build_join_clause)?;
+    let ctes = build_array_field(obj, "ctes", build_cte)?;
 
     Ok(QueryPlan {
         select,

@@ -164,8 +164,8 @@ impl LlmClient for AnthropicClient {
         let usage_clone = Arc::clone(&usage);
         let extract = move |data: &Value| {
             // Anthropic: input_tokens in message_start, output_tokens in message_delta
-            if let Some(u) = data.get("usage") {
-                if let Ok(mut guard) = usage_clone.try_lock() {
+            if let Some(u) = data.get("usage")
+                && let Ok(mut guard) = usage_clone.try_lock() {
                     let current = guard.get_or_insert(TokenUsage::default());
                     current.prompt_tokens = u
                         .get("input_tokens")
@@ -176,11 +176,9 @@ impl LlmClient for AnthropicClient {
                         .and_then(|v| v.as_u64())
                         .unwrap_or(current.completion_tokens);
                 }
-            }
             if let Some(msg) = data.get("message")
                 && let Some(u) = msg.get("usage")
-            {
-                if let Ok(mut guard) = usage_clone.try_lock() {
+                && let Ok(mut guard) = usage_clone.try_lock() {
                     let current = guard.get_or_insert(TokenUsage::default());
                     current.prompt_tokens = u
                         .get("input_tokens")
@@ -191,7 +189,6 @@ impl LlmClient for AnthropicClient {
                         .and_then(|v| v.as_u64())
                         .unwrap_or(current.completion_tokens);
                 }
-            }
             extract_delta_text(data)
         };
         let stream = self.stream_with_sse(&endpoint, &body, extract).await?;

@@ -318,20 +318,20 @@ fn validate_subqueries_in_expression(
                         serde_json::json!({"function": name, "min_args": def.min_args, "actual": args.len()}),
                     ));
                 }
-                if let Some(max) = def.max_args {
-                    if (args.len()) > max {
-                        errors.push(VlorQLError::validation(
-                            crate::errors::ValidationErrorKind::AggregationMismatch {
-                                message: format!(
-                                    "Function '{}' accepts at most {} arguments, got {}",
-                                    name,
-                                    max,
-                                    args.len()
-                                ),
-                            },
-                            serde_json::json!({"function": name, "max_args": max, "actual": args.len()}),
-                        ));
-                    }
+                if let Some(max) = def.max_args
+                    && (args.len()) > max
+                {
+                    errors.push(VlorQLError::validation(
+                        crate::errors::ValidationErrorKind::AggregationMismatch {
+                            message: format!(
+                                "Function '{}' accepts at most {} arguments, got {}",
+                                name,
+                                max,
+                                args.len()
+                            ),
+                        },
+                        serde_json::json!({"function": name, "max_args": max, "actual": args.len()}),
+                    ));
                 }
             }
             for argument in args {

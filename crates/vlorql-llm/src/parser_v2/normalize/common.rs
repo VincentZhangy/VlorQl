@@ -121,7 +121,7 @@ mod tests {
     #[test]
     fn canonical_data_type_number_float_value() {
         assert_eq!(
-            canonical_data_type("number", Some(&json!(3.14))),
+            canonical_data_type("number", Some(&json!(std::f64::consts::PI))),
             Some("float")
         );
     }

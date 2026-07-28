@@ -25,8 +25,8 @@ fn find_longest_valid_json(text: &str) -> Option<&str> {
     let mut best_len = 0;
     let mut i = 0;
     while i < bytes.len() {
-        if bytes[i] == b'{' {
-            if let Some(end) = bracket::find_balanced_object_end(text, i) {
+        if bytes[i] == b'{'
+            && let Some(end) = bracket::find_balanced_object_end(text, i) {
                 let candidate = &text[i..=end];
                 if candidate.len() > best_len
                     && serde_json::from_str::<serde_json::Value>(candidate).is_ok()
@@ -36,7 +36,6 @@ fn find_longest_valid_json(text: &str) -> Option<&str> {
                 }
                 i = end;
             }
-        }
         i += 1;
     }
     best

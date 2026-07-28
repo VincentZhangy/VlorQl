@@ -94,7 +94,7 @@ impl<'a> QueryBuilder<'a> {
             .iter()
             .rev()
             .enumerate()
-            .take_while(|(i, _)| max_depth.map_or(true, |d| *i < d))
+            .take_while(|(i, _)| max_depth.is_none_or(|d| *i < d))
             .find_map(|(_, map)| map.get(qualifier))
             .map(|s| Cow::Owned(s.clone()))
             .unwrap_or(Cow::Borrowed(qualifier))

@@ -498,8 +498,8 @@ impl LlmClient for LocalClient {
                 let usage = Arc::new(tokio::sync::Mutex::new(None));
                 let usage_clone = Arc::clone(&usage);
                 let extract = move |data: &Value| {
-                    if let Some(u) = data.get("usage") {
-                        if let Ok(mut guard) = usage_clone.try_lock() {
+                    if let Some(u) = data.get("usage")
+                        && let Ok(mut guard) = usage_clone.try_lock() {
                             *guard = Some(TokenUsage {
                                 prompt_tokens: u
                                     .get("prompt_tokens")
@@ -511,7 +511,6 @@ impl LlmClient for LocalClient {
                                     .unwrap_or(0),
                             });
                         }
-                    }
                     extract_delta_content(data)
                 };
                 let stream = self.stream_with_sse(&endpoint, &body, extract).await?;
@@ -703,10 +702,10 @@ fn parse_completion_payload(body: &str, backend: LocalBackend) -> Result<QueryPl
         ));
     }
     let cleaned = crate::extract_json_content(content);
-    crate::parse_llm_response(&cleaned).map_err(|error| {
+    crate::parse_llm_response(cleaned).map_err(|error| {
         let raw_content = truncate(content, 4096);
         let cleaned_for_debug = if cleaned != content {
-            Some(truncate(&cleaned, 4096))
+            Some(truncate(cleaned, 4096))
         } else {
             None
         };
