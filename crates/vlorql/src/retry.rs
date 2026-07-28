@@ -34,11 +34,21 @@ pub(crate) fn format_retry_question_str(
     } else {
         raw
     };
-    let hint = match error {
+    let hint = build_hint(error);
+    format!(
+        "{question}\n\n*** FEEDBACK ***\nThe previous query plan failed. Fix the specific errors below and return ONLY the corrected JSON QueryPlan.\nError: {feedback}{hint}"
+    )
+}
+
+/// Build a specific, actionable hint based on the error type.
+fn build_hint(error: &VlorQLError) -> String {
+    match error {
         VlorQLError::Llm {
             kind: LlmErrorKind::ParseError { .. },
             ..
-        } => " TIP: If the previous query used NOT EXISTS with a subquery, replace it with LEFT JOIN + IS NULL — it is simpler and avoids JSON nesting issues.".to_owned(),
+        } => {
+            "\nTIP: The JSON structure was invalid. Check that all objects have a valid `type` field, all brackets are balanced, and no raw SQL is embedded in column names.".to_owned()
+        }
         VlorQLError::Schema {
             kind: SchemaErrorKind::ColumnNotFound { table, column },
             ..
@@ -51,46 +61,53 @@ pub(crate) fn format_retry_question_str(
                     arr.iter()
                         .filter_map(|v| v.as_str())
                         .collect::<Vec<_>>()
-                        .join(", ")
+                        .join("`, `")
                 })
                 .unwrap_or_default();
             if available.is_empty() {
-                format!(" TIP: Column `{column}` does not exist on table `{table}`. Use only the exact column names listed in the Schema section.")
+                format!("\nTIP: Column `{column}` does not exist on table `{table}`. Use ONLY exact column names listed in the Schema section above.")
             } else {
-                format!(
-                    " TIP: Column `{column}` does not exist on table `{table}`. Available columns: `{available}`. Use only exact column names from the Schema."
-                )
+                format!("\nTIP: Column `{column}` does not exist on table `{table}`. The ONLY valid columns in `{table}` are: `{available}`. Replace `{column}` with one of these.")
             }
         }
         VlorQLError::Validation {
             kind: ValidationErrorKind::MultipleErrors { .. },
             ..
         } => {
-            // Try to extract available_columns from the first error in the list.
-            error
-                .details()
-                .get("errors")
-                .and_then(|v| v.as_array())
-                .and_then(|errs| errs.first())
-                .and_then(|first| {
-                    let col = first.get("column").and_then(|v| v.as_str())?;
-                    let table = first.get("table").and_then(|v| v.as_str())?;
-                    let available = first
-                        .get("available_columns")
-                        .and_then(|v| v.as_array())?;
-                    let cols: Vec<&str> = available.iter().filter_map(|v| v.as_str()).collect();
-                    Some(format!(
-                        " TIP: Column `{table}.{col}` does not exist. Available columns in `{table}`: `{}`. Use only exact column names from the Schema.",
-                        cols.join(", ")
-                    ))
-                })
-                .unwrap_or_default()
+            let mut hints = Vec::new();
+            if let Some(errors) = error.details().get("errors").and_then(|v| v.as_array()) {
+                for e in errors {
+                    // ColumnNotFound inside MultipleErrors
+                    if let Some(col) = e.get("column").and_then(|v| v.as_str()) {
+                        if let Some(table) = e.get("table").and_then(|v| v.as_str()) {
+                            let available = e.get("available_columns")
+                                .and_then(|v| v.as_array())
+                                .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>().join("`, `"))
+                                .unwrap_or_default();
+                            if !available.is_empty() {
+                                hints.push(format!("Column `{table}.{col}` does NOT exist. Available: `{available}`"));
+                            }
+                        }
+                    }
+                    // SELECT * with GROUP BY
+                    if let Some(msg) = e.get("message").and_then(|v| v.as_str()) {
+                        if msg.contains("SELECT * with GROUP BY") || msg.contains("not allowed in GROUP BY") || msg.contains("not allowed in GROUP BY") {
+                            hints.push("SELECT * and GROUP BY are incompatible. Replace star with explicit column_ref for each column.".to_owned());
+                        }
+                        if msg.contains("aggregate function") && msg.contains("not allowed in GROUP BY") {
+                            hints.push("Aggregate functions (like `sum`, `count`, `string_agg`) cannot appear in GROUP BY. Remove them from group_by[].".to_owned());
+                        }
+                    }
+                }
+            }
+            if hints.is_empty() {
+                String::new()
+            } else {
+                format!("\n{}", hints.join("\n"))
+            }
         }
-        _ => "".to_owned(),
-    };
-    format!(
-        "{question}\n\nThe previous QueryPlan failed validation. Correct it and return only a new JSON QueryPlan. Feedback:\n{feedback}{hint}"
-    )
+        _ => String::new(),
+    }
 }
 
 pub(crate) fn format_retry_question(
@@ -147,7 +164,7 @@ pub(crate) fn format_retry_question(
         String::new()
     };
     format!(
-        "{original_question}\n\nThe previous QueryPlan failed validation. Correct it and return only a new JSON QueryPlan. Feedback:\n{feedback}{hints_str}{omitted_str}"
+        "{original_question}\n\n*** FEEDBACK ***\nThe previous query plan failed. Fix the specific errors below and return ONLY the corrected JSON QueryPlan.\nErrors:\n{feedback}{hints_str}{omitted_str}"
     )
 }
 

@@ -167,6 +167,14 @@ pub fn repair_expression_value(val: &mut Value) -> bool {
 
     // ColumnRef: has `column` (and optionally `table`)
     if obj.contains_key("column") {
+        // Fix: LLM sometimes puts an array of column names instead of a
+        // single string (e.g. `"column":["name","email"]`). Use the first
+        // element as the column name.
+        if let Some(arr) = obj.get("column").and_then(|v| v.as_array()) {
+            if let Some(first) = arr.first().and_then(|v| v.as_str()) {
+                obj.insert("column".to_owned(), Value::String(first.to_owned()));
+            }
+        }
         obj.insert("type".to_owned(), Value::String("column_ref".to_owned()));
         return true;
     }
@@ -201,6 +209,13 @@ pub fn repair_predicate_type(val: &mut Value) -> bool {
     // LLM sometimes sets `"type": "not"` on object that also has key `"exists"`.
     for &key in PRED_KEYS {
         if obj.contains_key(key) {
+            // Only override when the key's value is a non-null object (meaningful
+            // content). Null/empty values are garbage fields, not key-as-type.
+            if let Some(v) = obj.get(key) {
+                if v.is_null() || v.as_str().is_some() || (v.as_object().is_some_and(|o| o.is_empty())) {
+                    continue;
+                }
+            }
             if let Some(v) = obj.remove(key) {
                 obj.insert("type".to_owned(), Value::String(key.to_owned()));
                 if key == "not" || key == "exists" {
@@ -911,6 +926,15 @@ fn normalize_impl(val: &mut Value) -> bool {
                         m.entry(k).or_insert(v);
                     }
                     *map = m;
+                }
+            }
+
+            // Fix: LLM puts array of column names instead of a single string
+            // (e.g. `"column":["name","email"]` in a column_ref). Use first element.
+            if let Some(col) = map.get("column").and_then(|v| v.as_array()) {
+                if let Some(first) = col.first().and_then(|v| v.as_str()) {
+                    map.insert("column".to_owned(), Value::String(first.to_owned()));
+                    changed = true;
                 }
             }
 

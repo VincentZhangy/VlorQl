@@ -427,15 +427,26 @@ impl PromptBuilder {
 
     fn push_planning_rules(&self, prompt: &mut String) {
         prompt.push_str(
-            "## Planning Rules\n\
-             1. Prefer the simplest plan. Fewer joins, shallower nesting.\n\
-             2. \"never / not / without / anti-join\" questions: MUST use LEFT JOIN + `is_null` on the right key. NEVER use `NOT EXISTS`.\n\
-             3. Every table in `select` / `where` must be in `from` or `joins`. Never reference an unjoined table.\n\
-             4. `limit`, `offset`, `order_by`, `group_by`, `having` ONLY at the top level of the JSON response, NEVER inside `where`.\n\
-             5. Only use GROUP BY when the question asks for \"each / every / per\". For those, always put the aggregate alias in HAVING, not WHERE.\n\
-             6. \"all combinations / every pairing / cartesian product\" questions: use CROSS JOIN with no `on` condition.\n\
-             7. Output valid JSON only — no markdown fences, no trailing backticks, no comments, no raw SQL.\n\
-             8. Use EXACT column names from the Schema section above. Never invent, guess, or rename columns. If the Schema lists `products.price`, use `products.price` — NOT `products.unit_price` or any other name.\n\
+            "## Core Rules\n\
+             ### JSON Structure Rules (MUST follow)\n\
+             1. Output ONLY a valid JSON object — no markdown fences, no comments, no raw SQL, no trailing text.\n\
+             2. Every key and string value MUST use double quotes (`\"`). Single quotes (`'`) are INVALID JSON.\n\
+             3. Every tagged object MUST include a `\"type\"` field matching the JSON Schema below.\n\
+             4. `where`, `having`, `left`, `right`, `child`, `on` must each be a single Predicate object `{...}`, NEVER an array `[...]`.\n\
+             5. `order_by`, `limit`, `offset`, `group_by`, `having`, `joins`, `ctes` ONLY at the top level, NEVER inside `where`.\n\
+             6. Every table in `select`/`where` MUST be in `from` or `joins`. Never reference an unjoined table.\n\
+             \n\
+             ### Column Name Rules (MUST follow)\n\
+             7. Use EXACT column names from the Schema section. Never invent, guess, or rename columns.\n\
+             8. NEVER embed SQL in a column name string. `{\"column\":\"EXTRACT(MONTH FROM created_at)\"}` is WRONG.\n\
+             \n\
+             ### Query Logic Rules\n\
+             9. Prefer the simplest plan. Fewer joins, shallower nesting.\n\
+             10. NEVER add JOINs when the question only involves one table.\n\
+             11. Only use GROUP BY when the question asks for \"each / every / per\".\n\
+             12. Aggregates like `sum`/`count` go in HAVING, not WHERE.\n\
+             13. \"never / not / without / anti-join\" questions: use LEFT JOIN + `is_null`. NEVER use `NOT EXISTS`.\n\
+             14. \"all combinations / every pairing / cartesian product\": use CROSS JOIN with no `on`.\n\
              \n",
         );
     }
@@ -557,28 +568,54 @@ impl PromptBuilder {
     /// that do not strictly enforce the schema (e.g. local Ollama models).
     fn push_type_guidance(&self, prompt: &mut String) {
         prompt.push_str(
-            "## JSON Type Reminder\n\
-             Every tagged object must include a `\"type\"` field matching the JSON Schema above.\n\
+            "## JSON Field Reference\n\
              \n\
-             ### ANTI-PATTERNS — NEVER write these\n\
+             ### Predicate types (where / having / on / left / right / child)\n\
+             Valid `\"type\"` values: `\"comparison\"`, `\"and\"`, `\"or\"`, `\"not\"`, `\"between\"`, `\"in\"`, `\"like\"`, `\"is_null\"`, `\"exists\"`.\n\
+             NEVER use aggregate names (`count`, `sum`, ...) or expression types (`column_ref`, `literal`, ...) as predicate type.\n\
              \n\
-             1. NEVER nest aggregate functions: `SUM(SUM(x))` → write `SUM(x)` once.\n\
-             2. NEVER use `SUM` on a plain column like `orders.total` that already contains the value — use the column directly.\n\
-             3. NEVER put `GROUP BY literal null` — it is invalid. GROUP BY must list actual column references.\n\
-             4. NEVER embed a SQL function in a column name string. `EXTRACT(MONTH FROM created_at)` is not a column — use `function_call` with `\"name\":\"extract\"` and proper `args`.\n\
-             5. NEVER invent column names. Only use column names that EXACTLY match the Schema section above. If the schema shows `orders.total`, write `{\"type\":\"column_ref\",\"table\":\"orders\",\"column\":\"total\"}` — NOT `total_amount`, NOT `SUM(total)`, NOT `extract(...)`.\n\
+             | Type | Fields |\n\
+             |------|-------|\n\
+             | `comparison` | `left`: Expression, `op`: string (eq/neq/gt/gte/lt/lte), `right`: Expression |\n\
+             | `and` / `or` | `left`: Predicate, `right`: Predicate |\n\
+             | `not` | `child`: Predicate |\n\
+             | `between` | `expr`: Expression, `low`: Expression, `high`: Expression |\n\
+             | `in` | `expr`: Expression, `target`: [Expression] or QueryPlan |\n\
+             | `like` | `expr`: Expression, `pattern`: string |\n\
+             | `is_null` | `expr`: Expression |\n\
+             | `exists` | `query`: QueryPlan |\n\
              \n\
-             ### EXTRACT function format\n\
-             - `extract` is a function_call, NOT a column name.\n\
-             - Correct: `{\"type\":\"function_call\",\"name\":\"extract\",\"args\":[{\"type\":\"literal\",\"value\":\"month\",\"data_type\":\"string\"},{\"type\":\"column_ref\",\"table\":\"orders\",\"column\":\"created_at\"}]}`\n\
-             - Wrong: `{\"column\":\"EXTRACT(MONTH FROM created_at)\"}` — NEVER write this.\n\
+             ### Expression types\n\
+             Valid `\"type\"` values: `\"column_ref\"`, `\"literal\"`, `\"function_call\"`, `\"binary_op\"`, `\"star\"`, `\"subquery\"`, `\"case\"`, `\"window_function\"`.\n\
              \n\
-             ### Quick Reference\n\
-             - `\"type\":\"expr\"` wraps computed expressions inside `select` only. In `where`/`having`/`order_by`/`group_by`, use the inner expression type directly.\n\
-             - Aggregates like `sum`/`count` go in HAVING, not WHERE.\n\
-             - `data_type` only belongs inside `literal` objects.\n\
-             - `string_agg(expr, delimiter)` requires **2 arguments**: the value and a delimiter string (e.g. `','`).\n\
-             - Output ONLY valid JSON — no markdown fences.\n\
+             | Type | Fields |\n\
+             |------|-------|\n\
+             | `column_ref` | `table?`: string, `column`: string |\n\
+             | `literal` | `value`: any, `data_type`: string (int/float/string/boolean/null/decimal/date/timestamp/json) |\n\
+             | `function_call` | `name`: string, `args`: [Expression], `distinct?`: bool |\n\
+             | `binary_op` | `left`: Expression, `op`: string, `right`: Expression |\n\
+             \n\
+             ### Projection types (inside select[])\n\
+             | Type | Fields |\n\
+             |------|-------|\n\
+             | `column_ref` | `table?`: string, `column`: string, `alias?`: string |\n\
+             | `expr` | `expression`: Expression, `alias?`: string |\n\
+             | `star` | `table?`: string |\n\
+             \n\
+             ### FROM / JOIN types\n\
+             - `from`: `{\"table\": string, \"alias\"?: string}`\n\
+             - `joins[]`: each entry = `{\"join_type\": string, \"right_table\": FromClause, \"on\": Predicate}`\n\
+             \n\
+             ## Common Mistakes to Avoid\n\
+             \n\
+             1. NEVER put aggregate names as predicate `\"type\"` — `{\"type\":\"count\",...}` is WRONG, use `{\"type\":\"function_call\",\"name\":\"count\",...}`.\n\
+             2. NEVER embed SQL in column names — `{\"column\":\"EXTRACT(MONTH FROM created_at)\"}` is WRONG.\n\
+             3. NEVER invent column names — use the EXACT names from the Schema section.\n\
+             4. NEVER use single quotes (`'`) — only double quotes (`\"\") are valid JSON.\n\
+             5. NEVER output markdown fences, trailing backticks, or raw SQL.\n\
+             6. NEVER nest aggregates: `SUM(SUM(x))` → write `SUM(x)` once.\n\
+             7. NEVER put `data_type` on anything other than a `literal` object.\n\
+             8. NEVER add JOINs when a single table is sufficient.\n\
              \n",
         );
     }
