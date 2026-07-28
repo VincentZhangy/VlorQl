@@ -26,3 +26,6 @@ pub use mysql::MysqlExecutor;
 pub mod sqlite;
 #[cfg(feature = "executor-sqlite")]
 pub use sqlite::SqliteExecutor;
+
+#[cfg(any(feature = "executor-mysql", feature = "executor-sqlite"))]
+mod sqlx_executor;
