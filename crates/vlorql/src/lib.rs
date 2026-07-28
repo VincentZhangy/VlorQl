@@ -598,6 +598,15 @@ impl VlorQl {
 
 impl Drop for VlorQl {
     fn drop(&mut self) {
+        if let Some(cache) = self.compile_cache.clone() {
+            if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                handle.spawn(async move {
+                    if let Err(e) = cache.persist().await {
+                        tracing::warn!(target: "vlorql", "failed to persist compile cache: {e}");
+                    }
+                });
+            }
+        }
         if let Some(guard) = self.telemetry_guard.take() {
             vlorql_core::observability::shutdown_telemetry(guard);
         }

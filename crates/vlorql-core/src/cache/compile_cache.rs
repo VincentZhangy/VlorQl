@@ -187,16 +187,18 @@ impl CompileCache {
         let Some(ref path) = self.persist_path else {
             return Ok(());
         };
-        let entries = self.entries.lock().unwrap();
-        let bytes = bincode::serialize(&*entries).map_err(|e| {
-            VlorQLError::config(
-                ConfigErrorKind::ConfigFileError {
-                    path: path.to_string_lossy().to_string(),
-                    reason: e.to_string(),
-                },
-                json!({"operation": "serialize"}),
-            )
-        })?;
+        let bytes = {
+            let entries = self.entries.lock().unwrap();
+            bincode::serialize(&*entries).map_err(|e| {
+                VlorQLError::config(
+                    ConfigErrorKind::ConfigFileError {
+                        path: path.to_string_lossy().to_string(),
+                        reason: e.to_string(),
+                    },
+                    json!({"operation": "serialize"}),
+                )
+            })?
+        };
         // Atomic write: write to temp file then rename
         let tmp = path.with_extension("tmp");
         tokio::fs::write(&tmp, &bytes).await.map_err(|e| {
