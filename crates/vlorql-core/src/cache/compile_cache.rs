@@ -14,7 +14,7 @@ use moka::future::Cache as MokaCache;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::sync::RwLock;
+use std::sync::Mutex;
 
 /// A cache for [`CompiledQuery`] values keyed by plan hash + dialect.
 ///
@@ -60,7 +60,7 @@ use tokio::sync::RwLock;
 #[derive(Debug)]
 pub struct CompileCache {
     inner: MokaCache<CompileCacheKey, Arc<CompiledQuery>>,
-    entries: RwLock<HashMap<CompileCacheKey, CompiledQuery>>,
+    entries: Mutex<HashMap<CompileCacheKey, CompiledQuery>>,
     max_size: u64,
     persist_path: Option<PathBuf>,
 }
@@ -88,7 +88,7 @@ impl CompileCache {
         let inner = builder.build();
         Self {
             inner,
-            entries: RwLock::new(HashMap::new()),
+            entries: Mutex::new(HashMap::new()),
             max_size,
             persist_path: None,
         }
@@ -136,18 +136,21 @@ impl CompileCache {
             key.plan_hash,
             key.dialect,
         );
-        self.inner.insert(key, Arc::new(query)).await;
+        self.inner.insert(key.clone(), Arc::new(query.clone())).await;
+        self.entries.lock().unwrap().insert(key, query);
     }
 
     /// Removes the cache entry for `plan` under `profile`.
     pub async fn invalidate_plan(&self, plan: &ValidatedPlan, profile: &DialectProfile) {
         let key = CompileCacheKey::new(plan, profile);
         self.inner.invalidate(&key).await;
+        self.entries.lock().unwrap().remove(&key);
     }
 
     /// Removes all entries from the cache.
     pub fn clear(&self) {
         self.inner.invalidate_all();
+        self.entries.lock().unwrap().clear();
     }
 
     /// Returns the number of entries currently in the cache.

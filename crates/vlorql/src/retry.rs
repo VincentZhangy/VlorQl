@@ -23,8 +23,13 @@ pub(crate) fn retry_temperature(base: f32, attempt: usize) -> Option<f32> {
     }
 }
 
-pub(crate) fn format_retry_question_str(question: &str, error: &VlorQLError) -> String {
-    let feedback = error.to_string();
+pub(crate) fn format_retry_question_str(question: &str, error: &VlorQLError, attempt: usize) -> String {
+    let raw = error.to_string();
+    let feedback = if attempt == 0 {
+        raw.lines().next().unwrap_or(&raw).to_owned()
+    } else {
+        raw
+    };
     let hint = match error {
         VlorQLError::Llm {
             kind: LlmErrorKind::ParseError { .. },
@@ -175,7 +180,7 @@ pub(crate) async fn run_stream_with_retry(
             Ok(stream) => stream,
             Err(error) => {
                 if error.is_retryable() && attempt < max_retries {
-                    question = format_retry_question_str(&question, &error);
+                    question = format_retry_question_str(&question, &error, attempt);
                     continue;
                 }
                 let _ = event_tx.send(Err(error));
@@ -196,7 +201,7 @@ pub(crate) async fn run_stream_with_retry(
                 }
                 Err(error) => {
                     if error.is_retryable() && attempt < max_retries {
-                        question = format_retry_question_str(&question, &error);
+                        question = format_retry_question_str(&question, &error, attempt);
                         stream_ok = false;
                         break;
                     }
@@ -218,7 +223,7 @@ pub(crate) async fn run_stream_with_retry(
         );
         match event {
             StreamEvent::Error(ref error) if error.is_retryable() && attempt < max_retries => {
-                question = format_retry_question_str(&question, error);
+                question = format_retry_question_str(&question, error, attempt);
                 continue;
             }
             _ => {

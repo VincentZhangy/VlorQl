@@ -266,7 +266,7 @@ impl VlorQl {
                                 plan
                             }
                             Err(e) if e.is_retryable() && attempt < self.max_retries => {
-                                llm_question = format_retry_question_str(&llm_question, &e);
+                                llm_question = format_retry_question_str(&llm_question, &e, attempt);
                                 continue;
                             }
                             Err(e) => return Err(e),
@@ -281,7 +281,7 @@ impl VlorQl {
                             plan
                         }
                         Err(e) if e.is_retryable() && attempt < self.max_retries => {
-                            llm_question = format_retry_question_str(&llm_question, &e);
+                            llm_question = format_retry_question_str(&llm_question, &e, attempt);
                             continue;
                         }
                         Err(e) => return Err(e),
