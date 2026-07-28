@@ -30,18 +30,33 @@ fn validate_plan_with_outer(
     errors: &mut Vec<VlorQLError>,
     outer_scope: Option<&QueryScope>,
 ) {
-    // DISTINCT + GROUP BY simultaneously is semantically ambiguous:
-    // it is unclear whether DISTINCT is applied before or after
-    // aggregation.  Reject this combination to force clarity.
+    // DISTINCT + GROUP BY: MySQL allows it (DISTINCT is applied after
+    // aggregation), so we only warn rather than reject.
     if plan.distinct
         && plan.group_by.is_some()
         && plan.group_by.as_ref().is_some_and(|g| !g.is_empty())
     {
+        tracing::warn!(
+            "DISTINCT and GROUP BY used together: DISTINCT is applied after aggregation. \
+             This is valid in MySQL but may be semantically ambiguous in other dialects. \
+             distinct=true group_by={:?}",
+            plan.group_by,
+        );
+    }
+
+    // SELECT * combined with GROUP BY: star-expanded columns may not all
+    // be in the GROUP BY clause, producing invalid SQL in most dialects.
+    if plan.group_by.is_some()
+        && plan.group_by.as_ref().is_some_and(|g| !g.is_empty())
+        && plan.select.iter().any(|p| matches!(p, Projection::Star { .. }))
+    {
         errors.push(VlorQLError::validation(
             crate::errors::ValidationErrorKind::AggregationMismatch {
-                message: "DISTINCT and GROUP BY cannot be used together: the combination is semantically ambiguous".to_owned(),
+                message: "SELECT * with GROUP BY may include columns that are not \
+                          in the GROUP BY clause; consider listing columns explicitly"
+                    .to_owned(),
             },
-            serde_json::json!({"distinct": true, "group_by": plan.group_by}),
+            serde_json::json!({"select": plan.select, "group_by": plan.group_by}),
         ));
     }
 
