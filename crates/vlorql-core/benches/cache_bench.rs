@@ -10,7 +10,7 @@
 
 use criterion::{Criterion, criterion_group, criterion_main};
 use std::sync::Arc;
-use vlorql_core::cache::{CompileCache, SchemaCache, SchemaCacheKey};
+use vlorql_core::cache::{CompileCache, LlmCacheKey, LlmResponseCache, SchemaCache, SchemaCacheKey};
 use vlorql_core::compile::CompiledQuery;
 use vlorql_core::schema::{
     ColumnSchema, DataType, DialectProfile, FromClause, Projection, QueryPlan, SchemaMetadata,
@@ -157,5 +157,65 @@ fn bench_schema_cache(c: &mut Criterion) {
     });
 }
 
-criterion_group!(benches, bench_compile_cache_miss, bench_schema_cache);
+// ---------------------------------------------------------------------------
+// LLM response cache benchmarks (hit vs miss)
+// ---------------------------------------------------------------------------
+
+fn bench_llm_cache_hit_and_miss(c: &mut Criterion) {
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let cache = LlmResponseCache::new(1024, 60);
+    let hit_key = LlmCacheKey {
+        normalized_question: "show users".to_owned(),
+        schema_version: "v1".to_owned(),
+        model_fingerprint: "gpt-4".to_owned(),
+    };
+    let miss_key = LlmCacheKey {
+        normalized_question: "show orders".to_owned(),
+        schema_version: "v2".to_owned(),
+        model_fingerprint: "gpt-4".to_owned(),
+    };
+    let plan = Arc::new(QueryPlan {
+        select: vec![Projection::Column {
+            table: None,
+            column: "id".to_owned(),
+            alias: None,
+        }],
+        from: FromClause::table("users".to_owned(), None),
+        r#where: None,
+        group_by: None,
+        having: None,
+        order_by: None,
+        limit: None,
+        offset: None,
+        joins: None,
+        ctes: None,
+        distinct: false,
+        distinct_on: None,
+        set_operation: None,
+    });
+
+    // Pre-insert for the hit case.
+    rt.block_on(cache.insert(hit_key.clone(), plan.clone()));
+
+    c.bench_function("cache/llm_hit", |bencher| {
+        bencher.iter(|| {
+            let result = rt.block_on(cache.get(&hit_key));
+            criterion::black_box(result);
+        });
+    });
+
+    c.bench_function("cache/llm_miss", |bencher| {
+        bencher.iter(|| {
+            let result = rt.block_on(cache.get(&miss_key));
+            criterion::black_box(result);
+        });
+    });
+}
+
+criterion_group!(
+    benches,
+    bench_compile_cache_miss,
+    bench_schema_cache,
+    bench_llm_cache_hit_and_miss,
+);
 criterion_main!(benches);

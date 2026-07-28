@@ -9,7 +9,7 @@ repository.workspace = true
 description = "Multi-provider LLM client for SQL query generation supporting Anthropic, DeepSeek, Zhipu, and local models"
 
 [dependencies]
-vlorql-core = { path = "../vlorql-core", version = "0.4.0" }
+vlorql-core = { path = "../vlorql-core", version = "0.5.0" }
 async-trait.workspace = true
 reqwest.workspace = true
 serde.workspace = true

@@ -10,6 +10,7 @@
 //! patterns.
 
 use criterion::{Criterion, criterion_group, criterion_main};
+use serde_json::json;
 use std::sync::Arc;
 use vlorql_core::policy::{PolicyConfig, PolicyEngine};
 use vlorql_core::schema::{
@@ -144,9 +145,167 @@ fn bench_validate_with_audit(c: &mut Criterion) {
     });
 }
 
+/// Builds a snapshot with a dedicated table containing Decimal columns.
+fn build_decimal_schema_snapshot() -> Arc<SchemaSnapshot> {
+    let mut tables: Vec<TableSchema> = (0..10)
+        .map(|i| {
+            let columns = vec![
+                ColumnSchema {
+                    name: "id".to_owned(),
+                    data_type: DataType::Uuid,
+                    nullable: false,
+                    description: None,
+                    is_primary_key: true,
+                    foreign_key: None,
+                },
+                ColumnSchema {
+                    name: "amount".to_owned(),
+                    data_type: DataType::Decimal,
+                    nullable: false,
+                    description: Some("Monetary amount".to_owned()),
+                    is_primary_key: false,
+                    foreign_key: None,
+                },
+                ColumnSchema {
+                    name: "rate".to_owned(),
+                    data_type: DataType::Decimal,
+                    nullable: true,
+                    description: Some("Exchange rate".to_owned()),
+                    is_primary_key: false,
+                    foreign_key: None,
+                },
+                ColumnSchema {
+                    name: "description".to_owned(),
+                    data_type: DataType::String,
+                    nullable: true,
+                    description: None,
+                    is_primary_key: false,
+                    foreign_key: None,
+                },
+            ];
+            TableSchema {
+                name: format!("financials_{i:02}"),
+                columns,
+                description: Some(format!("Financial table #{i}")),
+                primary_key: Some(vec!["id".to_owned()]),
+            }
+        })
+        .collect();
+
+    // Add one large table to keep the snapshot realistic in size.
+    let mut large_cols = Vec::with_capacity(COLUMNS_PER_TABLE);
+    for j in 0..COLUMNS_PER_TABLE {
+        large_cols.push(ColumnSchema {
+            name: format!("col_{j}"),
+            data_type: if j % 3 == 0 {
+                DataType::Decimal
+            } else {
+                DataType::String
+            },
+            nullable: true,
+            description: None,
+            is_primary_key: false,
+            foreign_key: None,
+        });
+    }
+    tables.push(TableSchema {
+        name: "large_financials".to_owned(),
+        columns: large_cols,
+        description: Some("Large financial table with mixed Decimal/String columns".to_owned()),
+        primary_key: None,
+    });
+
+    Arc::new(SchemaSnapshot::new(tables, SchemaMetadata::default()))
+}
+
+/// Builds a plan that references Decimal columns along with regular ones.
+fn build_decimal_query_plan() -> QueryPlan {
+    QueryPlan {
+        select: vec![
+            Projection::Column {
+                table: Some("f00".to_owned()),
+                column: "amount".to_owned(),
+                alias: None,
+            },
+            Projection::Column {
+                table: Some("f00".to_owned()),
+                column: "rate".to_owned(),
+                alias: None,
+            },
+            Projection::Column {
+                table: Some("f01".to_owned()),
+                column: "amount".to_owned(),
+                alias: None,
+            },
+            Projection::Expr {
+                expression: Expression::Literal {
+                    value: json!(99.99),
+                    data_type: DataType::Decimal,
+                },
+                alias: Some("computed".to_owned()),
+            },
+        ],
+        from: FromClause::table("financials_00".to_owned(), Some("f00".to_owned())),
+        r#where: Some(Predicate::Comparison {
+            left: Expression::ColumnRef {
+                table: Some("f00".to_owned()),
+                column: "amount".to_owned(),
+            },
+            op: ComparisonOperator::Gt,
+            right: Expression::Literal {
+                value: json!(0),
+                data_type: DataType::Decimal,
+            },
+        }),
+        group_by: None,
+        having: None,
+        order_by: None,
+        limit: None,
+        offset: None,
+        joins: Some(vec![JoinClause {
+            join_type: JoinType::Inner,
+            right_table: FromClause::table("financials_01".to_owned(), Some("f01".to_owned())),
+            on: Predicate::Comparison {
+                left: Expression::ColumnRef {
+                    table: Some("f00".to_owned()),
+                    column: "amount".to_owned(),
+                },
+                op: ComparisonOperator::Eq,
+                right: Expression::ColumnRef {
+                    table: Some("f01".to_owned()),
+                    column: "amount".to_owned(),
+                },
+            },
+        }]),
+        ctes: None,
+        distinct: false,
+        distinct_on: None,
+        set_operation: None,
+    }
+}
+
+fn bench_validate_decimal_schema(c: &mut Criterion) {
+    let schema = build_decimal_schema_snapshot();
+    let dialect = DialectProfile {
+        dialect: SqlDialect::Postgres,
+        ..DialectProfile::default()
+    };
+    let pipeline =
+        ValidationPipeline::new(schema, dialect, PolicyEngine::new(PolicyConfig::default()));
+    let plan = build_decimal_query_plan();
+
+    c.bench_function("validate/decimal_columns", |bencher| {
+        bencher.iter(|| {
+            let result = pipeline.validate(&plan);
+            criterion::black_box(result.expect("plan with Decimal columns should validate"))
+        })
+    });
+}
+
 criterion_group!(
     benches,
     bench_validate_large_schema,
     bench_validate_with_audit,
+    bench_validate_decimal_schema,
 );
 criterion_main!(benches);

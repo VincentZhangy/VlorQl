@@ -404,6 +404,207 @@ fn build_from_subquery_plan() -> ValidatedPlan {
     ValidatedPlan(Arc::new(plan))
 }
 
+/// Builds a plan whose sole focus is a Decimal literal projection.
+fn build_decimal_literal_plan() -> ValidatedPlan {
+    let plan = QueryPlan {
+        select: vec![
+            Projection::Column {
+                table: Some("inventory".to_owned()),
+                column: "sku".to_owned(),
+                alias: None,
+            },
+            Projection::Expr {
+                expression: Expression::Literal {
+                    value: json!(99.99),
+                    data_type: DataType::Decimal,
+                },
+                alias: Some("unit_price".to_owned()),
+            },
+            Projection::Expr {
+                expression: Expression::Literal {
+                    value: json!("19.9500"),
+                    data_type: DataType::Decimal,
+                },
+                alias: Some("tax_rate".to_owned()),
+            },
+            Projection::Expr {
+                expression: Expression::BinaryOp {
+                    left: Box::new(Expression::Literal {
+                        value: json!(100),
+                        data_type: DataType::Decimal,
+                    }),
+                    op: BinaryOperator::Add,
+                    right: Box::new(Expression::Literal {
+                        value: json!(50),
+                        data_type: DataType::Decimal,
+                    }),
+                },
+                alias: Some("total".to_owned()),
+            },
+        ],
+        from: FromClause::table("inventory".to_owned(), None),
+        r#where: Some(Predicate::Comparison {
+            left: Expression::Literal {
+                value: json!(0.00),
+                data_type: DataType::Decimal,
+            },
+            op: ComparisonOperator::Gt,
+            right: Expression::Literal {
+                value: json!(0),
+                data_type: DataType::Decimal,
+            },
+        }),
+        group_by: None,
+        having: None,
+        order_by: None,
+        limit: None,
+        offset: None,
+        joins: None,
+        ctes: None,
+        distinct: false,
+        distinct_on: None,
+        set_operation: None,
+    };
+
+    ValidatedPlan(Arc::new(plan))
+}
+
+/// Builds a plan that exercises a CTE chain: two nested CTEs feeding into
+/// the main query, similar to `WITH regional AS (...), filtered AS (...)
+/// SELECT ... FROM filtered`.
+fn build_cte_query_plan() -> ValidatedPlan {
+    let inner_cte = CommonTableExpression {
+        name: "base".to_owned(),
+        recursive: false,
+        query: Box::new(QueryPlan {
+            select: vec![
+                Projection::Column {
+                    table: Some("events".to_owned()),
+                    column: "id".to_owned(),
+                    alias: Some("event_id".to_owned()),
+                },
+                Projection::Column {
+                    table: Some("events".to_owned()),
+                    column: "event_type".to_owned(),
+                    alias: None,
+                },
+                Projection::Column {
+                    table: Some("events".to_owned()),
+                    column: "payload".to_owned(),
+                    alias: None,
+                },
+            ],
+            from: FromClause::table("events".to_owned(), None),
+            r#where: Some(Predicate::Comparison {
+                left: column_ref("events", "event_type"),
+                op: ComparisonOperator::Eq,
+                right: literal_str("purchase"),
+            }),
+            group_by: None,
+            having: None,
+            order_by: None,
+            limit: None,
+            offset: None,
+            joins: None,
+            ctes: None,
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,
+        }),
+    };
+
+    let mid_cte = CommonTableExpression {
+        name: "enriched".to_owned(),
+        recursive: false,
+        query: Box::new(QueryPlan {
+            select: vec![
+                Projection::Column {
+                    table: Some("b".to_owned()),
+                    column: "event_id".to_owned(),
+                    alias: None,
+                },
+                Projection::Column {
+                    table: Some("b".to_owned()),
+                    column: "event_type".to_owned(),
+                    alias: None,
+                },
+                Projection::Column {
+                    table: Some("u".to_owned()),
+                    column: "name".to_owned(),
+                    alias: Some("user_name".to_owned()),
+                },
+            ],
+            from: FromClause::table("base".to_owned(), Some("b".to_owned())),
+            r#where: None,
+            group_by: None,
+            having: None,
+            order_by: None,
+            limit: None,
+            offset: None,
+            joins: Some(vec![JoinClause {
+                join_type: JoinType::Inner,
+                right_table: FromClause::table("users".to_owned(), Some("u".to_owned())),
+                on: Predicate::Comparison {
+                    left: column_ref("b", "event_id"),
+                    op: ComparisonOperator::Eq,
+                    right: column_ref("u", "id"),
+                },
+            }]),
+            ctes: None,
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,
+        }),
+    };
+
+    let plan = QueryPlan {
+        select: vec![
+            Projection::Column {
+                table: Some("e".to_owned()),
+                column: "event_id".to_owned(),
+                alias: None,
+            },
+            Projection::Column {
+                table: Some("e".to_owned()),
+                column: "user_name".to_owned(),
+                alias: None,
+            },
+            Projection::Expr {
+                expression: count_of("e", "event_id"),
+                alias: Some("cnt".to_owned()),
+            },
+        ],
+        from: FromClause::table("enriched".to_owned(), Some("e".to_owned())),
+        r#where: Some(Predicate::Comparison {
+            left: column_ref("e", "event_type"),
+            op: ComparisonOperator::Eq,
+            right: literal_str("purchase"),
+        }),
+        group_by: Some(vec![
+            column_ref("e", "event_id"),
+            column_ref("e", "user_name"),
+        ]),
+        having: Some(Predicate::Comparison {
+            left: count_of("e", "event_id"),
+            op: ComparisonOperator::Gt,
+            right: literal_int(1),
+        }),
+        order_by: Some(vec![OrderByTerm {
+            expr: column_ref("e", "user_name"),
+            descending: false,
+        }]),
+        limit: Some(25),
+        offset: None,
+        joins: None,
+        ctes: Some(vec![inner_cte, mid_cte]),
+        distinct: false,
+        distinct_on: None,
+        set_operation: None,
+    };
+
+    ValidatedPlan(Arc::new(plan))
+}
+
 /// Builds a plan that exercises new data types (Decimal, Array, Jsonb)
 /// across projections and literal expressions.
 fn build_new_data_types_plan() -> ValidatedPlan {
@@ -535,10 +736,60 @@ fn bench_new_data_types(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_decimal_literal(c: &mut Criterion) {
+    let plan = build_decimal_literal_plan();
+    let mut group = c.benchmark_group("query_build/decimal_literal");
+
+    for name in ["postgres", "sqlite"] {
+        let config = match name {
+            "postgres" => DialectConfig::default_postgres(),
+            _ => DialectConfig::default_sqlite(),
+        };
+        group.bench_with_input(
+            BenchmarkId::from_parameter(name),
+            &config,
+            |bencher, config| {
+                bencher.iter(|| {
+                    let result = QueryBuilder::new(criterion::black_box(&plan), config).build();
+                    criterion::black_box(result.expect("decimal literal plan should compile"))
+                })
+            },
+        );
+    }
+
+    group.finish();
+}
+
+fn bench_cte_query(c: &mut Criterion) {
+    let plan = build_cte_query_plan();
+    let mut group = c.benchmark_group("query_build/cte_query");
+
+    for name in ["postgres", "sqlite"] {
+        let config = match name {
+            "postgres" => DialectConfig::default_postgres(),
+            _ => DialectConfig::default_sqlite(),
+        };
+        group.bench_with_input(
+            BenchmarkId::from_parameter(name),
+            &config,
+            |bencher, config| {
+                bencher.iter(|| {
+                    let result = QueryBuilder::new(criterion::black_box(&plan), config).build();
+                    criterion::black_box(result.expect("CTE query plan should compile"))
+                })
+            },
+        );
+    }
+
+    group.finish();
+}
+
 criterion_group!(
     benches,
     bench_query_build,
     bench_from_subquery,
     bench_new_data_types,
+    bench_decimal_literal,
+    bench_cte_query,
 );
 criterion_main!(benches);
