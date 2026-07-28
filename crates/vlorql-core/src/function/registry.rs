@@ -79,13 +79,7 @@ pub fn lookup_function(name: &str) -> Option<FunctionDef> {
 
 /// Look up a function by name, filtering by dialect.
 pub fn lookup_function_for_dialect(name: &str, dialect: Dialect) -> Option<FunctionDef> {
-    lookup_function(name).and_then(|def| {
-        if def.supports_dialect(dialect) {
-            Some(def)
-        } else {
-            None
-        }
-    })
+    lookup_function(name).filter(|def| def.supports_dialect(dialect))
 }
 
 /// Returns `true` when `name` is a known aggregate function.
