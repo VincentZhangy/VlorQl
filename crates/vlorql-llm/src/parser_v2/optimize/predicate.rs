@@ -9,7 +9,7 @@
 //! - `AND FALSE` → `FALSE` (short-circuit)
 //! - `OR TRUE` → `TRUE` (short-circuit)
 
-use vlorql_core::schema::{ComparisonOperator, Expression, Predicate};
+use vlorql_core::schema::{ComparisonOperator, DataType, Expression, Predicate};
 
 /// Run all predicate simplification rules on a predicate tree.
 ///

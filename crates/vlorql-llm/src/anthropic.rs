@@ -7,10 +7,9 @@ use std::time::Duration;
 use vlorql_core::errors::{ConfigErrorKind, LlmErrorKind, VlorQLError};
 use vlorql_core::schema::QueryPlan;
 
-use crate::{
-    LlmClient, LlmConfig, LlmProvider, RetryableHttpClient, compact_query_plan_schema,
-    transport_error, truncate,
-};
+use crate::schema::compact_query_plan_schema;
+use crate::sse::{transport_error, truncate};
+use crate::{LlmClient, LlmConfig, LlmProvider, RetryableHttpClient};
 
 const DEFAULT_API_BASE: &str = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_VERSION: &str = "2023-06-01";

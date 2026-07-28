@@ -25,9 +25,10 @@ use std::time::Duration;
 use vlorql_core::errors::{ConfigErrorKind, LlmErrorKind, VlorQLError};
 use vlorql_core::schema::QueryPlan;
 
+use crate::schema::compact_query_plan_schema;
+use crate::sse::{extract_delta_content, transport_error, truncate};
 use crate::{
     DEFAULT_MAX_ATTEMPTS, LlmClient, LlmConfig, LlmProvider, RetryableHttpClient,
-    compact_query_plan_schema, extract_delta_content, transport_error, truncate,
 };
 
 const DEFAULT_API_BASE: &str = "https://open.bigmodel.cn/api/paas/v4/chat/completions";

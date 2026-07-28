@@ -32,9 +32,9 @@ use tracing::warn;
 use vlorql_core::errors::{ConfigErrorKind, LlmErrorKind, VlorQLError};
 use vlorql_core::schema::QueryPlan;
 
+use crate::sse::{extract_delta_content, transport_error, truncate};
 use crate::{
     DEFAULT_MAX_ATTEMPTS, LlmClient, LlmConfig, LlmProvider, RetryableHttpClient,
-    extract_delta_content, transport_error, truncate,
 };
 
 const DEFAULT_API_BASE: &str = "https://api.deepseek.com/v1/chat/completions";

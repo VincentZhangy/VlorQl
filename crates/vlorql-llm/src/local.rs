@@ -43,10 +43,14 @@ use tracing::warn;
 use vlorql_core::errors::{ConfigErrorKind, LlmErrorKind, VlorQLError};
 use vlorql_core::schema::QueryPlan;
 
+use crate::schema::compact_query_plan_schema;
+use crate::sse::{
+    extract_delta_content, is_retryable, response_message, retry_backoff, sse_error, sse_lines,
+    transport_error, truncate,
+};
 use crate::{
     DEFAULT_MAX_ATTEMPTS, DEFAULT_RETRY_DELAY, LlmClient, LlmConfig, LlmProvider,
-    RetryableHttpClient, compact_query_plan_schema, detect_template_leak, extract_delta_content,
-    is_retryable, response_message, retry_backoff, sse_error, sse_lines, transport_error, truncate,
+    RetryableHttpClient, detect_template_leak,
 };
 
 /// Default base URL for vLLM (without the `/chat/completions` suffix).

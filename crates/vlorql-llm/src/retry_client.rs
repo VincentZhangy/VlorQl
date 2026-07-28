@@ -13,10 +13,11 @@ use tracing::warn;
 use vlorql_core::errors::{LlmErrorKind, VlorQLError};
 use vlorql_core::schema::QueryPlan;
 
-use crate::{
-    DEFAULT_RETRY_DELAY, drive_sse_consumer_with, is_retryable, response_message, retry_backoff,
-    sse_lines, transport_error, truncate,
+use crate::sse::{
+    drive_sse_consumer_with, is_retryable, response_message, retry_backoff, sse_lines,
+    transport_error, truncate,
 };
+use crate::DEFAULT_RETRY_DELAY;
 
 /// A retryable HTTP client that can send requests to an LLM provider.
 ///

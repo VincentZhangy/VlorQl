@@ -11,6 +11,7 @@
 //! - Simplifies single-child `and`/`or` predicates
 
 use serde_json::Value;
+use tracing;
 
 /// Maps a raw literal type tag plus its JSON value to the canonical
 /// `data_type` string. The ambiguous `"number"` tag is disambiguated by
@@ -578,18 +579,22 @@ pub fn normalize_predicate(val: &mut Value) -> bool {
             .unwrap_or("")
             .to_owned();
 
-        if pred_type == "and" || pred_type == "or" {
-            for side in &["left", "right"] {
-                if let Some(v) = obj.get_mut(*side) {
+        match pred_type.as_str() {
+            "and" | "or" => {
+                for side in &["left", "right"] {
+                    if let Some(v) = obj.get_mut(*side) {
+                        changed |= normalize_predicate(v);
+                    }
+                }
+            }
+            "not" => {
+                if let Some(v) = obj.get_mut("child") {
                     changed |= normalize_predicate(v);
                 }
             }
-        }
-
-        if pred_type == "not"
-            && let Some(v) = obj.get_mut("child")
-        {
-            changed |= normalize_predicate(v);
+            other => {
+                tracing::debug!("normalize_predicate: unknown predicate type `{other}`");
+            }
         }
     }
 
