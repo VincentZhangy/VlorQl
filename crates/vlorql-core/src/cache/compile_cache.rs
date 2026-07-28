@@ -534,4 +534,63 @@ mod tests {
             handle.await.expect("concurrent task should not panic");
         }
     }
+
+    #[tokio::test]
+    async fn persist_then_load_roundtrip() {
+        let dir = std::env::temp_dir();
+        let path = dir.join(format!("compile_cache_test_persist_{}", std::process::id()));
+        // Clean up any leftover from a previous failed run
+        std::fs::remove_file(&path).ok();
+        std::fs::remove_file(dir.join("compile_cache_test_persist_.tmp")).ok();
+
+        let cache = CompileCache::with_persistence(1024, 60, path.clone());
+        let plan = make_plan();
+        let profile = DialectProfile::default();
+        let compiled = make_compiled(SqlDialect::Postgres);
+        cache.insert(&plan, &profile, compiled.clone()).await;
+        cache.persist().await.expect("persist should succeed");
+
+        let loaded = CompileCache::load(&path, 1024, 60).await;
+        let cached = loaded.get(&plan, &profile).await;
+        assert_eq!(cached, Some(Arc::new(compiled)));
+
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[tokio::test]
+    async fn corrupt_file_loads_gracefully() {
+        let dir = std::env::temp_dir();
+        let path = dir.join(format!("compile_cache_test_corrupt_{}", std::process::id()));
+        std::fs::remove_file(&path).ok();
+        tokio::fs::write(&path, b"not valid bincode data").await.expect("write");
+
+        let cache = CompileCache::load(&path, 1024, 60).await;
+        assert_eq!(cache.size(), 0, "corrupt file should load as empty");
+
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[tokio::test]
+    async fn missing_file_loads_gracefully() {
+        let dir = std::env::temp_dir();
+        let path = dir.join(format!("compile_cache_test_missing_{}", std::process::id()));
+        std::fs::remove_file(&path).ok();
+
+        let cache = CompileCache::load(&path, 1024, 60).await;
+        assert_eq!(cache.size(), 0, "missing file should load as empty");
+    }
+
+    #[tokio::test]
+    async fn invalidate_removes_from_persist_state() {
+        let cache = CompileCache::new(1024, 60);
+        let plan = make_plan();
+        let profile = DialectProfile::default();
+        let compiled = make_compiled(SqlDialect::Postgres);
+
+        cache.insert(&plan, &profile, compiled).await;
+        assert_eq!(cache.entries.lock().unwrap().len(), 1);
+
+        cache.invalidate_plan(&plan, &profile).await;
+        assert_eq!(cache.entries.lock().unwrap().len(), 0);
+    }
 }
