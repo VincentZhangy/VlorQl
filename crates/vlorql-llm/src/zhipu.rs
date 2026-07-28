@@ -22,16 +22,12 @@ use async_trait::async_trait;
 use futures::stream::Stream;
 use serde_json::{Value, json};
 use std::time::Duration;
-use tokio::sync::mpsc;
-use tokio::time::sleep;
-use tracing::warn;
 use vlorql_core::errors::{ConfigErrorKind, LlmErrorKind, VlorQLError};
 use vlorql_core::schema::QueryPlan;
 
 use crate::{
-    DEFAULT_MAX_ATTEMPTS, DEFAULT_RETRY_DELAY, LlmClient, LlmConfig, LlmProvider,
-    compact_query_plan_schema, drive_sse_consumer, is_retryable, response_message, retry_backoff,
-    sse_lines, transport_error, truncate,
+    DEFAULT_MAX_ATTEMPTS, LlmClient, LlmConfig, LlmProvider, RetryableHttpClient,
+    compact_query_plan_schema, extract_delta_content, transport_error, truncate,
 };
 
 const DEFAULT_API_BASE: &str = "https://open.bigmodel.cn/api/paas/v4/chat/completions";
@@ -108,11 +104,6 @@ impl ZhipuClient {
             .api_base
             .clone()
             .unwrap_or_else(|| DEFAULT_API_BASE.to_owned())
-    }
-
-    /// Returns the maximum number of attempts for retryable failures.
-    fn max_attempts(&self) -> usize {
-        usize::try_from(self.config.max_retries.max(1)).unwrap_or(DEFAULT_MAX_ATTEMPTS)
     }
 
     /// Returns the `max_tokens` value sent on the wire.
@@ -199,35 +190,35 @@ impl ZhipuClient {
         }
         body
     }
+}
 
-    /// Issues a single non-streaming request and parses the result.
-    async fn send_once(&self, endpoint: &str, body: &Value) -> Result<QueryPlan, VlorQLError> {
-        let response = self
-            .client
+#[async_trait]
+impl RetryableHttpClient for ZhipuClient {
+    fn max_attempts(&self) -> usize {
+        usize::try_from(self.config.max_retries.max(1)).unwrap_or(DEFAULT_MAX_ATTEMPTS)
+    }
+
+    fn provider_label(&self) -> &'static str {
+        "zhipu"
+    }
+
+    fn parse_response(&self, body: &str) -> Result<QueryPlan, VlorQLError> {
+        parse_completion_payload(body)
+    }
+
+    async fn send_request(
+        &self,
+        endpoint: &str,
+        body: &Value,
+    ) -> Result<reqwest::Response, VlorQLError> {
+        self.client
             .post(endpoint)
             .bearer_auth(&self.api_key)
+            .header("accept", "text/event-stream")
             .json(body)
             .send()
             .await
-            .map_err(|error| transport_error(&error))?;
-        let status = response.status();
-        let text = response
-            .text()
-            .await
-            .map_err(|error| transport_error(&error))?;
-        if !status.is_success() {
-            return Err(VlorQLError::llm(
-                LlmErrorKind::ApiError {
-                    status: status.as_u16(),
-                    message: response_message(&text),
-                },
-                json!({
-                    "status": status.as_u16(),
-                    "body": truncate(&text, 2048),
-                }),
-            ));
-        }
-        parse_completion_payload(&text)
+            .map_err(|error| transport_error(&error))
     }
 }
 
@@ -241,38 +232,7 @@ impl LlmClient for ZhipuClient {
     ) -> Result<QueryPlan, VlorQLError> {
         let endpoint = self.endpoint();
         let body = self.build_request_body(question, system_prompt, false, temperature);
-        let max_attempts = self.max_attempts();
-        let mut last_error: Option<VlorQLError> = None;
-        for attempt in 0..max_attempts {
-            let result = self.send_once(&endpoint, &body).await;
-            match result {
-                Ok(plan) => return Ok(plan),
-                Err(error) => {
-                    let can_retry = is_retryable(&error) && attempt + 1 < max_attempts;
-                    if !can_retry {
-                        return Err(error);
-                    }
-                    let delay = retry_backoff(DEFAULT_RETRY_DELAY, attempt);
-                    warn!(
-                        attempt = attempt + 1,
-                        max_attempts,
-                        ?delay,
-                        "zhipu request failed; retrying"
-                    );
-                    last_error = Some(error);
-                    sleep(delay).await;
-                }
-            }
-        }
-        Err(last_error.unwrap_or_else(|| {
-            VlorQLError::llm(
-                LlmErrorKind::ApiError {
-                    status: 0,
-                    message: "zhipu request did not produce a result".to_owned(),
-                },
-                json!({"source": "zhipu_client"}),
-            )
-        }))
+        self.generate_with_retry(&endpoint, &body).await
     }
 
     async fn stream_plan(
@@ -283,43 +243,7 @@ impl LlmClient for ZhipuClient {
     {
         let endpoint = self.endpoint();
         let body = self.build_request_body(&question, &system_prompt, true, None);
-        let response = self
-            .client
-            .post(&endpoint)
-            .bearer_auth(&self.api_key)
-            .header("accept", "text/event-stream")
-            .json(&body)
-            .send()
-            .await
-            .map_err(|error| transport_error(&error))?;
-        let status = response.status();
-        if !status.is_success() {
-            let body = response.text().await.unwrap_or_default();
-            return Err(VlorQLError::llm(
-                LlmErrorKind::ApiError {
-                    status: status.as_u16(),
-                    message: response_message(&body),
-                },
-                json!({
-                    "status": status.as_u16(),
-                    "body": truncate(&body, 2048),
-                }),
-            ));
-        }
-
-        let byte_stream = response.bytes_stream();
-        let (tx, rx) = mpsc::unbounded_channel::<Result<String, VlorQLError>>();
-        let line_stream = sse_lines(byte_stream);
-        let max_attempts = self.max_attempts();
-        let retry_base = DEFAULT_RETRY_DELAY;
-        tokio::spawn(async move {
-            if !drive_sse_consumer(line_stream, tx, max_attempts, retry_base).await {
-                warn!("zhipu SSE consumer ended before producing content");
-            }
-        });
-
-        let output = tokio_stream::wrappers::UnboundedReceiverStream::new(rx);
-        Ok(Box::new(Box::pin(output)))
+        self.stream_with_sse(&endpoint, &body, extract_delta_content).await
     }
 
     fn provider(&self) -> LlmProvider {

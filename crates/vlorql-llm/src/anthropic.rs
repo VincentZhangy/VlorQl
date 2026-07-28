@@ -4,22 +4,18 @@ use async_trait::async_trait;
 use futures::stream::Stream;
 use serde_json::{Value, json};
 use std::time::Duration;
-use tokio::sync::mpsc;
-use tokio::time::sleep;
-use tracing::warn;
 use vlorql_core::errors::{ConfigErrorKind, LlmErrorKind, VlorQLError};
 use vlorql_core::schema::QueryPlan;
 
 use crate::{
-    LlmClient, LlmConfig, LlmProvider, compact_query_plan_schema, drive_sse_consumer_with,
-    is_retryable, response_message, retry_backoff, sse_lines, transport_error, truncate,
+    LlmClient, LlmConfig, LlmProvider, RetryableHttpClient, compact_query_plan_schema,
+    transport_error, truncate,
 };
 
 const DEFAULT_API_BASE: &str = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_VERSION: &str = "2023-06-01";
 const ANTHROPIC_API_KEY_ENV: &str = "ANTHROPIC_API_KEY";
 const DEFAULT_MAX_ATTEMPTS: usize = 3;
-const DEFAULT_RETRY_DELAY: Duration = Duration::from_secs(1);
 
 /// Anthropic Claude messages-API client.
 #[derive(Clone)]
@@ -82,10 +78,6 @@ impl AnthropicClient {
             .unwrap_or_else(|| DEFAULT_API_BASE.to_owned())
     }
 
-    fn max_attempts(&self) -> usize {
-        usize::try_from(self.config.max_retries.max(1)).unwrap_or(DEFAULT_MAX_ATTEMPTS)
-    }
-
     fn build_request_body(
         &self,
         question: &str,
@@ -116,35 +108,36 @@ impl AnthropicClient {
         }
         body
     }
+}
 
-    async fn send_once(&self, endpoint: &str, body: &Value) -> Result<QueryPlan, VlorQLError> {
-        let response = self
-            .client
+#[async_trait]
+impl RetryableHttpClient for AnthropicClient {
+    fn max_attempts(&self) -> usize {
+        usize::try_from(self.config.max_retries.max(1)).unwrap_or(DEFAULT_MAX_ATTEMPTS)
+    }
+
+    fn provider_label(&self) -> &'static str {
+        "anthropic"
+    }
+
+    fn parse_response(&self, body: &str) -> Result<QueryPlan, VlorQLError> {
+        parse_completion_payload(body)
+    }
+
+    async fn send_request(
+        &self,
+        endpoint: &str,
+        body: &Value,
+    ) -> Result<reqwest::Response, VlorQLError> {
+        self.client
             .post(endpoint)
             .header("x-api-key", &self.api_key)
             .header("anthropic-version", ANTHROPIC_VERSION)
+            .header("accept", "text/event-stream")
             .json(body)
             .send()
             .await
-            .map_err(|error| transport_error(&error))?;
-        let status = response.status();
-        let body = response
-            .text()
-            .await
-            .map_err(|error| transport_error(&error))?;
-        if !status.is_success() {
-            return Err(VlorQLError::llm(
-                LlmErrorKind::ApiError {
-                    status: status.as_u16(),
-                    message: response_message(&body),
-                },
-                json!({
-                    "status": status.as_u16(),
-                    "body": truncate(&body, 2048),
-                }),
-            ));
-        }
-        parse_completion_payload(&body)
+            .map_err(|error| transport_error(&error))
     }
 }
 
@@ -158,38 +151,7 @@ impl LlmClient for AnthropicClient {
     ) -> Result<QueryPlan, VlorQLError> {
         let endpoint = self.endpoint();
         let body = self.build_request_body(question, system_prompt, false, temperature);
-        let max_attempts = self.max_attempts();
-        let mut last_error: Option<VlorQLError> = None;
-        for attempt in 0..max_attempts {
-            let result = self.send_once(&endpoint, &body).await;
-            match result {
-                Ok(plan) => return Ok(plan),
-                Err(error) => {
-                    let can_retry = is_retryable(&error) && attempt + 1 < max_attempts;
-                    if !can_retry {
-                        return Err(error);
-                    }
-                    let delay = retry_backoff(Duration::from_secs(1), attempt);
-                    warn!(
-                        attempt = attempt + 1,
-                        max_attempts,
-                        ?delay,
-                        "anthropic request failed; retrying"
-                    );
-                    last_error = Some(error);
-                    sleep(delay).await;
-                }
-            }
-        }
-        Err(last_error.unwrap_or_else(|| {
-            VlorQLError::llm(
-                LlmErrorKind::ApiError {
-                    status: 0,
-                    message: "anthropic request did not produce a result".to_owned(),
-                },
-                json!({"source": "anthropic_client"}),
-            )
-        }))
+        self.generate_with_retry(&endpoint, &body).await
     }
 
     async fn stream_plan(
@@ -200,51 +162,7 @@ impl LlmClient for AnthropicClient {
     {
         let endpoint = self.endpoint();
         let body = self.build_request_body(&question, &system_prompt, true, None);
-        let response = self
-            .client
-            .post(&endpoint)
-            .header("x-api-key", &self.api_key)
-            .header("anthropic-version", ANTHROPIC_VERSION)
-            .header("accept", "text/event-stream")
-            .json(&body)
-            .send()
-            .await
-            .map_err(|error| transport_error(&error))?;
-        let status = response.status();
-        if !status.is_success() {
-            let body = response.text().await.unwrap_or_default();
-            return Err(VlorQLError::llm(
-                LlmErrorKind::ApiError {
-                    status: status.as_u16(),
-                    message: response_message(&body),
-                },
-                json!({
-                    "status": status.as_u16(),
-                    "body": truncate(&body, 2048),
-                }),
-            ));
-        }
-
-        let byte_stream = response.bytes_stream();
-        let (tx, rx) = mpsc::unbounded_channel::<Result<String, VlorQLError>>();
-        let line_stream = sse_lines(byte_stream);
-        let max_attempts = self.max_attempts();
-        let retry_base = DEFAULT_RETRY_DELAY;
-        tokio::spawn(async move {
-            if !drive_sse_consumer_with(
-                line_stream,
-                tx,
-                max_attempts,
-                retry_base,
-                extract_delta_text,
-            )
-            .await
-            {
-                warn!("anthropic SSE consumer ended before producing content");
-            }
-        });
-        let output = tokio_stream::wrappers::UnboundedReceiverStream::new(rx);
-        Ok(Box::new(Box::pin(output)))
+        self.stream_with_sse(&endpoint, &body, extract_delta_text).await
     }
 
     fn provider(&self) -> LlmProvider {

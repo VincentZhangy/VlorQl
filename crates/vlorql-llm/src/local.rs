@@ -45,7 +45,7 @@ use vlorql_core::schema::QueryPlan;
 
 use crate::{
     DEFAULT_MAX_ATTEMPTS, DEFAULT_RETRY_DELAY, LlmClient, LlmConfig, LlmProvider,
-    compact_query_plan_schema, detect_template_leak, drive_sse_consumer, extract_delta_content,
+    RetryableHttpClient, compact_query_plan_schema, detect_template_leak, extract_delta_content,
     is_retryable, response_message, retry_backoff, sse_error, sse_lines, transport_error, truncate,
 };
 
@@ -133,11 +133,6 @@ impl LocalClient {
             backend,
             base_url,
         })
-    }
-
-    /// Returns the maximum number of attempts for retryable failures.
-    fn max_attempts(&self) -> usize {
-        usize::try_from(self.config.max_retries.max(1)).unwrap_or(DEFAULT_MAX_ATTEMPTS)
     }
 
     /// Returns the effective chat endpoint for the active backend.
@@ -304,41 +299,46 @@ impl LocalClient {
     }
 
     /// Sends the request with the appropriate auth header.
-    async fn send_request(&self, body: &Value) -> Result<reqwest::Response, VlorQLError> {
-        let mut builder = self.client.post(self.endpoint()).json(body);
-        if matches!(self.backend, LocalBackend::VLLM)
-            && let Some(key) = self.config.api_key.as_deref().filter(|k| !k.is_empty())
-        {
-            builder = builder.bearer_auth(key);
+    async fn send_request(
+        &self,
+        endpoint: &str,
+        body: &Value,
+    ) -> Result<reqwest::Response, VlorQLError> {
+        let mut builder = self.client.post(endpoint).json(body);
+        if matches!(self.backend, LocalBackend::VLLM) {
+            if let Some(key) = self.config.api_key.as_deref().filter(|k| !k.is_empty()) {
+                builder = builder.bearer_auth(key);
+            }
+            builder = builder.header("accept", "text/event-stream");
         }
         builder
             .send()
             .await
             .map_err(|error| transport_error(&error))
     }
+}
 
-    /// Issues a single non-streaming request and parses the result.
-    async fn send_once(&self, body: &Value) -> Result<QueryPlan, VlorQLError> {
-        let response = self.send_request(body).await?;
-        let status = response.status();
-        let text = response
-            .text()
-            .await
-            .map_err(|error| transport_error(&error))?;
-        if !status.is_success() {
-            return Err(VlorQLError::llm(
-                LlmErrorKind::ApiError {
-                    status: status.as_u16(),
-                    message: response_message(&text),
-                },
-                json!({
-                    "status": status.as_u16(),
-                    "backend": self.backend.label(),
-                    "body": truncate(&text, 2048),
-                }),
-            ));
-        }
-        parse_completion_payload(&text, self.backend)
+#[async_trait]
+impl RetryableHttpClient for LocalClient {
+    fn max_attempts(&self) -> usize {
+        usize::try_from(self.config.max_retries.max(1)).unwrap_or(DEFAULT_MAX_ATTEMPTS)
+    }
+
+    fn provider_label(&self) -> &'static str {
+        "local"
+    }
+
+    fn parse_response(&self, body: &str) -> Result<QueryPlan, VlorQLError> {
+        parse_completion_payload(body, self.backend)
+    }
+
+    async fn send_request(
+        &self,
+        endpoint: &str,
+        body: &Value,
+    ) -> Result<reqwest::Response, VlorQLError> {
+        // Delegate to the existing send_request method on LocalClient
+        LocalClient::send_request(self, endpoint, body).await
     }
 }
 
@@ -363,6 +363,7 @@ impl LlmClient for LocalClient {
         system_prompt: &str,
         temperature: Option<f32>,
     ) -> Result<QueryPlan, VlorQLError> {
+        let endpoint = self.endpoint();
         let primary = self.build_request_body(question, system_prompt, false, temperature);
         let max_attempts = self.max_attempts();
         let mut last_error: Option<VlorQLError> = None;
@@ -370,10 +371,29 @@ impl LlmClient for LocalClient {
         let mut fallback_used = false;
 
         for attempt in 0..max_attempts {
-            let result = self.send_once(&body).await;
-            match result {
-                Ok(plan) => return Ok(plan),
-                Err(error) => {
+            let response = self.send_request(&endpoint, &body).await;
+            match response {
+                Ok(resp) => {
+                    let status = resp.status();
+                    let text = resp
+                        .text()
+                        .await
+                        .map_err(|error| transport_error(&error))?;
+                    if status.is_success() {
+                        return parse_completion_payload(&text, self.backend);
+                    }
+                    let error = VlorQLError::llm(
+                        LlmErrorKind::ApiError {
+                            status: status.as_u16(),
+                            message: response_message(&text),
+                        },
+                        json!({
+                            "status": status.as_u16(),
+                            "backend": self.backend.label(),
+                            "body": truncate(&text, 2048),
+                        }),
+                    );
+
                     let mut did_fallback = false;
                     if !fallback_used && should_fallback_to_json_object(&error) {
                         warn!(
@@ -385,6 +405,7 @@ impl LlmClient for LocalClient {
                         fallback_used = true;
                         did_fallback = true;
                     }
+
                     if !did_fallback {
                         let can_retry = is_retryable(&error) && attempt + 1 < max_attempts;
                         if !can_retry {
@@ -403,6 +424,22 @@ impl LlmClient for LocalClient {
                     } else {
                         last_error = Some(error);
                     }
+                }
+                Err(error) => {
+                    let can_retry = is_retryable(&error) && attempt + 1 < max_attempts;
+                    if !can_retry {
+                        return Err(error);
+                    }
+                    let delay = retry_backoff(DEFAULT_RETRY_DELAY, attempt);
+                    warn!(
+                        attempt = attempt + 1,
+                        max_attempts,
+                        backend = self.backend.label(),
+                        ?delay,
+                        "local request failed; retrying"
+                    );
+                    last_error = Some(error);
+                    sleep(delay).await;
                 }
             }
         }
@@ -423,60 +460,44 @@ impl LlmClient for LocalClient {
         system_prompt: String,
     ) -> Result<Box<dyn Stream<Item = Result<String, VlorQLError>> + Send + Unpin>, VlorQLError>
     {
-        let body = self.build_request_body(&question, &system_prompt, true, None);
         let endpoint = self.endpoint();
-        let mut builder = self.client.post(&endpoint).json(&body);
-        if matches!(self.backend, LocalBackend::VLLM) {
-            if let Some(key) = self.config.api_key.as_deref().filter(|k| !k.is_empty()) {
-                builder = builder.bearer_auth(key);
-            }
-            builder = builder.header("accept", "text/event-stream");
-        }
-        let response = builder
-            .send()
-            .await
-            .map_err(|error| transport_error(&error))?;
-        let status = response.status();
-        if !status.is_success() {
-            let body = response.text().await.unwrap_or_default();
-            return Err(VlorQLError::llm(
-                LlmErrorKind::ApiError {
-                    status: status.as_u16(),
-                    message: response_message(&body),
-                },
-                json!({
-                    "status": status.as_u16(),
-                    "backend": self.backend.label(),
-                    "body": truncate(&body, 2048),
-                }),
-            ));
-        }
-
-        let byte_stream = response.bytes_stream();
-        let (tx, rx) = mpsc::unbounded_channel::<Result<String, VlorQLError>>();
-        let line_stream = sse_lines(byte_stream);
+        let body = self.build_request_body(&question, &system_prompt, true, None);
 
         match self.backend {
             LocalBackend::VLLM => {
-                let max_attempts = self.max_attempts();
-                let retry_base = DEFAULT_RETRY_DELAY;
-                tokio::spawn(async move {
-                    if !drive_sse_consumer(line_stream, tx, max_attempts, retry_base).await {
-                        warn!("vLLM SSE consumer ended before producing content");
-                    }
-                });
+                self.stream_with_sse(&endpoint, &body, extract_delta_content).await
             }
             LocalBackend::Ollama => {
+                let response = self.send_request(&endpoint, &body).await?;
+                let status = response.status();
+                if !status.is_success() {
+                    let body = response.text().await.unwrap_or_default();
+                    return Err(VlorQLError::llm(
+                        LlmErrorKind::ApiError {
+                            status: status.as_u16(),
+                            message: response_message(&body),
+                        },
+                        json!({
+                            "status": status.as_u16(),
+                            "backend": self.backend.label(),
+                            "body": truncate(&body, 2048),
+                        }),
+                    ));
+                }
+
+                let byte_stream = response.bytes_stream();
+                let (tx, rx) = mpsc::unbounded_channel::<Result<String, VlorQLError>>();
+                let line_stream = sse_lines(byte_stream);
                 tokio::spawn(async move {
                     if !drive_ollama_ndjson_consumer(line_stream, tx).await {
                         warn!("Ollama NDJSON consumer ended before producing content");
                     }
                 });
+
+                let output = tokio_stream::wrappers::UnboundedReceiverStream::new(rx);
+                Ok(Box::new(Box::pin(output)))
             }
         }
-
-        let output = tokio_stream::wrappers::UnboundedReceiverStream::new(rx);
-        Ok(Box::new(Box::pin(output)))
     }
 
     fn provider(&self) -> LlmProvider {
@@ -627,10 +648,10 @@ fn parse_completion_payload(body: &str, backend: LocalBackend) -> Result<QueryPl
         ));
     }
     let cleaned = crate::extract_json_content(content);
-    crate::parse_llm_response(cleaned).map_err(|error| {
+    crate::parse_llm_response(&cleaned).map_err(|error| {
         let raw_content = truncate(content, 4096);
         let cleaned_for_debug = if cleaned != content {
-            Some(truncate(cleaned, 4096))
+            Some(truncate(&cleaned, 4096))
         } else {
             None
         };

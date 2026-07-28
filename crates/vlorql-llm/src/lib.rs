@@ -30,10 +30,12 @@ use std::collections::HashMap;
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::time::sleep;
-use tokio_stream::wrappers::UnboundedReceiverStream;
-use tracing::{Instrument, debug, warn};
+use tracing::{Instrument, debug};
 use vlorql_core::errors::{ConfigErrorKind, LlmErrorKind, VlorQLError};
 use vlorql_core::schema::QueryPlan;
+
+mod retry_client;
+pub(crate) use retry_client::RetryableHttpClient;
 
 pub(crate) const SSE_DONE: &str = "[DONE]";
 
@@ -308,8 +310,6 @@ pub struct OpenAIClient {
     api_key: String,
     model: String,
     api_base: Option<String>,
-    max_attempts: usize,
-    retry_base_delay: Duration,
     strict_json_schema_override: Option<bool>,
     config: LlmConfig,
 }
@@ -318,18 +318,12 @@ impl std::fmt::Debug for OpenAIClient {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
             .debug_struct("OpenAIClient")
-            .field("client", &self.client)
             .field("api_key", &"[REDACTED]")
             .field("model", &self.model)
             .field("api_base", &self.api_base)
-            .field("max_attempts", &self.max_attempts)
-            .field("retry_base_delay", &self.retry_base_delay)
-            .field(
-                "strict_json_schema_override",
-                &self.strict_json_schema_override,
-            )
+            .field("max_attempts", &self.max_attempts())
+            .field("strict_json_schema_override", &self.strict_json_schema_override)
             .field("provider", &self.config.provider)
-            .field("model", &self.config.model)
             .finish()
     }
 }
@@ -348,20 +342,16 @@ impl OpenAIClient {
     /// Creates a client from a fully populated [`LlmConfig`].
     pub fn from_config(config: LlmConfig) -> Self {
         let api_key = config.api_key.clone().unwrap_or_default();
-        let timeout = std::time::Duration::from_secs(config.timeout_seconds);
+        let timeout = Duration::from_secs(config.timeout_seconds);
         let client = reqwest::Client::builder()
             .timeout(timeout)
             .build()
             .unwrap_or_else(|_| reqwest::Client::new());
-        let max_attempts =
-            usize::try_from(config.max_retries.max(1)).unwrap_or(DEFAULT_MAX_ATTEMPTS);
         Self {
             client,
             api_key,
             model: config.model.clone(),
             api_base: config.api_base.clone(),
-            max_attempts,
-            retry_base_delay: DEFAULT_RETRY_DELAY,
             strict_json_schema_override: None,
             config,
         }
@@ -385,8 +375,6 @@ impl OpenAIClient {
             api_key: config.api_key.clone().unwrap_or_default(),
             model: config.model.clone(),
             api_base: config.api_base.clone(),
-            max_attempts: DEFAULT_MAX_ATTEMPTS,
-            retry_base_delay: DEFAULT_RETRY_DELAY,
             strict_json_schema_override: None,
             config,
         }
@@ -403,20 +391,6 @@ impl OpenAIClient {
     #[must_use]
     pub fn with_client(mut self, client: reqwest::Client) -> Self {
         self.client = client;
-        self
-    }
-
-    /// Sets the retry delay base. The normal production default is one second.
-    #[must_use]
-    pub fn with_retry_base_delay(mut self, delay: Duration) -> Self {
-        self.retry_base_delay = delay;
-        self
-    }
-
-    /// Sets the maximum number of total attempts, capped at three.
-    #[must_use]
-    pub fn with_max_attempts(mut self, attempts: usize) -> Self {
-        self.max_attempts = attempts.clamp(1, DEFAULT_MAX_ATTEMPTS);
         self
     }
 
@@ -441,85 +415,6 @@ impl OpenAIClient {
     pub fn supports_strict_json_schema(&self) -> bool {
         self.strict_json_schema_override
             .unwrap_or_else(|| model_supports_strict_json_schema(&self.model))
-    }
-
-    async fn send_once(&self, endpoint: &str, body: &Value) -> Result<QueryPlan, VlorQLError> {
-        let response = self
-            .client
-            .post(endpoint)
-            .bearer_auth(&self.api_key)
-            .json(body)
-            .send()
-            .await
-            .map_err(|error| transport_error(&error))?;
-
-        let status = response.status();
-        let response_text = response
-            .text()
-            .await
-            .map_err(|error| transport_error(&error))?;
-        if !status.is_success() {
-            return Err(VlorQLError::llm(
-                LlmErrorKind::ApiError {
-                    status: status.as_u16(),
-                    message: response_message(&response_text),
-                },
-                json!({
-                    "status": status.as_u16(),
-                    "body": truncate(&response_text, 2048),
-                }),
-            ));
-        }
-
-        let response_json: Value = serde_json::from_str(&response_text).map_err(|error| {
-            VlorQLError::llm(
-                LlmErrorKind::ParseError {
-                    details: format!("OpenAI response is not valid JSON: {error}"),
-                },
-                json!({
-                    "source": "provider_response",
-                    "body": truncate(&response_text, 2048),
-                }),
-            )
-        })?;
-        let content = response_json
-            .get("choices")
-            .and_then(Value::as_array)
-            .and_then(|choices| choices.first())
-            .and_then(|choice| choice.get("message"))
-            .and_then(|message| message.get("content"))
-            .and_then(Value::as_str)
-            .ok_or_else(|| {
-                VlorQLError::llm(
-                    LlmErrorKind::ParseError {
-                        details: "OpenAI response did not contain choices[0].message.content"
-                            .to_owned(),
-                    },
-                    json!({"source": "provider_response"}),
-                )
-            })?;
-
-        serde_json::from_str(content)
-            .ok()
-            .and_then(|v: Value| {
-                v.get("content")
-                    .or_else(|| v.get("response"))
-                    .and_then(Value::as_str)
-                    .map(|s| s.to_owned())
-            })
-            .unwrap_or_else(|| content.to_owned());
-
-        parse_llm_response(content).map_err(|error| {
-            VlorQLError::llm(
-                LlmErrorKind::ParseError {
-                    details: format!("assistant content is not a valid QueryPlan: {error}"),
-                },
-                json!({
-                    "source": "assistant_content",
-                    "content": truncate(content, 4096),
-                }),
-            )
-        })
     }
 
     fn streaming_request_body(&self, question: &str, system_prompt: &str) -> Value {
@@ -585,6 +480,72 @@ impl OpenAIClient {
 }
 
 #[async_trait]
+impl RetryableHttpClient for OpenAIClient {
+    fn max_attempts(&self) -> usize {
+        usize::try_from(self.config.max_retries.max(1)).unwrap_or(DEFAULT_MAX_ATTEMPTS)
+    }
+
+    fn provider_label(&self) -> &'static str {
+        "openai"
+    }
+
+    fn parse_response(&self, body: &str) -> Result<QueryPlan, VlorQLError> {
+        let value: Value = serde_json::from_str(body).map_err(|error| {
+            VlorQLError::llm(
+                LlmErrorKind::ParseError {
+                    details: format!("OpenAI response is not valid JSON: {error}"),
+                },
+                json!({
+                    "source": "provider_response",
+                    "body": truncate(body, 2048),
+                }),
+            )
+        })?;
+        let content = value
+            .get("choices")
+            .and_then(Value::as_array)
+            .and_then(|choices| choices.first())
+            .and_then(|choice| choice.get("message"))
+            .and_then(|message| message.get("content"))
+            .and_then(Value::as_str)
+            .ok_or_else(|| {
+                VlorQLError::llm(
+                    LlmErrorKind::ParseError {
+                        details:
+                            "OpenAI response did not contain choices[0].message.content".to_owned(),
+                    },
+                    json!({"source": "provider_response"}),
+                )
+            })?;
+        crate::parse_llm_response(content).map_err(|error| {
+            VlorQLError::llm(
+                LlmErrorKind::ParseError {
+                    details: format!("assistant content is not a valid QueryPlan: {error}"),
+                },
+                json!({
+                    "source": "assistant_content",
+                    "content": truncate(content, 4096),
+                }),
+            )
+        })
+    }
+
+    async fn send_request(
+        &self,
+        endpoint: &str,
+        body: &Value,
+    ) -> Result<reqwest::Response, VlorQLError> {
+        self.client
+            .post(endpoint)
+            .bearer_auth(&self.api_key)
+            .json(body)
+            .send()
+            .await
+            .map_err(|error| transport_error(&error))
+    }
+}
+
+#[async_trait]
 impl LlmClient for OpenAIClient {
     async fn generate_plan(
         &self,
@@ -602,42 +563,7 @@ impl LlmClient for OpenAIClient {
         async move {
             let endpoint = self.endpoint();
             let body = self.request_body(question, system_prompt, temperature);
-            let attempts = self.max_attempts.max(1);
-            let mut last_error = None;
-
-            for attempt in 0..attempts {
-                match self.send_once(&endpoint, &body).await {
-                    Ok(plan) => {
-                        tracing::debug!("LLM response received");
-                        return Ok(plan);
-                    }
-                    Err(error) => {
-                        let can_retry = is_retryable(&error) && attempt + 1 < attempts;
-                        if !can_retry {
-                            return Err(error);
-                        }
-                        let delay = retry_delay(self.retry_base_delay, attempt);
-                        tracing::warn!(
-                            attempt = attempt + 1,
-                            max_attempts = attempts,
-                            ?delay,
-                            "temporary LLM request failure; retrying"
-                        );
-                        last_error = Some(error);
-                        sleep(delay).await;
-                    }
-                }
-            }
-
-            Err(last_error.unwrap_or_else(|| {
-                VlorQLError::llm(
-                    LlmErrorKind::ApiError {
-                        status: 0,
-                        message: "LLM request did not produce a result".to_owned(),
-                    },
-                    json!({"source": "client"}),
-                )
-            }))
+            self.generate_with_retry(&endpoint, &body).await
         }
         .instrument(span)
         .await
@@ -656,46 +582,13 @@ impl LlmClient for OpenAIClient {
             prompt_len = system_prompt.len(),
             streaming = true,
         );
-        let _enter = span.enter();
-        let body = self.streaming_request_body(&question, &system_prompt);
-        let endpoint = self.endpoint();
-        let response = self
-            .client
-            .post(&endpoint)
-            .bearer_auth(&self.api_key)
-            .json(&body)
-            .send()
-            .await
-            .map_err(|error| transport_error(&error))?;
-        let status = response.status();
-        if !status.is_success() {
-            let body = response.text().await.unwrap_or_default();
-            return Err(VlorQLError::llm(
-                LlmErrorKind::ApiError {
-                    status: status.as_u16(),
-                    message: response_message(&body),
-                },
-                json!({
-                    "status": status.as_u16(),
-                    "body": truncate(&body, 2048),
-                }),
-            ));
+        async move {
+            let endpoint = self.endpoint();
+            let body = self.streaming_request_body(&question, &system_prompt);
+            self.stream_with_sse(&endpoint, &body, extract_delta_content).await
         }
-
-        let byte_stream = response.bytes_stream();
-        let (tx, rx) = mpsc::unbounded_channel::<Result<String, VlorQLError>>();
-        let line_stream = sse_lines(byte_stream);
-
-        let max_attempts = self.max_attempts;
-        let retry_base = self.retry_base_delay;
-        tokio::spawn(async move {
-            if !drive_sse_consumer(line_stream, tx, max_attempts, retry_base).await {
-                warn!("SSE consumer ended before producing content");
-            }
-        });
-
-        let output = UnboundedReceiverStream::new(rx);
-        Ok(Box::new(Box::pin(output)))
+        .instrument(span)
+        .await
     }
 
     fn provider(&self) -> LlmProvider {
@@ -1118,13 +1011,6 @@ pub(crate) fn is_retryable(error: &VlorQLError) -> bool {
     }
 }
 
-pub(crate) fn retry_delay(base: Duration, retry_index: usize) -> Duration {
-    let multiplier = 1u32
-        .checked_shl(retry_index.min(31) as u32)
-        .unwrap_or(u32::MAX);
-    base.checked_mul(multiplier).unwrap_or(Duration::MAX)
-}
-
 pub(crate) fn response_message(body: &str) -> String {
     serde_json::from_str::<Value>(body)
         .ok()
@@ -1144,25 +1030,6 @@ pub(crate) fn truncate(value: &str, max_chars: usize) -> String {
         output.push('…');
     }
     output
-}
-
-pub(crate) async fn drive_sse_consumer<S>(
-    line_stream: S,
-    tx: mpsc::UnboundedSender<Result<String, VlorQLError>>,
-    max_attempts: usize,
-    retry_base: Duration,
-) -> bool
-where
-    S: futures::Stream<Item = std::io::Result<String>> + Unpin + Send,
-{
-    drive_sse_consumer_with(
-        line_stream,
-        tx,
-        max_attempts,
-        retry_base,
-        extract_delta_content,
-    )
-    .await
 }
 
 pub(crate) async fn drive_sse_consumer_with<S, F>(
@@ -1423,7 +1290,6 @@ mod tests {
     use super::*;
     use mockito::{Matcher, Server};
     use serde_json::json;
-    use std::time::Duration;
     use vlorql_core::schema::{FromClause, Projection};
 
     fn plan() -> QueryPlan {
@@ -1494,8 +1360,7 @@ mod tests {
             .await;
 
         let client = OpenAIClient::new("test-key", "gpt-4o-mini")
-            .with_api_base(format!("{}/v1", server.url()))
-            .with_retry_base_delay(Duration::ZERO);
+            .with_api_base(format!("{}/v1", server.url()));
         let request_body = client.request_body("show users", "system instructions", None);
         assert_eq!(request_body["model"], "gpt-4o-mini");
         assert_eq!(request_body["temperature"], 0.0);
@@ -1532,8 +1397,7 @@ mod tests {
             .create_async()
             .await;
         let client = OpenAIClient::new("key", "local-model")
-            .with_api_base(format!("{}/", server.url()))
-            .with_retry_base_delay(Duration::ZERO);
+            .with_api_base(format!("{}/", server.url()));
         let request_body = client.request_body("q", "s", None);
         assert_eq!(request_body["model"], "local-model");
         assert_eq!(request_body["response_format"]["type"], "json_object");
@@ -1566,9 +1430,7 @@ mod tests {
             .create_async()
             .await;
         let client = OpenAIClient::new("key", "local-model")
-            .with_api_base(format!("{}/v1", server.url()))
-            .with_retry_base_delay(Duration::ZERO)
-            .with_max_attempts(3);
+            .with_api_base(format!("{}/v1", server.url()));
 
         assert_eq!(
             client
@@ -1596,8 +1458,7 @@ mod tests {
             .create_async()
             .await;
         let client = OpenAIClient::new("key", "local-model")
-            .with_api_base(format!("{}/v1", server.url()))
-            .with_retry_base_delay(Duration::ZERO);
+            .with_api_base(format!("{}/v1", server.url()));
 
         let error = client
             .generate_plan("q", "s", None)
@@ -1668,8 +1529,7 @@ mod tests {
             .await;
 
         let client = OpenAIClient::new("key", "local-model")
-            .with_api_base(format!("{}/v1", server.url()))
-            .with_retry_base_delay(Duration::ZERO);
+            .with_api_base(format!("{}/v1", server.url()));
         let mut stream = client
             .stream_plan("hi".to_owned(), "system".to_owned())
             .await
@@ -1692,9 +1552,7 @@ mod tests {
             .create_async()
             .await;
         let client = OpenAIClient::new("key", "local-model")
-            .with_api_base(format!("{}/v1", server.url()))
-            .with_retry_base_delay(Duration::ZERO)
-            .with_max_attempts(1);
+            .with_api_base(format!("{}/v1", server.url()));
         let outcome = client
             .stream_plan("hi".to_owned(), "system".to_owned())
             .await;
