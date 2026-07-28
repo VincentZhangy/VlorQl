@@ -89,11 +89,13 @@ impl<'a> QueryBuilder<'a> {
         }
     }
 
-    fn resolve_alias<'b>(&self, qualifier: &'b str) -> Cow<'b, str> {
+    fn resolve_alias<'b>(&self, qualifier: &'b str, max_depth: Option<usize>) -> Cow<'b, str> {
         self.alias_stack
             .iter()
             .rev()
-            .find_map(|map| map.get(qualifier))
+            .enumerate()
+            .take_while(|(i, _)| max_depth.map_or(true, |d| *i < d))
+            .find_map(|(_, map)| map.get(qualifier))
             .map(|s| Cow::Owned(s.clone()))
             .unwrap_or(Cow::Borrowed(qualifier))
     }
@@ -131,7 +133,8 @@ impl<'a> QueryBuilder<'a> {
                 Ok(())
             }
             Expression::ColumnRef { table, column } => {
-                buf.push_str(&self.render_qualified_identifier(table.as_deref(), column)?);
+                let max_depth = if self.in_cte { None } else { Some(1) };
+                buf.push_str(&self.render_qualified_identifier(table.as_deref(), column, max_depth)?);
                 Ok(())
             }
             Expression::FunctionCall {
@@ -502,7 +505,8 @@ impl<'a> QueryBuilder<'a> {
             match projection {
                 Projection::Star { table: None } => sql.push('*'),
                 Projection::Star { table: Some(table) } => {
-                    let resolved = self.resolve_alias(table);
+                    let max_depth = if self.in_cte { None } else { Some(1) };
+                    let resolved = self.resolve_alias(table, max_depth);
                     write!(sql, "{}.*", self.quote_identifier(&resolved)?)
                         .map_err(formatting_error)?;
                 }
@@ -511,7 +515,8 @@ impl<'a> QueryBuilder<'a> {
                     column,
                     alias,
                 } => {
-                    sql.push_str(&self.render_qualified_identifier(table.as_deref(), column)?);
+                    let max_depth = if self.in_cte { None } else { Some(1) };
+                    sql.push_str(&self.render_qualified_identifier(table.as_deref(), column, max_depth)?);
                     if let Some(alias) = alias {
                         write!(sql, " AS {}", self.quote_identifier(alias)?)
                             .map_err(formatting_error)?;
@@ -660,11 +665,12 @@ impl<'a> QueryBuilder<'a> {
         &self,
         qualifier: Option<&str>,
         identifier: &str,
+        max_depth: Option<usize>,
     ) -> Result<String, VlorQLError> {
         let identifier = self.quote_identifier(identifier)?;
         match qualifier {
             Some(qualifier) => {
-                let resolved = self.resolve_alias(qualifier);
+                let resolved = self.resolve_alias(qualifier, max_depth);
                 Ok(format!(
                     "{}.{}",
                     self.quote_identifier(&resolved)?,

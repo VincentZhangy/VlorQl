@@ -71,4 +71,5 @@ pub mod normalize;
 pub mod optimize;
 pub mod pipeline;
 pub mod recover;
+pub mod schema_check;
 pub mod validate;

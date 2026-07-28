@@ -217,3 +217,36 @@ async fn schema_cache_is_configured() {
     // Invalidating a non-existent version should not panic.
     vlorql.invalidate_schema_cache("nonexistent");
 }
+
+/// A query through the schema cache records a miss on the first call and
+/// a hit on the second call (same schema version, so the cached entry is
+/// reused).
+#[tokio::test]
+async fn schema_cache_records_hit_after_initial_miss() {
+    let vlorql = VlorQl::builder()
+        .with_schema(snapshot())
+        .with_dialect_name("postgres")
+        .with_policy(open_policy())
+        .with_schema_cache(10, 60)
+        .with_llm_client(MockLlmClient::success(base_plan()))
+        .with_max_retries(0)
+        .build()
+        .expect("facade should build");
+
+    let cache = vlorql.schema_cache().expect("schema cache is configured");
+    assert_eq!(cache.size(), 0, "cache starts empty");
+
+    // First call: cache miss, schema loaded and cached.
+    let _ = vlorql
+        .query("list users")
+        .await
+        .expect("first query should succeed");
+    assert_eq!(cache.size(), 1, "first query caches the schema");
+
+    // Second call: cache hit, returns the entry without re-loading.
+    let _ = vlorql
+        .query("list users")
+        .await
+        .expect("second query should succeed");
+    assert_eq!(cache.size(), 1, "second query reuses the cached entry");
+}

@@ -41,7 +41,7 @@ use crate::retry::{
     validation_errors_to_error,
 };
 
-pub use vlorql_core::cache::{CompileCache, PromptCache, SchemaCache};
+pub use vlorql_core::cache::{CompileCache, PromptCache, SchemaCache, SchemaCacheKey};
 pub use vlorql_core::compile::{
     CompiledQuery, DialectConfig, DialectRegistry, Parameter, RewriteEngine, RewriteRule,
 };
@@ -220,9 +220,13 @@ impl VlorQl {
                 )
             })?;
 
+            // Resolve the schema (may consult the schema cache).
+            let schema = self.resolve_schema().await;
+            let schema_version = schema.metadata.version.clone().unwrap_or_default();
+
             // Build the system prompt, optionally using the prompt cache.
             let prompt_builder = PromptBuilder::new(
-                Arc::clone(&self.schema),
+                Arc::clone(&schema),
                 self.dialect.clone(),
                 self.policy.clone(),
             );
@@ -240,7 +244,7 @@ impl VlorQl {
                 format!("{}:{}", client.config().provider, client.config().model);
             let cache_key = LlmCacheKey {
                 normalized_question: question.to_lowercase(),
-                schema_version: self.schema.metadata.version.clone().unwrap_or_default(),
+                schema_version,
                 model_fingerprint,
             };
             let cached_plan: Option<Arc<QueryPlan>> =
@@ -290,7 +294,7 @@ impl VlorQl {
                         Err(e) => return Err(e),
                     }
                 };
-                match self.build_pipeline().validate_repairing(&plan) {
+                match self.build_pipeline(&schema).validate_repairing(&plan) {
                     Ok(validated_plan) => {
                         // Optimize when an optimizer is configured, then compile.
                         let plan_for_compile = match &self.optimizer {
@@ -298,9 +302,9 @@ impl VlorQl {
                                 match optimizer.optimize_async(validated_plan.as_plan()).await {
                                     Ok(optimized) => {
                                         // Re-validate policy on the optimized plan.
-                                        let pipeline = self.build_pipeline();
+                                        let pipeline = self.build_pipeline(&schema);
                                         if let Err(stage_errors) =
-                                            pipeline.policy().validate(&optimized, &self.schema)
+                                            pipeline.policy().validate(&optimized, &schema)
                                         {
                                             return Err(validation_errors_to_error(
                                                 ValidationErrors(stage_errors),
@@ -475,7 +479,7 @@ impl VlorQl {
     pub fn validate_only(&self, plan: &QueryPlan) -> Result<ValidatedPlan, ValidationErrors> {
         let span = tracing::debug_span!("vlorql.validate", plan_has_cte = plan.ctes.is_some());
         let _enter = span.enter();
-        self.build_pipeline().validate(plan)
+        self.build_pipeline(&self.schema).validate(plan)
     }
 
     /// Validates a plan and, when an optimizer is configured, applies
@@ -498,7 +502,7 @@ impl VlorQl {
         &self,
         plan: &QueryPlan,
     ) -> Result<OptimizedPlan, ValidationErrors> {
-        self.build_pipeline_with_optimizer()
+        self.build_pipeline_with_optimizer(&self.schema)
             .validate_and_optimize(plan)
             .await
     }
@@ -583,18 +587,18 @@ impl VlorQl {
     }
 
     /// Builds a [`ValidationPipeline`] without the optimizer.
-    fn build_pipeline(&self) -> ValidationPipeline {
+    fn build_pipeline(&self, schema: &ArcSchemaSnapshot) -> ValidationPipeline {
         ValidationPipeline::new(
-            Arc::clone(&self.schema),
+            Arc::clone(schema),
             self.dialect.clone(),
             PolicyEngine::new(self.policy.clone()),
         )
     }
 
     /// Builds a [`ValidationPipeline`] with the optional optimizer attached.
-    fn build_pipeline_with_optimizer(&self) -> ValidationPipeline {
+    fn build_pipeline_with_optimizer(&self, schema: &ArcSchemaSnapshot) -> ValidationPipeline {
         let mut pipeline = ValidationPipeline::new(
-            Arc::clone(&self.schema),
+            Arc::clone(schema),
             self.dialect.clone(),
             PolicyEngine::new(self.policy.clone()),
         );
@@ -602,6 +606,23 @@ impl VlorQl {
             pipeline = pipeline.with_optimizer(optimizer.clone());
         }
         pipeline
+    }
+
+    /// Resolves the schema, optionally through the schema cache.
+    async fn resolve_schema(&self) -> ArcSchemaSnapshot {
+        match &self.schema_cache {
+            Some(cache) => {
+                let version = self.schema.metadata.version.clone().unwrap_or_default();
+                let key = SchemaCacheKey {
+                    version,
+                    source: "build".to_owned(),
+                };
+                cache
+                    .get_or_insert_with(key, || async { Arc::clone(&self.schema) })
+                    .await
+            }
+            None => Arc::clone(&self.schema),
+        }
     }
 }
 

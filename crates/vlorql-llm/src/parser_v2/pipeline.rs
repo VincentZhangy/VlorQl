@@ -12,6 +12,7 @@ use crate::parser_v2::normalize::pipeline as normalize_pipeline;
 use crate::parser_v2::optimize::optimize as optimize_plan;
 use crate::parser_v2::recover::bracket::repair_truncated_json;
 use crate::parser_v2::recover::extract_json_content;
+use crate::parser_v2::schema_check;
 use crate::parser_v2::validate::validator;
 use vlorql_core::schema::QueryPlan;
 
@@ -78,6 +79,14 @@ pub fn parse_query_plan(raw: &str, model_name: Option<&str>) -> Result<QueryPlan
         serde_json::from_str(&json_str).map_err(|e| ParseError::InvalidJson(e.to_string()))?;
     let _ = normalize_pipeline::normalize_for_model(&mut value, model_name);
 
+    // Stage 2b: Schema validation
+    let schema_errors = schema_check::validate_against_schema(&value);
+    if let Err(ref errors) = schema_errors {
+        for err in errors {
+            tracing::debug!("Schema validation: {err}");
+        }
+    }
+
     // Stage 3: Build — canonical JSON → QueryPlan AST.
     let mut plan =
         query_builder::build_plan(&value).map_err(|e| ParseError::BuildError(e.to_string()))?;
@@ -109,6 +118,15 @@ pub fn parse_query_plan_lenient(
     let mut value: serde_json::Value =
         serde_json::from_str(&json_str).map_err(|e| ParseError::InvalidJson(e.to_string()))?;
     let _ = normalize_pipeline::normalize_for_model(&mut value, model_name);
+
+    // Stage 2b: Schema validation
+    let schema_errors = schema_check::validate_against_schema(&value);
+    if let Err(ref errors) = schema_errors {
+        for err in errors {
+            tracing::debug!("Schema validation: {err}");
+        }
+    }
+
     let mut plan =
         query_builder::build_plan(&value).map_err(|e| ParseError::BuildError(e.to_string()))?;
     let _ = fixer::fix_plan(&mut plan);
@@ -135,6 +153,15 @@ pub fn parse_query_plan_debug(
     let mut value: serde_json::Value =
         serde_json::from_str(&json_str).map_err(|e| ParseError::InvalidJson(e.to_string()))?;
     let _ = normalize_pipeline::normalize_for_model(&mut value, model_name);
+
+    // Stage 2b: Schema validation
+    let schema_errors = schema_check::validate_against_schema(&value);
+    if let Err(ref errors) = schema_errors {
+        for err in errors {
+            tracing::debug!("Schema validation: {err}");
+        }
+    }
+
     let canonical = value.clone();
     let mut plan =
         query_builder::build_plan(&value).map_err(|e| ParseError::BuildError(e.to_string()))?;
