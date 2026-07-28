@@ -293,27 +293,55 @@ fn unwrap_array_field(obj: &mut serde_json::Map<String, Value>, field: &str) -> 
 ///
 /// The LLM sometimes outputs `"op":[{"type":"function_call","name":"between",...},...]`
 /// instead of `"op":"gt"`. Try to extract a string operator from the array.
+/// For `"between"`, converts the entire predicate to `Between` format
+/// (`type: "between"`, expr, low, high) since `"between"` is not a valid
+/// comparison operator.
 #[must_use]
 fn unwrap_operator_field(obj: &mut serde_json::Map<String, Value>) -> bool {
     let arr = match obj.get("op").and_then(|v| v.as_array()) {
         Some(a) if !a.is_empty() => a.clone(),
         _ => return false,
     };
-    // Try first element as a string
-    if let Some(s) = arr[0].as_str() {
-        obj.insert("op".to_owned(), Value::String(s.to_owned()));
-        return true;
+    // Extract operator name: try string first, then object with "name" field
+    let op_name = arr[0].as_str().or_else(|| {
+        arr[0].as_object()
+            .and_then(|o| o.get("name").and_then(|v| v.as_str()))
+    });
+
+    match op_name {
+        Some("between" | "not_between") => {
+            // Convert comparison to Between predicate
+            let expr = obj.get("left").cloned()
+                .or_else(|| obj.get("expr").cloned())
+                .unwrap_or(Value::Null);
+            // Try to extract low/high from function_call args
+            let (low, high) = arr[0].as_object()
+                .and_then(|o| o.get("args"))
+                .and_then(|a| a.as_array())
+                .map(|a| {
+                    let low = a.first().cloned().unwrap_or(Value::Null);
+                    let high = a.get(1).cloned().unwrap_or(Value::Null);
+                    (low, high)
+                })
+                .unwrap_or((Value::Null, Value::Null));
+
+            obj.clear();
+            obj.insert("type".to_owned(), Value::String("between".to_owned()));
+            obj.insert("expr".to_owned(), expr);
+            obj.insert("low".to_owned(), low);
+            obj.insert("high".to_owned(), high);
+            true
+        }
+        Some(name) => {
+            obj.insert("op".to_owned(), Value::String(name.to_owned()));
+            true
+        }
+        None => {
+            // Fallback: use "eq" as safe default
+            obj.insert("op".to_owned(), Value::String("eq".to_owned()));
+            true
+        }
     }
-    // Try first element as an object with a "name" field (e.g. function_call)
-    if let Some(obj_val) = arr[0].as_object()
-        && let Some(name) = obj_val.get("name").and_then(|v| v.as_str())
-    {
-        obj.insert("op".to_owned(), Value::String(name.to_owned()));
-        return true;
-    }
-    // Fallback: use "eq" as safe default
-    obj.insert("op".to_owned(), Value::String("eq".to_owned()));
-    true
 }
 
 /// Inject missing `right` field on comparison predicates.
