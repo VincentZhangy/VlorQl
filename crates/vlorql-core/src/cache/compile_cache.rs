@@ -8,10 +8,13 @@
 
 use crate::cache::CompileCacheKey;
 use crate::compile::CompiledQuery;
+use crate::errors::{ConfigErrorKind, VlorQLError};
 use crate::schema::DialectProfile;
 use crate::validate::ValidatedPlan;
 use moka::future::Cache as MokaCache;
+use serde_json::json;
 use std::collections::HashMap;
+use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -163,6 +166,93 @@ impl CompileCache {
     #[must_use]
     pub fn max_size(&self) -> u64 {
         self.max_size
+    }
+
+    /// Creates a new compile cache with a persistence path.
+    ///
+    /// The cache will be backed by the file at `path` — call
+    /// [`persist`](Self::persist) to save entries to disk.
+    #[must_use]
+    pub fn with_persistence(max_size: u64, ttl_seconds: u64, path: PathBuf) -> Self {
+        let mut cache = Self::new(max_size, ttl_seconds);
+        cache.persist_path = Some(path);
+        cache
+    }
+
+    /// Persists the current cache entries to disk via bincode serialization.
+    ///
+    /// Writes atomically by writing to a `.tmp` sibling file then renaming.
+    /// Returns `Ok(())` when no `persist_path` is set (silent no-op).
+    pub async fn persist(&self) -> Result<(), VlorQLError> {
+        let Some(ref path) = self.persist_path else {
+            return Ok(());
+        };
+        let entries = self.entries.lock().unwrap();
+        let bytes = bincode::serialize(&*entries).map_err(|e| {
+            VlorQLError::config(
+                ConfigErrorKind::ConfigFileError {
+                    path: path.to_string_lossy().to_string(),
+                    reason: e.to_string(),
+                },
+                json!({"operation": "serialize"}),
+            )
+        })?;
+        // Atomic write: write to temp file then rename
+        let tmp = path.with_extension("tmp");
+        tokio::fs::write(&tmp, &bytes).await.map_err(|e| {
+            VlorQLError::config(
+                ConfigErrorKind::ConfigFileError {
+                    path: tmp.to_string_lossy().to_string(),
+                    reason: e.to_string(),
+                },
+                json!({"operation": "write_tmp"}),
+            )
+        })?;
+        tokio::fs::rename(&tmp, path).await.map_err(|e| {
+            VlorQLError::config(
+                ConfigErrorKind::ConfigFileError {
+                    path: path.to_string_lossy().to_string(),
+                    reason: e.to_string(),
+                },
+                json!({"operation": "rename"}),
+            )
+        })?;
+        Ok(())
+    }
+
+    /// Loads a compile cache from a bincode file on disk.
+    ///
+    /// If the file does not exist or is corrupt, returns an empty cache
+    /// (warns on corruption). The cache's `persist_path` is set to `path`
+    /// so future [`persist`](Self::persist) calls write to the same file.
+    #[must_use]
+    pub async fn load(path: &Path, max_size: u64, ttl_seconds: u64) -> Self {
+        let mut cache = Self::new(max_size, ttl_seconds);
+        cache.persist_path = Some(path.to_path_buf());
+        let bytes = match tokio::fs::read(path).await {
+            Ok(b) => b,
+            Err(_) => return cache,
+        };
+        let entries: HashMap<CompileCacheKey, CompiledQuery> = match bincode::deserialize(&bytes) {
+            Ok(e) => e,
+            Err(_) => {
+                tracing::warn!(target: "vlorql::cache", "corrupt compile cache file, starting fresh");
+                return cache;
+            }
+        };
+        for (key, query) in &entries {
+            cache.inner.insert(key.clone(), Arc::new(query.clone())).await;
+            cache.entries.lock().unwrap().insert(key.clone(), query.clone());
+        }
+        cache
+    }
+
+    /// Sets the persistence path for the cache.
+    ///
+    /// After calling this, [`persist`](Self::persist) will write entries
+    /// to `path` and [`load`](Self::load) will read from it.
+    pub fn set_persist_path(&mut self, path: PathBuf) {
+        self.persist_path = Some(path);
     }
 }
 
