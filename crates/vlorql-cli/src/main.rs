@@ -15,13 +15,14 @@ use vlorql_llm::{LlmConfig, LlmProvider, create_llm_client};
 
 const DEFAULT_CONFIG_PATH: &str = "vlorql.toml";
 
-type LlmOverrides = (
-    LlmProvider,
-    Option<String>,
-    Option<String>,
-    Option<String>,
-    usize,
-);
+/// CLI overrides for LLM configuration.
+struct LlmOverrides {
+    provider: LlmProvider,
+    api_key: Option<String>,
+    model: Option<String>,
+    api_base: Option<String>,
+    max_retries: usize,
+}
 
 #[derive(Debug, Parser)]
 #[command(
@@ -114,7 +115,7 @@ async fn main() -> Result<()> {
             let facade = build_facade(
                 file_config,
                 dialect.as_deref(),
-                Some((provider, api_key, model, api_base, max_retries)),
+                Some(LlmOverrides { provider, api_key, model, api_base, max_retries }),
             )?;
             let compiled = facade
                 .query(&question)
@@ -192,14 +193,14 @@ fn build_facade(
         builder = builder.with_dialect_name(dialect_name);
     }
 
-    if let Some((provider, cli_api_key, cli_model, cli_api_base, max_retries)) = llm_overrides {
+    if let Some(overrides) = llm_overrides {
         let api_key_env = llm.api_key_env.as_deref().unwrap_or("LLM_API_KEY");
-        let api_key = cli_api_key
+        let api_key = overrides.api_key
             .or_else(|| env::var(api_key_env).ok())
             .filter(|key| !key.trim().is_empty());
-        let model = cli_model.or(llm.model);
-        let api_base = cli_api_base.or(llm.api_base);
-        let llm_provider = llm.provider.unwrap_or(provider);
+        let model = overrides.model.or(llm.model);
+        let api_base = overrides.api_base.or(llm.api_base);
+        let llm_provider = llm.provider.unwrap_or(overrides.provider);
 
         let api_key = api_key.or_else(|| {
             let default_env = "LLM_API_KEY";
@@ -215,7 +216,7 @@ fn build_facade(
         let client = create_llm_client(llm_config).map_err(|e| anyhow!(e))?;
         builder = builder
             .with_llm_client(client)
-            .with_max_retries(max_retries);
+            .with_max_retries(overrides.max_retries);
     }
 
     builder.build().map_err(Into::into)
