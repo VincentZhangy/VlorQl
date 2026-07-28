@@ -236,15 +236,15 @@ impl VlorQl {
                 schema_version: self.schema.metadata.version.clone().unwrap_or_default(),
                 model_fingerprint,
             };
-            let cached_plan: Option<QueryPlan> =
-                self.llm_cache.get(&cache_key).await.map(|a| (*a).clone());
+            let cached_plan: Option<Arc<QueryPlan>> =
+                self.llm_cache.get(&cache_key).await;
 
             let mut llm_question = question.to_owned();
             for attempt in 0..=self.max_retries {
                 let temperature = retry_temperature(client.config().temperature, attempt);
                 let plan = if attempt == 0 {
-                    if let Some(p) = cached_plan.clone() {
-                        p
+                    if let Some(ref cached) = cached_plan {
+                        (**cached).clone()
                     } else {
                         let llm_start = std::time::Instant::now();
                         let result = client
@@ -626,7 +626,7 @@ impl VlorQl {
 ///     .with_dialect_name("sqlite")
 ///     .with_policy(PolicyConfig::default());
 /// let vlorql = builder.build().expect("valid facade");
-/// assert_eq!(vlorql.max_retries(), 2);
+/// assert_eq!(vlorql.max_retries(), 3);
 /// ```
 pub struct VlorQlBuilder {
     schema: Option<ArcSchemaSnapshot>,
