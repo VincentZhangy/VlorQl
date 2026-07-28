@@ -161,6 +161,10 @@ fn lift_nested_plan_fields(val: &mut serde_json::Value) -> bool {
 /// Weak LLMs sometimes emit `"order_by": [null]` or `"group_by": [null]`
 /// which the builder rejects because it expects objects.
 ///
+/// Also strips invalid predicates from `having`: entries whose `type`
+/// is not a valid Predicate variant (e.g. `"order"`, `"count"`, `"sum"`,
+/// `"avg"`, `"min"`, `"max"`, `"string_agg"`, `"array_agg"`).
+///
 /// Returns `true` if any null entries were removed.
 #[must_use]
 fn sanitize_null_array_entries(val: &mut serde_json::Value) -> bool {
@@ -168,12 +172,69 @@ fn sanitize_null_array_entries(val: &mut serde_json::Value) -> bool {
         return false;
     };
     let mut changed = false;
+    // Aggregate function names that are NOT valid Predicate variants.
+    const AGG_NAMES: &[&str] = &[
+        "count", "sum", "avg", "min", "max",
+        "string_agg", "array_agg", "jsonb_agg", "json_agg",
+    ];
+    // Expression types that are NOT valid Predicate variants.
+    const EXPR_TYPES: &[&str] = &[
+        "string", "integer", "number", "float", "boolean", "null",
+        "literal", "column_ref", "function_call", "binary_op",
+        "star", "subquery", "case", "window_function", "expr",
+    ];
     for field in &["order_by", "group_by", "having"] {
         if let Some(arr) = obj.get_mut(*field).and_then(|v| v.as_array_mut()) {
             let before = arr.len();
             arr.retain(|v| !v.is_null());
             if arr.len() != before {
                 changed = true;
+            }
+            // Also strip invalid predicate types from having.
+            if *field == "having" {
+                let before = arr.len();
+                arr.retain(|v| {
+                    v.as_object()
+                        .and_then(|o| o.get("type").and_then(|t| t.as_str()))
+                        .map_or(true, |t| t != "order" && !AGG_NAMES.contains(&t) && !EXPR_TYPES.contains(&t))
+                });
+                if arr.len() != before {
+                    changed = true;
+                }
+            }
+            // Strip aggregate function calls from group_by — they are not
+            // valid GROUP BY expressions.
+            if *field == "group_by" {
+                let before = arr.len();
+                arr.retain(|v| {
+                    v.as_object()
+                        .and_then(|o| o.get("name").and_then(|n| n.as_str()))
+                        .map_or(true, |name| !AGG_NAMES.contains(&name))
+                });
+                if arr.len() != before {
+                    changed = true;
+                }
+            }
+        }
+        // Handle the case where `having`/`where` is a direct object with an
+        // invalid predicate type (not inside an array).
+        // Uses a whitelist of valid Predicate variants — anything else is
+        // an LLM hallucination and should be stripped.
+        const VALID_PRED_TYPES: &[&str] = &[
+            "comparison", "and", "or", "not", "between",
+            "in", "like", "is_null", "exists", "true", "false",
+        ];
+        if *field == "having" || *field == "where" {
+            let field_key = *field;
+            if let Some(val) = obj.get_mut(field_key) {
+                if let Some(o) = val.as_object() {
+                    if let Some(type_str) = o.get("type").and_then(|t| t.as_str()) {
+                        if !VALID_PRED_TYPES.contains(&type_str) {
+                            obj.remove(field_key);
+                            changed = true;
+                        }
+                    }
+                }
             }
         }
     }
@@ -196,10 +257,28 @@ pub fn sanitize_strings(val: &mut serde_json::Value) -> bool {
 fn sanitize_strings_impl(val: &mut serde_json::Value, changed: &mut bool) {
     match val {
         serde_json::Value::String(s) => {
+            // 1. Strip single quotes and backticks (JSON syntax residuals).
             let cleaned: String = s.chars().filter(|&c| c != '\'' && c != '`').collect();
             if cleaned.len() != s.len() {
                 *s = cleaned;
                 *changed = true;
+            }
+            // 2. Try to parse strings that look like inline JSON objects
+            //    (e.g. `{table:orders,column:user_id}` or `{'table':'orders'}`)
+            //    and convert them to proper JSON Values.
+            if s.starts_with('{') && s.contains(':') {
+                // Replace single quotes with double quotes for valid JSON.
+                let fixed: String = s
+                    .replace('\'', "\"")
+                    .replace("None", "null")
+                    .replace("True", "true")
+                    .replace("False", "false");
+                if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&fixed) {
+                    if parsed.is_object() || parsed.is_array() {
+                        *val = parsed;
+                        *changed = true;
+                    }
+                }
             }
         }
         serde_json::Value::Object(map) => {

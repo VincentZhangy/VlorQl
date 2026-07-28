@@ -566,11 +566,18 @@ impl PromptBuilder {
              2. NEVER use `SUM` on a plain column like `orders.total` that already contains the value — use the column directly.\n\
              3. NEVER put `GROUP BY literal null` — it is invalid. GROUP BY must list actual column references.\n\
              4. NEVER embed a SQL function in a column name string. `EXTRACT(MONTH FROM created_at)` is not a column — use `function_call` with `\"name\":\"extract\"` and proper `args`.\n\
+             5. NEVER invent column names. Only use column names that EXACTLY match the Schema section above. If the schema shows `orders.total`, write `{\"type\":\"column_ref\",\"table\":\"orders\",\"column\":\"total\"}` — NOT `total_amount`, NOT `SUM(total)`, NOT `extract(...)`.\n\
+             \n\
+             ### EXTRACT function format\n\
+             - `extract` is a function_call, NOT a column name.\n\
+             - Correct: `{\"type\":\"function_call\",\"name\":\"extract\",\"args\":[{\"type\":\"literal\",\"value\":\"month\",\"data_type\":\"string\"},{\"type\":\"column_ref\",\"table\":\"orders\",\"column\":\"created_at\"}]}`\n\
+             - Wrong: `{\"column\":\"EXTRACT(MONTH FROM created_at)\"}` — NEVER write this.\n\
              \n\
              ### Quick Reference\n\
              - `\"type\":\"expr\"` wraps computed expressions inside `select` only. In `where`/`having`/`order_by`/`group_by`, use the inner expression type directly.\n\
              - Aggregates like `sum`/`count` go in HAVING, not WHERE.\n\
              - `data_type` only belongs inside `literal` objects.\n\
+             - `string_agg(expr, delimiter)` requires **2 arguments**: the value and a delimiter string (e.g. `','`).\n\
              - Output ONLY valid JSON — no markdown fences.\n\
              \n",
         );

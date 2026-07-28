@@ -84,6 +84,24 @@ pub fn repair_expression_value(val: &mut Value) -> bool {
         None => return false,
     };
 
+    // Fix: `{"type":"column_ref",...,"expr":{...}}` — LLM sometimes sets
+    // type=column_ref but includes an expr field (e.g. a function_call).
+    // The expr field conflicts with column_ref; fix by changing to expr type.
+    if obj.get("type").and_then(|t| t.as_str()) == Some("column_ref")
+        && obj.contains_key("expr")
+        && let Some(expr_val) = obj.get("expr")
+        && expr_val.is_object()
+    {
+        let mut new_obj = serde_json::Map::new();
+        new_obj.insert("type".to_owned(), Value::String("expr".to_owned()));
+        new_obj.insert("expression".to_owned(), expr_val.clone());
+        if let Some(alias) = obj.get("alias").cloned() {
+            new_obj.insert("alias".to_owned(), alias);
+        }
+        *val = Value::Object(new_obj);
+        return true;
+    }
+
     // Fix: LLM sometimes uses {"type": "string", "value": "..."} or {"type": "integer", "value": N}
     // instead of the canonical {"type": "literal", "value": "...", "data_type": "string"}.
     if let Some(type_val) = obj
@@ -179,6 +197,36 @@ pub fn repair_predicate_type(val: &mut Value) -> bool {
         None => return false,
     };
 
+    // Even if `type` exists, check for key-as-type conflicts:
+    // LLM sometimes sets `"type": "not"` on object that also has key `"exists"`.
+    for &key in PRED_KEYS {
+        if obj.contains_key(key) {
+            if let Some(v) = obj.remove(key) {
+                obj.insert("type".to_owned(), Value::String(key.to_owned()));
+                if key == "not" || key == "exists" {
+                    obj.insert("child".to_owned(), v);
+                } else {
+                    obj.insert("left".to_owned(), v);
+                    if !obj.contains_key("right") {
+                        obj.insert("right".to_owned(), Value::Null);
+                    }
+                }
+                return true;
+            }
+        }
+    }
+
+    // Fix: LLM sets `"type": "and"`/`"or"` on comparison predicates
+    // (e.g. `{"type":"and","left":Expression,"op":"eq","right":Expression}`).
+    // `and`/`or` never have `op` — detect this and correct to `comparison`.
+    if let Some(type_str) = obj.get("type").and_then(|t| t.as_str())
+        && (type_str == "and" || type_str == "or")
+        && obj.contains_key("op")
+    {
+        obj.insert("type".to_owned(), Value::String("comparison".to_owned()));
+        return true;
+    }
+
     if obj.contains_key("type") {
         return false;
     }
@@ -186,6 +234,37 @@ pub fn repair_predicate_type(val: &mut Value) -> bool {
     if obj.contains_key("left") && obj.contains_key("op") {
         obj.insert("type".to_owned(), Value::String("comparison".to_owned()));
         return true;
+    }
+
+    // Fix: LLM sometimes uses predicate type names as keys instead of
+    // the `type` field value, e.g. `{"not": {"exists": {...}}}` instead
+    // of `{"type": "not", "child": {"type": "exists", ...}}`.
+    // Detect known predicate key names and convert.
+    const PRED_KEYS: &[&str] = &["not", "exists", "and", "or"];
+    for &key in PRED_KEYS {
+        if let Some(v) = obj.remove(key) {
+            obj.insert("type".to_owned(), Value::String(key.to_owned()));
+            if key == "not" || key == "exists" {
+                // If the value already contains `child`, prefer embedding
+                // the extracted key into that child rather than overwriting.
+                if key == "not" && let Some(child_obj) = v.as_object()
+                    && child_obj.contains_key("child")
+                {
+                    if let Some(child_val) = child_obj.get("child").cloned() {
+                        obj.insert("child".to_owned(), child_val);
+                    }
+                } else {
+                    obj.insert("child".to_owned(), v);
+                }
+            } else {
+                // and/or — wrap value in `left`, create empty `right`
+                obj.insert("left".to_owned(), v);
+                if !obj.contains_key("right") {
+                    obj.insert("right".to_owned(), Value::Null);
+                }
+            }
+            return true;
+        }
     }
 
     false
@@ -460,6 +539,23 @@ pub fn normalize_predicate(val: &mut Value) -> bool {
         return changed;
     }
 
+    // Fix: `{"type":"none"}` in predicate positions — not a valid predicate.
+    // Convert to a boolean comparison that resolves to false so the plan
+    // remains valid (null predicate would be stripped later).
+    if let Some(obj) = val.as_object()
+        && obj.get("type").and_then(|t| t.as_str()) == Some("none")
+        && obj.len() == 1
+    {
+        *val = serde_json::json!({
+            "type": "comparison",
+            "left": {"type": "literal", "value": 1, "data_type": "int"},
+            "op": "eq",
+            "right": {"type": "literal", "value": 0, "data_type": "int"}
+        });
+        changed = true;
+        return changed;
+    }
+
     // Inject missing type tag.
     changed |= repair_predicate_type(val);
 
@@ -585,6 +681,14 @@ pub fn normalize_predicate(val: &mut Value) -> bool {
                     obj.insert("right".to_owned(), right_val);
                     changed = true;
                 }
+            }
+
+            // Fix empty `op` — LLM sometimes outputs `"op":""` or `"op":null`.
+            if matches!(obj.get("op"), Some(Value::String(s)) if s.is_empty() || s == "unknown")
+                || obj.get("op").map_or(false, |v| v.is_null())
+            {
+                obj.insert("op".to_owned(), Value::String("eq".to_owned()));
+                changed = true;
             }
 
             if let Some(op_val) = obj.get("op").and_then(|v| v.as_str()) {
@@ -764,7 +868,16 @@ fn normalize_impl(val: &mut Value) -> bool {
             ];
             let pred_type = map.get("type").and_then(|t| t.as_str()).unwrap_or("");
             let is_predicate_like = (!pred_type.is_empty() && !EXPR_TYPES.contains(&pred_type))
-                || (map.contains_key("left") && map.contains_key("op"));
+                || (map.contains_key("left") && map.contains_key("op"))
+                // Also detect key-as-type pattern: object has known predicate
+                // type names ("not", "exists", "and", "or") as direct keys
+                // instead of a `type` field.
+                || (pred_type.is_empty() && (
+                    map.contains_key("not")
+                    || map.contains_key("exists")
+                    || map.contains_key("and")
+                    || map.contains_key("or")
+                ));
 
             if is_predicate_like {
                 // Preserve non-predicate fields that may be dropped by
@@ -835,6 +948,26 @@ fn normalize_impl(val: &mut Value) -> bool {
                 map.insert("type".to_owned(), Value::String("function_call".to_owned()));
                 map.insert("name".to_owned(), Value::String(type_str));
                 map.insert("args".to_owned(), args);
+                changed = true;
+            }
+
+            // Fix: `string_agg` with only 1 arg — many models forget the
+            // delimiter argument. Inject a default `','` delimiter.
+            if map.get("name").and_then(|n| n.as_str()) == Some("string_agg")
+                && map.get("type").and_then(|t| t.as_str()) == Some("function_call")
+                && let Some(args) = map.get_mut("args").and_then(|a| a.as_array_mut())
+                && args.len() == 1
+            {
+                args.push(serde_json::json!({"type": "literal", "value": ",", "data_type": "string"}));
+                changed = true;
+            }
+
+            // Fix: `row_number()` with args — the function takes zero arguments.
+            if map.get("name").and_then(|n| n.as_str()) == Some("row_number")
+                && map.get("type").and_then(|t| t.as_str()) == Some("function_call")
+                && map.contains_key("args")
+            {
+                map.remove("args");
                 changed = true;
             }
 

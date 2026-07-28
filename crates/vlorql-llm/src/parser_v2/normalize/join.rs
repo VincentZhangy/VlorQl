@@ -373,7 +373,11 @@ fn fix_empty_join_on(val: &mut serde_json::Value) -> bool {
         let Some(on_val) = join_obj.get("on") else {
             continue;
         };
-        if on_val.as_object().is_some_and(|o| o.is_empty()) {
+        if on_val.as_object().is_some_and(|o| o.is_empty())
+            || on_val.as_array().is_some_and(|a| a.is_empty())
+            || on_val.as_str().is_some_and(|s| s.is_empty())
+            || on_val.is_null()
+        {
             join_obj.insert(
                 "on".to_owned(),
                 serde_json::json!({

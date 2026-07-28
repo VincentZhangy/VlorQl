@@ -43,6 +43,8 @@ const DATA_TYPE_ALIASES: &[(&str, &str)] = &[
     ("Null", "null"),
     // JSON types
     ("jsonb", "json"),
+    // Asterisk (used by COUNT(*) — not a real data type)
+    ("*", "null"),
 ];
 
 /// Maps a raw type tag plus its JSON value to the canonical

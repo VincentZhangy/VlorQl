@@ -215,12 +215,43 @@ pub fn normalize_flat_condition(val: &mut serde_json::Value) -> bool {
     false
 }
 
+/// Wrap bare `function_call` objects in `having`/`where` into a comparison
+/// predicate (`{"type":"comparison","left":...,"op":"gt","right":{"type":"literal","value":0}}`).
+///
+/// The LLM sometimes places a bare function_call directly in a predicate
+/// position, which the builder rejects as "unknown Predicate variant".
+#[must_use]
+fn wrap_bare_function_call(val: &mut serde_json::Value) -> bool {
+    let Some(obj) = val.as_object_mut() else {
+        return false;
+    };
+    for field in ["having", "where"] {
+        if let Some(target) = obj.get_mut(field) {
+            if target.as_object()
+                .and_then(|o| o.get("type").and_then(|t| t.as_str()))
+                == Some("function_call")
+            {
+                let inner = std::mem::take(target);
+                *target = serde_json::json!({
+                    "type": "comparison",
+                    "left": inner,
+                    "op": "gt",
+                    "right": {"type": "literal", "value": 0, "data_type": "int"}
+                });
+                return true;
+            }
+        }
+    }
+    false
+}
+
 /// Full WHERE structure normalization.
 ///
 /// 1. Collapse array `where` → single predicate object
 /// 2. Extract misplaced top-level fields from `where`
 /// 3. Normalize flat condition to proper comparison
 /// 4. Collapse array `having` → single predicate object
+/// 5. Wrap bare function_call in having/where → comparison
 #[must_use]
 pub fn normalize(val: &mut serde_json::Value) -> bool {
     let mut changed = false;
@@ -228,6 +259,7 @@ pub fn normalize(val: &mut serde_json::Value) -> bool {
     changed |= extract_top_level_fields(val);
     changed |= normalize_flat_condition(val);
     changed |= collapse_having_from_array(val);
+    changed |= wrap_bare_function_call(val);
     changed
 }
 
