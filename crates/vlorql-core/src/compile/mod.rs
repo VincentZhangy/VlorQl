@@ -267,6 +267,87 @@ mod tests {
     }
 
     #[test]
+    fn postgres_cte_literals_get_cast() {
+        let cte_query = QueryPlan {
+            select: vec![Projection::Column {
+                table: Some("users".to_owned()),
+                column: "id".to_owned(),
+                alias: Some("level".to_owned()),
+            }],
+            from: FromClause::table("users".to_owned(), None),
+            r#where: Some(Predicate::Comparison {
+                left: column_ref("users", "level"),
+                op: ComparisonOperator::Lte,
+                right: literal(json!(10), DataType::Int),
+            }),
+            group_by: None,
+            having: None,
+            order_by: None,
+            limit: None,
+            offset: None,
+            joins: None,
+            ctes: None,
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,
+        };
+        let plan = QueryPlan {
+            select: vec![Projection::Column {
+                table: Some("cte".to_owned()),
+                column: "level".to_owned(),
+                alias: None,
+            }],
+            from: FromClause::table("cte".to_owned(), None),
+            r#where: None,
+            group_by: None,
+            having: None,
+            order_by: None,
+            limit: None,
+            offset: None,
+            joins: None,
+            ctes: Some(vec![CommonTableExpression {
+                name: "cte".to_owned(),
+                query: Box::new(cte_query),
+                recursive: false,
+            }]),
+            distinct: false,
+            distinct_on: None,
+            set_operation: None,
+        };
+        let compiled = PostgresCompiler
+            .compile(&validated(plan))
+            .expect("CTE should compile");
+        assert!(
+            compiled.sql.contains("CAST("),
+            "CTE literal should be CAST-wrapped in PostgreSQL, got: {}",
+            compiled.sql
+        );
+        assert!(
+            compiled.sql.contains("AS INTEGER"),
+            "Int literal should CAST to INTEGER, got: {}",
+            compiled.sql
+        );
+    }
+
+    #[test]
+    fn non_cte_literals_are_not_cast() {
+        let mut plan = base_plan();
+        plan.r#where = Some(Predicate::Comparison {
+            left: column_ref("users", "level"),
+            op: ComparisonOperator::Lte,
+            right: literal(json!(10), DataType::Int),
+        });
+        let compiled = PostgresCompiler
+            .compile(&validated(plan))
+            .expect("non-CTE should compile");
+        assert!(
+            !compiled.sql.contains("CAST("),
+            "non-CTE literals should not be CAST-wrapped, got: {}",
+            compiled.sql
+        );
+    }
+
+    #[test]
     fn literal_content_is_never_interpolated_into_sql() {
         let malicious = "' OR 1 = 1; DROP TABLE users; --";
         let mut plan = base_plan();
