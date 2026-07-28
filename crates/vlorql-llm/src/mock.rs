@@ -1,9 +1,10 @@
 use async_trait::async_trait;
-use futures::stream::{self, Stream};
+use futures::stream;
 use serde_json::json;
+use std::sync::Arc;
 use vlorql_core::errors::{LlmErrorKind, VlorQLError};
 use vlorql_core::schema::QueryPlan;
-use crate::{LlmClient, LlmConfig, LlmProvider};
+use crate::{LlmClient, LlmConfig, LlmProvider, StreamResult, TokenUsage};
 
 /// A deterministic client for unit and integration tests.
 ///
@@ -38,6 +39,8 @@ pub struct MockLlmClient {
     pub should_succeed: bool,
     /// The plan to return on success.
     pub plan: Option<QueryPlan>,
+    /// Token usage to return on success.
+    pub usage: TokenUsage,
     /// The configuration exposed via [`LlmClient::config`].
     pub config: LlmConfig,
 }
@@ -53,13 +56,28 @@ impl MockLlmClient {
         Self {
             should_succeed,
             plan,
+            usage: TokenUsage::default(),
             config,
         }
     }
 
-    /// Creates a successful mock returning the supplied plan.
+    /// Creates a successful mock returning the supplied plan with default usage.
     pub fn success(plan: QueryPlan) -> Self {
         Self::new(true, Some(plan))
+    }
+
+    /// Creates a successful mock returning the supplied plan and usage.
+    pub fn with_usage(plan: QueryPlan, usage: TokenUsage) -> Self {
+        Self {
+            should_succeed: true,
+            plan: Some(plan),
+            usage,
+            config: LlmConfig {
+                provider: LlmProvider::OpenAi,
+                model: "mock".to_owned(),
+                ..LlmConfig::default()
+            },
+        }
     }
 
     /// Creates a failed mock returning a deterministic provider error.
@@ -75,9 +93,9 @@ impl LlmClient for MockLlmClient {
         _question: &str,
         _system_prompt: &str,
         _temperature: Option<f32>,
-    ) -> Result<QueryPlan, VlorQLError> {
+    ) -> Result<(QueryPlan, TokenUsage), VlorQLError> {
         if self.should_succeed {
-            Ok(self.plan.clone().unwrap_or_else(default_plan))
+            Ok((self.plan.clone().unwrap_or_else(default_plan), self.usage))
         } else {
             Err(VlorQLError::llm(
                 LlmErrorKind::ApiError {
@@ -93,8 +111,8 @@ impl LlmClient for MockLlmClient {
         &self,
         _question: String,
         _system_prompt: String,
-    ) -> Result<Box<dyn Stream<Item = Result<String, VlorQLError>> + Send + Unpin>, VlorQLError>
-    {
+    ) -> Result<StreamResult, VlorQLError> {
+        let usage = Arc::new(tokio::sync::Mutex::new(Some(self.usage)));
         if !self.should_succeed {
             let err = VlorQLError::llm(
                 LlmErrorKind::ApiError {
@@ -103,13 +121,15 @@ impl LlmClient for MockLlmClient {
                 },
                 json!({"source": "mock"}),
             );
-            return Ok(Box::new(stream::iter(vec![Err(err)])));
+            let stream = Box::new(stream::iter(vec![Err(err)]))
+                as Box<dyn futures::stream::Stream<Item = Result<String, VlorQLError>> + Send + Unpin>;
+            return Ok(StreamResult { stream, usage });
         }
         let serialized = serde_json::to_string(&self.plan.clone().unwrap_or_else(default_plan))
             .unwrap_or_default();
-        // Mock implementation: emit a single chunk containing the serialized plan.
-        let stream = stream::iter(vec![Ok(serialized)]);
-        Ok(Box::new(stream))
+        let stream = Box::new(stream::iter(vec![Ok(serialized)]))
+            as Box<dyn futures::stream::Stream<Item = Result<String, VlorQLError>> + Send + Unpin>;
+        Ok(StreamResult { stream, usage })
     }
 
     fn provider(&self) -> LlmProvider {

@@ -530,7 +530,6 @@ impl LlmClient for LocalClient {
                 let (tx, rx) = mpsc::unbounded_channel::<Result<String, VlorQLError>>();
                 let line_stream = sse_lines(byte_stream);
                 let usage = Arc::new(tokio::sync::Mutex::new(None));
-                let usage_clone = Arc::clone(&usage);
                 tokio::spawn(async move {
                     if !drive_ollama_ndjson_consumer(line_stream, tx).await {
                         warn!("Ollama NDJSON consumer ended before producing content");

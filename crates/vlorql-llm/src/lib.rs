@@ -223,14 +223,18 @@ pub(crate) const DEFAULT_RETRY_DELAY: Duration = Duration::from_secs(1);
 /// Token usage returned by an LLM provider.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct TokenUsage {
+    /// Number of tokens in the prompt.
     pub prompt_tokens: u64,
+    /// Number of tokens in the completion.
     pub completion_tokens: u64,
 }
 
 /// Result of `stream_plan()`. The stream emits text deltas; after the
 /// stream ends, `usage` contains the provider's token usage (if any).
 pub struct StreamResult {
+    /// Stream of text delta chunks from the LLM.
     pub stream: Box<dyn Stream<Item = Result<String, VlorQLError>> + Send + Unpin>,
+    /// Token usage captured from the streaming response, populated after the stream ends.
     pub usage: Arc<tokio::sync::Mutex<Option<TokenUsage>>>,
 }
 
