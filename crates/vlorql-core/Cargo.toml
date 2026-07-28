@@ -8,7 +8,12 @@ homepage.workspace = true
 repository.workspace = true
 description = "A high-performance SQL query optimizer with constant folding, predicate pushdown, column pruning, and cost-based join reordering"
 
+[features]
+default = []
+vector-search = ["qdrant-client"]
+
 [dependencies]
+qdrant-client = { version = "1.13", optional = true }
 thiserror.workspace = true
 serde.workspace = true
 serde_json.workspace = true

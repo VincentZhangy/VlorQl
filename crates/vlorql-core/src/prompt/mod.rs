@@ -5,6 +5,8 @@
 
 pub mod builder;
 pub mod skill;
+#[cfg(feature = "vector-search")]
+pub mod schema_index;
 
 pub use builder::PromptBuilder;
 pub use skill::{ExamplePair, PromptSkill};
