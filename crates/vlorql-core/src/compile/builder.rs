@@ -123,18 +123,8 @@ impl<'a> QueryBuilder<'a> {
         match expression {
             Expression::Literal { value, data_type } => {
                 let placeholder = self.add_parameter(value.clone(), *data_type);
-                // In CTE contexts, PostgreSQL cannot infer the type of
-                // parameterized literals — add explicit CAST so the type
-                // is known (e.g. `CAST($1 AS integer)`).
-                if self.in_cte && self.dialect == SqlDialect::Postgres {
-                    match data_type {
-                        DataType::Int => write!(buf, "CAST({placeholder} AS INTEGER)"),
-                        DataType::Float => write!(buf, "CAST({placeholder} AS DOUBLE PRECISION)"),
-                        DataType::Boolean => write!(buf, "CAST({placeholder} AS BOOLEAN)"),
-                        DataType::Decimal => write!(buf, "CAST({placeholder} AS NUMERIC)"),
-                        _ => write!(buf, "{placeholder}"),
-                    }
-                    .map_err(formatting_error)?;
+                if self.in_cte {
+                    self.render_cte_cast(&placeholder, *data_type, buf)?;
                 } else {
                     buf.push_str(&placeholder);
                 }
@@ -226,6 +216,59 @@ impl<'a> QueryBuilder<'a> {
                 buf.push(')');
                 self.render_window_spec(over, buf)?;
                 Ok(())
+            }
+        }
+    }
+
+    fn render_cte_cast(
+        &mut self,
+        placeholder: &str,
+        data_type: DataType,
+        buf: &mut String,
+    ) -> Result<(), VlorQLError> {
+        match self.dialect {
+            SqlDialect::Postgres => {
+                let cast_type = match data_type {
+                    DataType::Int => "INTEGER",
+                    DataType::Float => "DOUBLE PRECISION",
+                    DataType::Boolean => "BOOLEAN",
+                    DataType::Decimal => "NUMERIC",
+                    DataType::Date => "DATE",
+                    DataType::Timestamp => "TIMESTAMP",
+                    DataType::Json => "JSON",
+                    _ => return write!(buf, "{placeholder}").map_err(formatting_error),
+                };
+                write!(buf, "CAST({placeholder} AS {cast_type})").map_err(formatting_error)
+            }
+            SqlDialect::MySql => {
+                let cast_type = match data_type {
+                    DataType::Int => "SIGNED",
+                    DataType::Float => "DECIMAL(65, 30)",
+                    DataType::Boolean => "UNSIGNED",
+                    DataType::Decimal => "DECIMAL(65, 10)",
+                    DataType::Date => "DATE",
+                    DataType::Timestamp => "DATETIME",
+                    DataType::Json => "JSON",
+                    DataType::String => "CHAR",
+                    _ => return write!(buf, "{placeholder}").map_err(formatting_error),
+                };
+                write!(buf, "CAST({placeholder} AS {cast_type})").map_err(formatting_error)
+            }
+            SqlDialect::Sqlite => {
+                let cast_type = match data_type {
+                    DataType::Int => "INTEGER",
+                    DataType::Float => "REAL",
+                    DataType::Boolean => "INTEGER",
+                    DataType::Decimal => "REAL",
+                    DataType::Date => "TEXT",
+                    DataType::Timestamp => "TEXT",
+                    DataType::String => "TEXT",
+                    DataType::Json => "TEXT",
+                    DataType::Uuid => "TEXT",
+                    DataType::Null => "INTEGER",
+                    _ => return write!(buf, "{placeholder}").map_err(formatting_error),
+                };
+                write!(buf, "CAST({placeholder} AS {cast_type})").map_err(formatting_error)
             }
         }
     }
