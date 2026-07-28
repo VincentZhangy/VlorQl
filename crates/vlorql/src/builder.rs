@@ -1,4 +1,5 @@
 use serde_json::json;
+use std::path::PathBuf;
 use std::sync::Arc;
 use vlorql_core::cache::{CompileCache, LlmResponseCache, PromptCache, SchemaCache};
 use vlorql_core::compile::{RewriteEngine, SqlCompiler, get_compiler};
@@ -194,6 +195,28 @@ impl VlorQlBuilder {
     #[must_use]
     pub fn with_compile_cache(mut self, max_size: u64, ttl_seconds: u64) -> Self {
         self.compile_cache = Some(Arc::new(CompileCache::new(max_size, ttl_seconds)));
+        self
+    }
+
+    /// Configures a [`CompileCache`] with bincode disk persistence.
+    ///
+    /// The cache is loaded from `path` on startup (if the file exists) and
+    /// persisted on shutdown (via [`VlorQl::drop`]). Uses bincode format.
+    #[must_use]
+    pub fn with_persistent_compile_cache(
+        mut self,
+        max_size: u64,
+        ttl_seconds: u64,
+        path: impl Into<PathBuf>,
+    ) -> Self {
+        let path = path.into();
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            let cache = handle.block_on(CompileCache::load(&path, max_size, ttl_seconds));
+            self.compile_cache = Some(Arc::new(cache));
+        } else {
+            self.compile_cache =
+                Some(Arc::new(CompileCache::with_persistence(max_size, ttl_seconds, path)));
+        }
         self
     }
 
