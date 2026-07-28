@@ -5,53 +5,14 @@
 
 use serde_json::Value;
 
-/// Data type aliases: non-standard → canonical serde form.
-const DATA_TYPE_ALIASES: &[(&str, &str)] = &[
-    // Integer types
-    ("integer", "int"),
-    ("int4", "int"),
-    ("int8", "int"),
-    ("bigint", "int"),
-    ("smallint", "int"),
-    ("tinyint", "int"),
-    // String types
-    ("varchar", "string"),
-    ("text", "string"),
-    ("char", "string"),
-    ("character", "string"),
-    ("character varying", "string"),
-    // Decimal types
-    ("decimal", "decimal"),
-    ("numeric", "decimal"),
-    // Float types
-    ("real", "float"),
-    ("double", "float"),
-    ("double precision", "float"),
-    // Boolean types
-    ("bool", "boolean"),
-    // Timestamp types
-    ("timestampz", "timestamp"),
-    ("timestamptz", "timestamp"),
-    ("datetime", "timestamp"),
-    ("timestamp with time zone", "timestamp"),
-    ("timestamp without time zone", "timestamp"),
-    ("date", "timestamp"),
-    // Blob types
-    ("bytea", "blob"),
-    // Null variants
-    ("NULL", "null"),
-    ("Null", "null"),
-];
+use super::common::resolve_sql_type_alias;
 
 /// Resolve a data type alias to its canonical form.
 ///
 /// Returns `None` if the type is already canonical or unknown.
 #[must_use]
 pub fn resolve_data_type(dt: &str) -> Option<&'static str> {
-    DATA_TYPE_ALIASES
-        .iter()
-        .find(|(from, _)| *from == dt)
-        .map(|(_, to)| *to)
+    resolve_sql_type_alias(dt)
 }
 
 /// Normalize all `data_type` fields in a JSON value tree.

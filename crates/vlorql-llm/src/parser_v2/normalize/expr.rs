@@ -13,24 +13,14 @@
 use serde_json::Value;
 use tracing;
 
+use super::common::canonical_data_type;
+
 /// Maps a raw literal type tag plus its JSON value to the canonical
 /// `data_type` string. The ambiguous `"number"` tag is disambiguated by
 /// inspecting whether the value is integral, so both normalization paths
 /// agree on `int` vs `float`.
 fn canonical_literal_type(type_val: &str, value: Option<&Value>) -> &'static str {
-    match type_val {
-        "string" => "string",
-        "integer" => "int",
-        "float" => "float",
-        "number" => match value {
-            Some(Value::Number(n)) if n.as_i64().is_some() || n.as_u64().is_some() => "int",
-            Some(Value::Number(_)) => "float",
-            _ => "int",
-        },
-        "boolean" => "boolean",
-        "null" => "null",
-        _ => "null",
-    }
+    canonical_data_type(type_val, value).unwrap_or("null")
 }
 
 /// Convert LLM type aliases (string, integer, number, float, boolean, null)
