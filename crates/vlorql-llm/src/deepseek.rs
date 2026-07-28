@@ -403,7 +403,7 @@ mod tests {
         assert_eq!(messages[1]["role"], "user");
         assert_eq!(messages[1]["content"], "show users");
 
-        let actual = client
+        let (actual, _usage) = client
             .generate_plan("show users", "system", None)
             .await
             .expect("plan should parse");
@@ -446,7 +446,7 @@ mod tests {
             ..deepseek_config("deepseek-v4-pro")
         };
         let client = DeepSeekClient::new(config).expect("client should build");
-        let actual = client
+        let (actual, _usage) = client
             .generate_plan("show users", "system", None)
             .await
             .expect("plan should parse");
@@ -600,12 +600,12 @@ mod tests {
         assert_eq!(body["stream"], true);
         assert_eq!(body["response_format"]["type"], "json_object");
 
-        let mut stream = client
+        let mut result = client
             .stream_plan("hi".to_owned(), "system".to_owned())
             .await
             .expect("stream should be produced");
         let mut combined = String::new();
-        while let Some(chunk) = stream.next().await {
+        while let Some(chunk) = result.stream.next().await {
             combined.push_str(&chunk.expect("chunk should be Ok"));
         }
         assert_eq!(combined, "hello world");
@@ -662,7 +662,7 @@ mod tests {
         };
         let client = DeepSeekClient::new(config).expect("client should build");
 
-        let actual = client
+        let (actual, _usage) = client
             .generate_plan("hi", "system", None)
             .await
             .expect("retry should succeed");
@@ -721,7 +721,7 @@ mod tests {
         };
         let result = client.generate_plan("q", "s", None).await;
         drop(guard);
-        let actual = result.expect("env-keyed request should succeed");
+        let (actual, _usage) = result.expect("env-keyed request should succeed");
         assert_eq!(actual, expected);
         mock.assert_async().await;
     }

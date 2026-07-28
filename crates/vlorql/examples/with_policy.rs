@@ -166,7 +166,7 @@ async fn run_scenario(label: &str, client: Box<dyn LlmClient>) -> Result<(), Box
 
     println!("--- {label} ---");
     match vlorql.query("policy demo").await {
-        Ok(compiled) => {
+        Ok((compiled, _usage)) => {
             println!("PASS  sql:     {}", compiled.sql);
             println!("      params:  {}", compiled.parameters.len());
         }

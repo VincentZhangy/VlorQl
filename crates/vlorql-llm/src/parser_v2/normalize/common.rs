@@ -64,6 +64,7 @@ pub fn canonical_data_type(dt: &str, value: Option<&Value>) -> Option<&'static s
         "double" | "real" => Some("float"),
         "boolean" | "bool" => Some("boolean"),
         "null" => Some("null"),
+        "decimal" => Some("decimal"),
         _ => None,
     }
 }
@@ -129,5 +130,10 @@ mod tests {
         assert_eq!(resolve_sql_type_alias("varchar"), Some("string"));
         assert_eq!(resolve_sql_type_alias("decimal"), Some("decimal"));
         assert_eq!(resolve_sql_type_alias("int"), None);
+    }
+
+    #[test]
+    fn canonical_data_type_decimal() {
+        assert_eq!(canonical_data_type("decimal", None), Some("decimal"));
     }
 }

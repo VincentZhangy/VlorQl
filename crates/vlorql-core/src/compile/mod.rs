@@ -860,4 +860,19 @@ mod tests {
             compiled.sql
         );
     }
+
+    #[test]
+    fn postgres_compiles_decimal_literal() {
+        let mut plan = base_plan();
+        plan.r#where = Some(Predicate::Comparison {
+            left: column_ref("users", "price"),
+            op: ComparisonOperator::Gt,
+            right: literal(json!(99.99), DataType::Decimal),
+        });
+        let compiled = PostgresCompiler
+            .compile(&validated(plan))
+            .expect("Decimal literal should compile");
+        assert_eq!(compiled.parameters[0].value, json!(99.99));
+        assert_eq!(compiled.parameters[0].data_type, DataType::Decimal);
+    }
 }

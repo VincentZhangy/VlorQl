@@ -90,7 +90,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     println!("=== First query (all caches cold) ===");
     let start = std::time::Instant::now();
-    let result1 = vlorql.query("List all users").await?;
+    let (result1, _usage1) = vlorql.query("List all users").await?;
     let elapsed1 = start.elapsed();
     println!("sql: {}", result1.sql);
     println!("time: {elapsed1:?}");
@@ -101,7 +101,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     println!();
     println!("=== Second query (same question — compile cache should hit) ===");
     let start = std::time::Instant::now();
-    let result2 = vlorql.query("List all users").await?;
+    let (result2, _usage2) = vlorql.query("List all users").await?;
     let elapsed2 = start.elapsed();
     println!("sql: {}", result2.sql);
     println!("time: {elapsed2:?}");

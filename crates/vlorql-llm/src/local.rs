@@ -1016,7 +1016,7 @@ mod tests {
         assert_eq!(messages[1]["role"], "user");
         assert_eq!(messages[1]["content"], "show users");
 
-        let actual = client
+        let (actual, _usage) = client
             .generate_plan("show users", "system", None)
             .await
             .expect("plan should parse");
@@ -1044,7 +1044,7 @@ mod tests {
             ..local_config(LlmProvider::Vllm, "Qwen2.5-7B-Instruct")
         };
         let client = LocalClient::new(config).expect("client should build");
-        let actual = client
+        let (actual, _usage) = client
             .generate_plan("q", "s", None)
             .await
             .expect("plan should parse");
@@ -1081,7 +1081,7 @@ mod tests {
             ..local_config(LlmProvider::Vllm, "Qwen2.5-7B-Instruct")
         };
         let client = LocalClient::new(config).expect("client should build");
-        let actual = client
+        let (actual, _usage) = client
             .generate_plan("q", "s", None)
             .await
             .expect("fallback should succeed");
@@ -1129,12 +1129,12 @@ mod tests {
         let body = client.build_request_body("hi", "system", true, None);
         assert_eq!(body["stream"], true);
 
-        let mut stream = client
+        let mut result = client
             .stream_plan("hi".to_owned(), "system".to_owned())
             .await
             .expect("stream should be produced");
         let mut combined = String::new();
-        while let Some(chunk) = stream.next().await {
+        while let Some(chunk) = result.stream.next().await {
             combined.push_str(&chunk.expect("chunk should be Ok"));
         }
         assert_eq!(combined, "hello world");
@@ -1199,7 +1199,7 @@ mod tests {
         assert_eq!(request_body["options"]["temperature"], 0.0);
         assert_eq!(request_body["options"]["num_predict"], 1024);
 
-        let actual = client
+        let (actual, _usage) = client
             .generate_plan("show users", "system", None)
             .await
             .expect("plan should parse");
@@ -1232,7 +1232,7 @@ mod tests {
         let client = LocalClient::new(config).expect("client should build");
         let request_body = client.build_request_body("q", "s", false, None);
         assert_eq!(request_body["format"], "json");
-        let actual = client
+        let (actual, _usage) = client
             .generate_plan("q", "s", None)
             .await
             .expect("plan should parse");
@@ -1262,7 +1262,7 @@ mod tests {
             ..local_config(LlmProvider::Ollama, "llama3.2")
         };
         let client = LocalClient::new(config).expect("client should build");
-        let actual = client
+        let (actual, _usage) = client
             .generate_plan("q", "s", None)
             .await
             .expect("ollama plan should parse");
@@ -1358,12 +1358,12 @@ mod tests {
             ..local_config(LlmProvider::Ollama, "llama3.2")
         };
         let client = LocalClient::new(config).expect("client should build");
-        let mut stream = client
+        let mut result = client
             .stream_plan("hi".to_owned(), "system".to_owned())
             .await
             .expect("stream should be produced");
         let mut combined = String::new();
-        while let Some(chunk) = stream.next().await {
+        while let Some(chunk) = result.stream.next().await {
             combined.push_str(&chunk.expect("chunk should be Ok"));
         }
         assert_eq!(combined, "hello world");

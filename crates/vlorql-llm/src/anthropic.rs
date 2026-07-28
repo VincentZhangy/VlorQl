@@ -316,11 +316,11 @@ mod tests {
             ..anthropic_config()
         };
         let client = AnthropicClient::new(config).expect("client should build");
-        let result = client
+        let (actual, _usage) = client
             .generate_plan("hi", "system", None)
             .await
             .expect("anthropic plan should parse");
-        assert_eq!(result, plan);
+        assert_eq!(actual, plan);
         assert_eq!(client.provider(), LlmProvider::Anthropic);
         mock.assert_async().await;
     }
@@ -383,12 +383,12 @@ mod tests {
             ..anthropic_config()
         };
         let client = AnthropicClient::new(config).expect("client should build");
-        let mut stream = client
+        let mut result = client
             .stream_plan("hi".to_owned(), "system".to_owned())
             .await
             .expect("stream should be produced");
         let mut combined = String::new();
-        while let Some(item) = stream.next().await {
+        while let Some(item) = result.stream.next().await {
             combined.push_str(&item.expect("chunk should be Ok"));
         }
         assert_eq!(combined, "hello world");

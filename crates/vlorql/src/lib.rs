@@ -27,9 +27,7 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::Instrument;
 use vlorql_core::cache::{LlmCacheKey, LlmResponseCache};
 use vlorql_core::compile::SqlCompiler;
-use vlorql_core::errors::{
-    ConfigErrorKind, VlorQLError,
-};
+use vlorql_core::errors::{ConfigErrorKind, VlorQLError};
 use vlorql_core::execute::{DatabaseExecutor, QueryResult};
 use vlorql_core::observability::{TelemetryGuard, VlorqMetrics};
 use vlorql_core::optimizer::QueryOptimizer;
@@ -91,6 +89,8 @@ pub enum StreamEvent {
     TextChunk(String),
     /// The fully assembled, validated `QueryPlan` after the LLM response ends.
     PlanComplete(Box<QueryPlan>),
+    /// Token usage emitted after the stream ends.
+    TokenUsage(TokenUsage),
     /// A validation or parse error encountered after the LLM response.
     Error(VlorQLError),
 }
@@ -250,9 +250,9 @@ impl VlorQl {
             let mut last_usage = TokenUsage::default();
             for attempt in 0..=self.max_retries {
                 let temperature = retry_temperature(client.config().temperature, attempt);
-                let (plan, usage) = if attempt == 0 {
+                let plan = if attempt == 0 {
                     if let Some(ref cached) = cached_plan {
-                        ((**cached).clone(), TokenUsage::default())
+                        (**cached).clone()
                     } else {
                         let llm_start = std::time::Instant::now();
                         let result = client
@@ -264,7 +264,8 @@ impl VlorQl {
                         }
                         match result {
                             Ok((plan, usage)) => {
-                                (plan, usage)
+                                last_usage = usage;
+                                plan
                             }
                             Err(e) if e.is_retryable() && attempt < self.max_retries => {
                                 llm_question = format_retry_question_str(&llm_question, &e, attempt);
@@ -279,7 +280,8 @@ impl VlorQl {
                         .await
                     {
                         Ok((plan, usage)) => {
-                            (plan, usage)
+                            last_usage = usage;
+                            plan
                         }
                         Err(e) if e.is_retryable() && attempt < self.max_retries => {
                             llm_question = format_retry_question_str(&llm_question, &e, attempt);
@@ -288,7 +290,6 @@ impl VlorQl {
                         Err(e) => return Err(e),
                     }
                 };
-                last_usage = usage;
                 match self.build_pipeline().validate_repairing(&plan) {
                     Ok(validated_plan) => {
                         // Optimize when an optimizer is configured, then compile.
@@ -626,7 +627,7 @@ mod tests {
     use super::*;
     use async_trait::async_trait;
     use std::sync::{Arc, Mutex};
-    use vlorql_core::errors::LlmErrorKind;
+    use vlorql_core::errors::{LlmErrorKind, SchemaErrorKind};
     use vlorql_core::schema::{
         ColumnSchema, DataType, Expression, FromClause, Predicate, Projection, QueryPlan,
         SchemaMetadata, TableSchema,
@@ -932,15 +933,21 @@ mod tests {
             .expect("query_stream should succeed");
         let mut final_plan = None;
         let mut saw_chunks = false;
+        let mut saw_usage = false;
         while let Some(item) = stream.next().await {
             match item.expect("event should be Ok") {
                 StreamEvent::TextChunk(_) => saw_chunks = true,
                 StreamEvent::PlanComplete(plan) => final_plan = Some(*plan),
+                StreamEvent::TokenUsage(usage) => {
+                    saw_usage = true;
+                    assert_eq!(usage, TokenUsage::default());
+                }
                 StreamEvent::Error(error) => panic!("unexpected error event: {error}"),
             }
         }
         assert!(saw_chunks, "should receive at least one text chunk");
         assert_eq!(final_plan, Some(valid_plan()));
+        assert!(saw_usage, "should receive token usage event");
     }
 
     #[tokio::test]

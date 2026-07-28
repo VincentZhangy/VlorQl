@@ -420,7 +420,7 @@ mod tests {
             true
         );
 
-        let actual = client
+        let (actual, _usage) = client
             .generate_plan("show users", "system", None)
             .await
             .expect("zhipu plan should parse");
@@ -458,13 +458,11 @@ mod tests {
         assert_eq!(request_body["model"], "glm-4");
         assert_eq!(request_body["response_format"]["type"], "json_object");
 
-        assert_eq!(
-            client
-                .generate_plan("q", "s", None)
-                .await
-                .expect("response"),
-            expected
-        );
+        let (actual, _usage) = client
+            .generate_plan("q", "s", None)
+            .await
+            .expect("response");
+        assert_eq!(actual, expected);
         mock.assert_async().await;
     }
 
@@ -559,12 +557,12 @@ mod tests {
         let body = client.build_request_body("hi", "system", true, None);
         assert_eq!(body["stream"], true);
 
-        let mut stream = client
+        let mut result = client
             .stream_plan("hi".to_owned(), "system".to_owned())
             .await
             .expect("stream should be produced");
         let mut combined = String::new();
-        while let Some(chunk) = stream.next().await {
+        while let Some(chunk) = result.stream.next().await {
             combined.push_str(&chunk.expect("chunk should be Ok"));
         }
         assert_eq!(combined, "hello world");
@@ -662,7 +660,7 @@ mod tests {
         config.api_key = None;
         config.api_base = Some(format!("{}/v4/chat/completions", server.url()));
         let client = ZhipuClient::new(config).expect("client should build from env var");
-        let actual = client
+        let (actual, _usage) = client
             .generate_plan("q", "s", None)
             .await
             .expect("env-keyed request should succeed");

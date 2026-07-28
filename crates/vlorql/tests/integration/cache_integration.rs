@@ -82,13 +82,13 @@ async fn compile_cache_hits_on_second_call() {
     let vlorql = facade_with_compile_cache();
 
     // First call: generate plan, validate, compile (cache miss).
-    let first = vlorql
+    let (first, _usage1) = vlorql
         .query("list users with id > 10")
         .await
         .expect("first query should succeed");
 
     // Second call: same plan should hit the compile cache.
-    let second = vlorql
+    let (second, _usage2) = vlorql
         .query("list users with id > 10")
         .await
         .expect("second query should succeed");
@@ -109,7 +109,7 @@ async fn compile_cache_hits_on_second_call() {
 async fn compile_cache_invalidation_forces_recompile() {
     let vlorql = facade_with_compile_cache();
 
-    let first = vlorql
+    let (first, _usage1) = vlorql
         .query("list users with id > 10")
         .await
         .expect("first query should succeed");
@@ -119,7 +119,7 @@ async fn compile_cache_invalidation_forces_recompile() {
     let validated = vlorql.validate_only(&plan).expect("plan should validate");
     vlorql.invalidate_compile_cache(&validated).await;
 
-    let second = vlorql
+    let (second, _usage2) = vlorql
         .query("list users with id > 10")
         .await
         .expect("second query should succeed");
@@ -188,7 +188,7 @@ async fn clear_all_caches_does_not_break_queries() {
     vlorql.clear_all_caches();
 
     // Subsequent queries should still work (result from fresh compilation).
-    let result = vlorql
+    let (result, _usage) = vlorql
         .query("list users with id > 10")
         .await
         .expect("query after clear should succeed");

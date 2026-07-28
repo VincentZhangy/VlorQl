@@ -154,7 +154,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     //      d. Retry up to `with_max_retries` times on validation errors that
     //         the LLM can plausibly correct.
     //      e. Compile the validated plan with the configured compiler.
-    let compiled = vlorql.query("List users with id greater than 10").await?;
+    let (compiled, _usage) = vlorql.query("List users with id greater than 10").await?;
 
     // 3. Print the result.
     println!("dialect: {:?}", SqlDialect::Postgres);

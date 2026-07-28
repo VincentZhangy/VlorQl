@@ -176,7 +176,7 @@ async fn validation_errors_are_retryable_and_do_trigger_retry() {
         .build()
         .expect("facade should build");
 
-    let compiled = facade
+    let (compiled, _usage) = facade
         .query("list users")
         .await
         .expect("retryable error should trigger another LLM attempt");

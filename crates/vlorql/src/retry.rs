@@ -173,11 +173,11 @@ pub(crate) async fn run_stream_with_retry(
     max_retries: usize,
 ) {
     for attempt in 0..=max_retries {
-        let stream = match llm_client
+        let stream_result = match llm_client
             .stream_plan(question.clone(), system_prompt.clone())
             .await
         {
-            Ok(stream) => stream,
+            Ok(sr) => sr,
             Err(error) => {
                 if error.is_retryable() && attempt < max_retries {
                     question = format_retry_question_str(&question, &error, attempt);
@@ -189,7 +189,7 @@ pub(crate) async fn run_stream_with_retry(
         };
 
         let mut buffer = String::new();
-        let mut stream = stream;
+        let mut stream = stream_result.stream;
         let mut stream_ok = true;
         while let Some(item) = stream.next().await {
             match item {
@@ -228,6 +228,9 @@ pub(crate) async fn run_stream_with_retry(
             }
             _ => {
                 let _ = event_tx.send(Ok(event));
+                if let Some(usage) = *stream_result.usage.lock().await {
+                    let _ = event_tx.send(Ok(StreamEvent::TokenUsage(usage)));
+                }
                 return;
             }
         }

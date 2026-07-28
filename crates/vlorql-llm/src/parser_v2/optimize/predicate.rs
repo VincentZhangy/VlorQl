@@ -9,7 +9,7 @@
 //! - `AND FALSE` → `FALSE` (short-circuit)
 //! - `OR TRUE` → `TRUE` (short-circuit)
 
-use vlorql_core::schema::{ComparisonOperator, DataType, Expression, Predicate};
+use vlorql_core::schema::{ComparisonOperator, Expression, Predicate};
 
 /// Run all predicate simplification rules on a predicate tree.
 ///
@@ -431,6 +431,7 @@ fn expressions_equal(a: &Expression, b: &Expression) -> bool {
 mod tests {
     use super::*;
     use serde_json::json;
+    use vlorql_core::schema::DataType;
 
     fn lit_bool(v: bool) -> Expression {
         Expression::Literal {

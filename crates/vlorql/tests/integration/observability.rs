@@ -32,7 +32,7 @@ async fn query_span_contains_vlorql_query() {
         .expect("facade should build");
 
     // 3. Execute a query.
-    let compiled = facade
+    let (compiled, _usage) = facade
         .query("show user ids")
         .await
         .expect("valid mock plan should compile");
@@ -67,7 +67,7 @@ async fn compile_span_has_dialect_attribute() {
         .build()
         .expect("facade should build");
 
-    let compiled = facade
+    let (compiled, _usage) = facade
         .query("show user ids")
         .await
         .expect("valid mock plan should compile");

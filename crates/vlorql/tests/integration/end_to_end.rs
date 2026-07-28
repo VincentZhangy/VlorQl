@@ -28,7 +28,7 @@ use super::common::{
 async fn query_runs_prompt_validation_and_compilation() {
     let facade = facade_with(base_plan(), open_policy(), "sqlite");
 
-    let compiled = facade
+    let (compiled, _usage) = facade
         .query("show user ids")
         .await
         .expect("valid mock plan should compile");
@@ -60,7 +60,7 @@ async fn query_emits_parameterized_where_clause() {
     });
 
     let facade = facade_with(plan, open_policy(), "postgres");
-    let compiled = facade
+    let (compiled, _usage) = facade
         .query("users with id > 5")
         .await
         .expect("where clause should compile");
@@ -100,6 +100,7 @@ async fn query_stream_emits_chunks_then_plan_complete() {
             }
             vlorql::StreamEvent::PlanComplete(plan) => final_plan = Some(*plan),
             vlorql::StreamEvent::Error(error) => saw_error = Some(error),
+            vlorql::StreamEvent::TokenUsage(_usage) => {} // verified in e2e tests
         }
     }
 
@@ -135,6 +136,7 @@ async fn query_stream_preserves_chunk_ordering() {
                 observed.push(String::from("__PLAN_COMPLETE__"));
             }
             vlorql::StreamEvent::Error(error) => panic!("unexpected error event: {error}"),
+            vlorql::StreamEvent::TokenUsage(_usage) => {} // verified in e2e tests
         }
     }
 
@@ -175,7 +177,7 @@ async fn query_retries_after_retryable_validation_error() {
         .build()
         .expect("facade should build");
 
-    let compiled = facade
+    let (compiled, _usage) = facade
         .query("show user ids")
         .await
         .expect("second valid plan should be used after retry");
@@ -203,10 +205,11 @@ async fn query_exhausts_retries_then_returns_last_error() {
         .build()
         .expect("facade should build");
 
-    let error = facade
-        .query("show user ids")
-        .await
-        .expect_err("exhausting retries should surface the last error");
+    let error =
+        facade
+            .query("show user ids")
+            .await
+            .expect_err("exhausting retries should surface the last error");
     // The exact kind depends on the inner validator, but it must be a
     // validation error (the only retryable category).
     assert!(
@@ -229,10 +232,11 @@ async fn query_does_not_retry_non_retryable_llm_errors() {
         .build()
         .expect("facade should build");
 
-    let error = facade
-        .query("anything")
-        .await
-        .expect_err("failure mock should bubble up an error");
+    let error =
+        facade
+            .query("anything")
+            .await
+            .expect_err("failure mock should bubble up an error");
     assert!(matches!(
         error,
         VlorQLError::Llm {
@@ -240,6 +244,68 @@ async fn query_does_not_retry_non_retryable_llm_errors() {
             ..
         }
     ));
+}
+
+/// `query()` returns token usage populated from the LLM response.
+#[tokio::test]
+async fn query_returns_token_usage_from_mock() {
+    let plan = base_plan();
+    let expected_usage = vlorql::TokenUsage {
+        prompt_tokens: 42,
+        completion_tokens: 17,
+    };
+    let client = MockLlmClient::with_usage(plan, expected_usage);
+    let facade = VlorQl::builder()
+        .with_schema(snapshot())
+        .with_dialect_name("sqlite")
+        .with_policy(open_policy())
+        .with_llm_client(client)
+        .with_max_retries(0)
+        .build()
+        .expect("facade should build");
+
+    let (_compiled, usage) = facade
+        .query("show user ids")
+        .await
+        .expect("mock should succeed");
+    assert_eq!(usage, expected_usage);
+}
+
+/// `query_stream()` emits a `TokenUsage` event carrying the LLM usage.
+#[tokio::test]
+async fn query_stream_emits_token_usage_event() {
+    let plan = base_plan();
+    let expected_usage = vlorql::TokenUsage {
+        prompt_tokens: 100,
+        completion_tokens: 50,
+    };
+    let client = MockLlmClient::with_usage(plan, expected_usage);
+    let facade = VlorQl::builder()
+        .with_schema(snapshot())
+        .with_dialect_name("sqlite")
+        .with_policy(open_policy())
+        .with_llm_client(client)
+        .with_max_retries(0)
+        .build()
+        .expect("facade should build");
+
+    let mut stream = facade
+        .query_stream("list users")
+        .await
+        .expect("query_stream should succeed");
+
+    let mut saw_usage = false;
+    while let Some(item) = stream.next().await {
+        match item.expect("event should be Ok") {
+            vlorql::StreamEvent::TextChunk(_) | vlorql::StreamEvent::PlanComplete(_) => {}
+            vlorql::StreamEvent::TokenUsage(usage) => {
+                saw_usage = true;
+                assert_eq!(usage, expected_usage);
+            }
+            vlorql::StreamEvent::Error(error) => panic!("unexpected error event: {error}"),
+        }
+    }
+    assert!(saw_usage, "should receive token usage event");
 }
 
 // ---------------------------------------------------------------------------
@@ -260,7 +326,7 @@ async fn dialect_smoke(
     #[case] expected_identifier: &str,
 ) {
     let facade = facade_with(base_plan(), open_policy(), dialect_name);
-    let compiled = facade
+    let (compiled, _usage) = facade
         .query("list users")
         .await
         .expect("dialect should compile");

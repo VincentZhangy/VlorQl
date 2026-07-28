@@ -83,11 +83,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .unwrap_or_else(|| "Show user ids".to_owned());
 
     eprintln!("Streaming response for: {question}");
-    let mut stream = client
+    let mut result = client
         .stream_plan(question.clone(), SYSTEM_PROMPT.to_owned())
         .await?;
     let mut combined = String::new();
-    while let Some(item) = stream.next().await {
+    while let Some(item) = result.stream.next().await {
         let chunk = item?;
         combined.push_str(&chunk);
         print!("{chunk}");

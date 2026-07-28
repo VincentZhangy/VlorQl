@@ -10,10 +10,11 @@
 //! must not reach into private state.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::sync::Mutex;
 
 use async_trait::async_trait;
-use futures::stream::{self, Stream};
+use futures::stream;
 use serde_json::json;
 use vlorql::VlorQl;
 use vlorql_core::errors::{LlmErrorKind, VlorQLError};
@@ -22,7 +23,7 @@ use vlorql_core::schema::{
     ColumnSchema, ComparisonOperator, DataType, Expression, FromClause, Predicate, Projection,
     QueryPlan, SchemaMetadata, SchemaSnapshot, TableSchema,
 };
-use vlorql_llm::{LlmClient, LlmConfig, LlmProvider};
+use vlorql_llm::{LlmClient, LlmConfig, LlmProvider, StreamResult, TokenUsage};
 
 /// Returns a single column schema with the supplied name and data type.
 pub fn column(name: &str, data_type: DataType) -> ColumnSchema {
@@ -248,8 +249,9 @@ impl LlmClient for SequenceMockClient {
         _question: &str,
         _system_prompt: &str,
         _temperature: Option<f32>,
-    ) -> Result<QueryPlan, VlorQLError> {
-        self.plans
+    ) -> Result<(QueryPlan, TokenUsage), VlorQLError> {
+        let plan = self
+            .plans
             .lock()
             .expect("sequence lock should not be poisoned")
             .pop()
@@ -260,21 +262,21 @@ impl LlmClient for SequenceMockClient {
                     },
                     json!({"source": "sequence_mock"}),
                 )
-            })
+            })?;
+        Ok((plan, TokenUsage::default()))
     }
 
     async fn stream_plan(
         &self,
         _question: String,
         _system_prompt: String,
-    ) -> Result<Box<dyn Stream<Item = Result<String, VlorQLError>> + Send + Unpin>, VlorQLError>
-    {
-        let plan = self
-            .generate_plan("", "", None)
-            .await
-            .expect("sequence client should yield a plan");
+    ) -> Result<StreamResult, VlorQLError> {
+        let (plan, _usage) = self.generate_plan("", "", None).await?;
         let serialized = serde_json::to_string(&plan).unwrap_or_default();
-        Ok(Box::new(stream::iter(vec![Ok(serialized)])))
+        let stream = Box::new(stream::iter(vec![Ok(serialized)]))
+            as Box<dyn futures::stream::Stream<Item = Result<String, VlorQLError>> + Send + Unpin>;
+        let usage = Arc::new(tokio::sync::Mutex::new(Some(TokenUsage::default())));
+        Ok(StreamResult { stream, usage })
     }
 
     fn provider(&self) -> LlmProvider {
@@ -319,30 +321,32 @@ impl LlmClient for StreamingMockClient {
         _question: &str,
         _system_prompt: &str,
         _temperature: Option<f32>,
-    ) -> Result<QueryPlan, VlorQLError> {
+    ) -> Result<(QueryPlan, TokenUsage), VlorQLError> {
         // Concatenate the chunks and try to deserialize them. This makes
         // the streaming client also usable from the non-streaming code
         // paths so the same fixture can power both kinds of test.
         let combined = self.chunks.concat();
-        serde_json::from_str(&combined).map_err(|error| {
+        let plan = serde_json::from_str(&combined).map_err(|error| {
             VlorQLError::llm(
                 LlmErrorKind::ParseError {
                     details: format!("streaming client cannot decode its own chunks: {error}"),
                 },
                 json!({"chunks": self.chunks.len()}),
             )
-        })
+        })?;
+        Ok((plan, TokenUsage::default()))
     }
 
     async fn stream_plan(
         &self,
         _question: String,
         _system_prompt: String,
-    ) -> Result<Box<dyn Stream<Item = Result<String, VlorQLError>> + Send + Unpin>, VlorQLError>
-    {
+    ) -> Result<StreamResult, VlorQLError> {
         let chunks = self.chunks.clone();
-        let stream = stream::iter(chunks.into_iter().map(Ok::<String, VlorQLError>));
-        Ok(Box::new(Box::pin(stream)))
+        let stream = Box::new(stream::iter(chunks.into_iter().map(Ok::<String, VlorQLError>)))
+            as Box<dyn futures::stream::Stream<Item = Result<String, VlorQLError>> + Send + Unpin>;
+        let usage = Arc::new(tokio::sync::Mutex::new(Some(TokenUsage::default())));
+        Ok(StreamResult { stream, usage })
     }
 
     fn provider(&self) -> LlmProvider {

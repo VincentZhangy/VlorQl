@@ -2719,7 +2719,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     if is_llm_mode {
         for (i, question) in QUESTIONS.iter().enumerate() {
             println!("[{}/{}] 查询: \"{}\"", i + 1, count, question);
-            let compiled = vlorql.query(question).await?;
+            let (compiled, _usage) = vlorql.query(question).await?;
             println!("[OK]\n");
             all_compiled.push(compiled);
         }

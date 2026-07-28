@@ -30,27 +30,25 @@ use std::time::Duration;
 use vlorql_core::errors::{ConfigErrorKind, LlmErrorKind, VlorQLError};
 use vlorql_core::schema::QueryPlan;
 
+// ── Internal modules ──────────────────────────────────────────────
 mod retry_client;
 pub(crate) use retry_client::RetryableHttpClient;
 
 pub(crate) mod sse;
-
 pub(crate) mod schema;
 
+// ── Public: LLM providers ─────────────────────────────────────────
 pub mod anthropic;
 pub mod deepseek;
 pub mod local;
-/// V2 parse pipeline: recover → normalize → build → validate → optimize.
-///
-/// Replaces the legacy `parse` module. All new code should use
-/// `parser_v2` directly.
-pub mod parser_v2;
 pub mod zhipu;
 /// OpenAI-compatible chat-completions client.
 pub mod openai;
 /// A deterministic client for unit and integration tests.
 pub mod mock;
 
+// ── Public: V2 parse pipeline ─────────────────────────────────────
+pub mod parser_v2;
 pub use parser_v2::builder::query_builder::{from_canonical_str, from_canonical_value};
 pub use parser_v2::pipeline::{
     ParseError, ParseResult, parse_query_plan, parse_query_plan_debug, parse_query_plan_lenient,
@@ -221,7 +219,7 @@ pub(crate) const DEFAULT_MAX_ATTEMPTS: usize = 3;
 pub(crate) const DEFAULT_RETRY_DELAY: Duration = Duration::from_secs(1);
 
 /// Token usage returned by an LLM provider.
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Default, serde::Serialize)]
 pub struct TokenUsage {
     /// Number of tokens in the prompt.
     pub prompt_tokens: u64,
@@ -437,13 +435,11 @@ mod tests {
     async fn mock_client_returns_success_and_failure() {
         let expected = plan();
         let success = MockLlmClient::success(expected.clone());
-        assert_eq!(
-            success
-                .generate_plan("question", "system", None)
-                .await
-                .expect("mock should succeed"),
-            expected
-        );
+        let (actual, _usage) = success
+            .generate_plan("question", "system", None)
+            .await
+            .expect("mock should succeed");
+        assert_eq!(actual, expected);
 
         let failure = MockLlmClient::failure();
         let error = failure
@@ -485,7 +481,7 @@ mod tests {
             true
         );
 
-        let actual = client
+        let (actual, _usage) = client
             .generate_plan("show users", "system instructions", None)
             .await
             .expect("OpenAI response should parse");
@@ -513,13 +509,11 @@ mod tests {
         assert_eq!(request_body["model"], "local-model");
         assert_eq!(request_body["response_format"]["type"], "json_object");
 
-        assert_eq!(
-            client
-                .generate_plan("q", "s", None)
-                .await
-                .expect("response"),
-            expected
-        );
+        let (actual, _usage) = client
+            .generate_plan("q", "s", None)
+            .await
+            .expect("response");
+        assert_eq!(actual, expected);
         mock.assert_async().await;
     }
 
@@ -543,13 +537,11 @@ mod tests {
         let client = OpenAIClient::new("key", "local-model")
             .with_api_base(format!("{}/v1", server.url()));
 
-        assert_eq!(
-            client
-                .generate_plan("q", "s", None)
-                .await
-                .expect("retry should succeed"),
-            expected
-        );
+        let (actual, _usage) = client
+            .generate_plan("q", "s", None)
+            .await
+            .expect("retry should succeed");
+        assert_eq!(actual, expected);
         failures.assert_async().await;
         success.assert_async().await;
     }
@@ -598,12 +590,12 @@ mod tests {
             set_operation: None,
         };
         let client = MockLlmClient::success(plan);
-        let mut stream = client
+        let mut result = client
             .stream_plan("question".to_owned(), "system".to_owned())
             .await
             .expect("stream should be produced");
         let mut collected = String::new();
-        while let Some(item) = stream.next().await {
+        while let Some(item) = result.stream.next().await {
             collected.push_str(&item.expect("chunk should be Ok"));
         }
         assert!(collected.contains("users"));
@@ -641,12 +633,12 @@ mod tests {
 
         let client = OpenAIClient::new("key", "local-model")
             .with_api_base(format!("{}/v1", server.url()));
-        let mut stream = client
+        let mut result = client
             .stream_plan("hi".to_owned(), "system".to_owned())
             .await
             .expect("stream should be produced");
         let mut combined = String::new();
-        while let Some(chunk) = stream.next().await {
+        while let Some(chunk) = result.stream.next().await {
             combined.push_str(&chunk.expect("chunk should be Ok"));
         }
         assert_eq!(combined, "hello world");

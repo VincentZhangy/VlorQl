@@ -21,7 +21,7 @@ use vlorql_core::schema::{
     ColumnSchema, ComparisonOperator, DataType, Expression, FromClause, Predicate, Projection,
     QueryPlan, SchemaMetadata, TableSchema,
 };
-use vlorql_llm::{LlmClient, LlmConfig, LlmProvider};
+use vlorql_llm::{LlmClient, LlmConfig, LlmProvider, StreamResult, TokenUsage};
 
 /// A minimal LLM client that emits a precomputed plan as a series of small
 /// fragments. It implements the full `LlmClient` trait so we can exercise
@@ -56,16 +56,15 @@ impl LlmClient for ChunkyMock {
         _question: &str,
         _system_prompt: &str,
         _temperature: Option<f32>,
-    ) -> Result<QueryPlan, VlorQLError> {
-        Ok(self.plan.clone())
+    ) -> Result<(QueryPlan, TokenUsage), VlorQLError> {
+        Ok((self.plan.clone(), TokenUsage::default()))
     }
 
     async fn stream_plan(
         &self,
         _question: String,
         _system_prompt: String,
-    ) -> Result<Box<dyn Stream<Item = Result<String, VlorQLError>> + Send + Unpin>, VlorQLError>
-    {
+    ) -> Result<StreamResult, VlorQLError> {
         let chunks = self.chunks.clone();
         let counter = Arc::clone(&self.counter);
         let stream = futures::stream::unfold(
@@ -81,7 +80,11 @@ impl LlmClient for ChunkyMock {
                 }
             },
         );
-        Ok(Box::new(Box::pin(stream)))
+        let usage = Arc::new(tokio::sync::Mutex::new(Some(TokenUsage::default())));
+        Ok(StreamResult {
+            stream: Box::new(Box::pin(stream)),
+            usage,
+        })
     }
 
     fn provider(&self) -> LlmProvider {
@@ -203,6 +206,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 final_plan = Some(*plan);
             }
             StreamEvent::Error(error) => return Err(error.into()),
+            StreamEvent::TokenUsage(_usage) => {} // logged by the facade
         }
     }
 

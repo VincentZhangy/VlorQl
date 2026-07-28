@@ -1,6 +1,7 @@
 //! Schema existence validation for query plans.
 
 use crate::errors::{SchemaErrorKind, VlorQLError};
+use crate::function::{is_known_function, lookup_function};
 use crate::query::{ColumnReference, QueryScope, collect_plan_references};
 use crate::schema::{
     Expression, FromClause, InTarget, JoinType, Predicate, Projection, QueryPlan, SchemaSnapshot,
@@ -297,7 +298,39 @@ fn validate_subqueries_in_expression(
         Expression::SubQuery { query } => {
             validate_plan_with_outer(query, schema, errors, Some(outer_scope));
         }
-        Expression::FunctionCall { args, .. } => {
+        Expression::FunctionCall { name, args, .. } => {
+            if !is_known_function(name) {
+                tracing::warn!("Unknown function '{}' in query plan", name);
+            } else if let Some(def) = lookup_function(name) {
+                if (args.len()) < def.min_args {
+                    errors.push(VlorQLError::validation(
+                        crate::errors::ValidationErrorKind::AggregationMismatch {
+                            message: format!(
+                                "Function '{}' requires at least {} arguments, got {}",
+                                name,
+                                def.min_args,
+                                args.len()
+                            ),
+                        },
+                        serde_json::json!({"function": name, "min_args": def.min_args, "actual": args.len()}),
+                    ));
+                }
+                if let Some(max) = def.max_args {
+                    if (args.len()) > max {
+                        errors.push(VlorQLError::validation(
+                            crate::errors::ValidationErrorKind::AggregationMismatch {
+                                message: format!(
+                                    "Function '{}' accepts at most {} arguments, got {}",
+                                    name,
+                                    max,
+                                    args.len()
+                                ),
+                            },
+                            serde_json::json!({"function": name, "max_args": max, "actual": args.len()}),
+                        ));
+                    }
+                }
+            }
             for argument in args {
                 validate_subqueries_in_expression(argument, schema, errors, outer_scope);
             }

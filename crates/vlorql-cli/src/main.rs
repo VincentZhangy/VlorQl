@@ -117,7 +117,7 @@ async fn main() -> Result<()> {
                 dialect.as_deref(),
                 Some(LlmOverrides { provider, api_key, model, api_base, max_retries }),
             )?;
-            let compiled = facade
+            let (compiled, _usage) = facade
                 .query(&question)
                 .await
                 .context("query execution failed")?;

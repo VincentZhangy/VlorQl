@@ -127,7 +127,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     // 4. Run a query.  The spans and metrics are exported via OTLP.
     println!("Sending query…");
-    let compiled = vlorql.query("Show me active users with id > 10").await?;
+    let (compiled, _usage) = vlorql.query("Show me active users with id > 10").await?;
     println!("SQL:     {}", compiled.sql);
     if !compiled.parameters.is_empty() {
         println!("Params:");
