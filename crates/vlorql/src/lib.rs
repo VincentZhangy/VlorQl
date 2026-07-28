@@ -28,7 +28,7 @@ use tracing::Instrument;
 use vlorql_core::cache::{LlmCacheKey, LlmResponseCache};
 use vlorql_core::compile::SqlCompiler;
 use vlorql_core::errors::{
-    ConfigErrorKind, SchemaErrorKind, VlorQLError,
+    ConfigErrorKind, VlorQLError,
 };
 use vlorql_core::execute::{DatabaseExecutor, QueryResult};
 use vlorql_core::observability::{TelemetryGuard, VlorqMetrics};
@@ -53,8 +53,8 @@ pub use vlorql_core::prompt::{ExamplePair, PromptSkill};
 pub use vlorql_core::schema::{DialectProfile, SchemaSnapshot, SqlDialect};
 pub use vlorql_core::validate::{OptimizedPlan, ValidatedPlan};
 pub use vlorql_llm::{
-    LlmClient, LlmConfig, LlmProvider, create_llm_client, detect_template_leak, parse_query_plan,
-    parse_query_plan_lenient,
+    LlmClient, LlmConfig, LlmProvider, StreamResult, TokenUsage, create_llm_client,
+    detect_template_leak, parse_query_plan, parse_query_plan_lenient,
 };
 pub use builder::VlorQlBuilder;
 
@@ -195,7 +195,7 @@ impl VlorQl {
     /// from the cache when possible.  When a [`CompileCache`] is configured,
     /// a plan that has already been compiled for the same dialect is
     /// returned without re-compiling.
-    pub async fn query(&self, question: &str) -> Result<CompiledQuery, VlorQLError> {
+    pub async fn query(&self, question: &str) -> Result<(CompiledQuery, TokenUsage), VlorQLError> {
         let span = tracing::info_span!(
             "vlorql.query",
             question_len = question.len(),
@@ -247,11 +247,12 @@ impl VlorQl {
                 self.llm_cache.get(&cache_key).await;
 
             let mut llm_question = question.to_owned();
+            let mut last_usage = TokenUsage::default();
             for attempt in 0..=self.max_retries {
                 let temperature = retry_temperature(client.config().temperature, attempt);
-                let plan = if attempt == 0 {
+                let (plan, usage) = if attempt == 0 {
                     if let Some(ref cached) = cached_plan {
-                        (**cached).clone()
+                        ((**cached).clone(), TokenUsage::default())
                     } else {
                         let llm_start = std::time::Instant::now();
                         let result = client
@@ -262,8 +263,8 @@ impl VlorQl {
                                 .record(llm_start.elapsed().as_secs_f64(), &[]);
                         }
                         match result {
-                            Ok(plan) => {
-                                plan
+                            Ok((plan, usage)) => {
+                                (plan, usage)
                             }
                             Err(e) if e.is_retryable() && attempt < self.max_retries => {
                                 llm_question = format_retry_question_str(&llm_question, &e, attempt);
@@ -277,8 +278,8 @@ impl VlorQl {
                         .generate_plan(&llm_question, &system_prompt, temperature)
                         .await
                     {
-                        Ok(plan) => {
-                            plan
+                        Ok((plan, usage)) => {
+                            (plan, usage)
                         }
                         Err(e) if e.is_retryable() && attempt < self.max_retries => {
                             llm_question = format_retry_question_str(&llm_question, &e, attempt);
@@ -287,6 +288,7 @@ impl VlorQl {
                         Err(e) => return Err(e),
                     }
                 };
+                last_usage = usage;
                 match self.build_pipeline().validate_repairing(&plan) {
                     Ok(validated_plan) => {
                         // Optimize when an optimizer is configured, then compile.
@@ -317,8 +319,10 @@ impl VlorQl {
                         {
                             if let Some(ref m) = self.metrics {
                                 m.cache_hit_counter.add(1, &[]);
+                                m.llm_prompt_tokens.add(last_usage.prompt_tokens, &[]);
+                                m.llm_completion_tokens.add(last_usage.completion_tokens, &[]);
                             }
-                            return Ok((*cached).clone());
+                            return Ok(((*cached).clone(), last_usage));
                         }
                         if let Some(ref m) = self.metrics {
                             m.cache_miss_counter.add(1, &[]);
@@ -339,12 +343,16 @@ impl VlorQl {
                             .insert(cache_key, Arc::new(plan.clone()))
                             .await;
 
+                        if let Some(ref m) = self.metrics {
+                            m.llm_prompt_tokens.add(last_usage.prompt_tokens, &[]);
+                            m.llm_completion_tokens.add(last_usage.completion_tokens, &[]);
+                        }
                         let elapsed = start.elapsed().as_secs_f64();
                         if let Some(ref m) = self.metrics {
                             m.query_duration_histogram.record(elapsed, &[]);
                             m.active_queries.add(-1, &[]);
                         }
-                        return Ok(compiled);
+                        return Ok((compiled, last_usage));
                     }
                     Err(errors) => {
                         let plan_json = serde_json::to_string(&plan).unwrap_or_default();
@@ -402,7 +410,7 @@ impl VlorQl {
     /// any step of the pipeline (LLM plan generation, validation,
     /// compilation, or database execution) fails.
     pub async fn run(&self, question: &str) -> Result<QueryResult, VlorQLError> {
-        let compiled = self.query(question).await?;
+        let (compiled, _usage) = self.query(question).await?;
         match &self.executor {
             Some(executor) => executor.execute(&compiled).await,
             None => Err(VlorQLError::config(
@@ -747,7 +755,7 @@ mod tests {
             .with_llm_client(boxed_client)
             .build()
             .expect("boxed client should build");
-        let compiled = facade
+        let (compiled, _usage) = facade
             .query("show user ids")
             .await
             .expect("valid mock plan should compile");
@@ -808,8 +816,9 @@ mod tests {
             _question: &str,
             _system_prompt: &str,
             _temperature: Option<f32>,
-        ) -> Result<QueryPlan, VlorQLError> {
-            self.plans
+        ) -> Result<(QueryPlan, TokenUsage), VlorQLError> {
+            let plan = self
+                .plans
                 .lock()
                 .expect("sequence lock should not be poisoned")
                 .pop()
@@ -820,20 +829,21 @@ mod tests {
                         },
                         json!({}),
                     )
-                })
+                })?;
+            Ok((plan, TokenUsage::default()))
         }
 
         async fn stream_plan(
             &self,
             question: String,
             system_prompt: String,
-        ) -> Result<
-            Box<dyn futures::stream::Stream<Item = Result<String, VlorQLError>> + Send + Unpin>,
-            VlorQLError,
-        > {
-            let plan = self.generate_plan(&question, &system_prompt, None).await?;
+        ) -> Result<StreamResult, VlorQLError> {
+            let (plan, _usage) = self.generate_plan(&question, &system_prompt, None).await?;
             let serialized = serde_json::to_string(&plan).unwrap_or_default();
-            Ok(Box::new(futures::stream::iter(vec![Ok(serialized)])))
+            let stream = Box::new(futures::stream::iter(vec![Ok(serialized)]))
+                as Box<dyn futures::stream::Stream<Item = Result<String, VlorQLError>> + Send + Unpin>;
+            let usage = Arc::new(tokio::sync::Mutex::new(Some(TokenUsage::default())));
+            Ok(StreamResult { stream, usage })
         }
 
         fn provider(&self) -> vlorql_llm::LlmProvider {
@@ -871,7 +881,7 @@ mod tests {
             .build()
             .expect("facade should build");
 
-        let compiled = facade
+        let (compiled, _usage) = facade
             .query("show user ids")
             .await
             .expect("second valid plan should be used");
@@ -958,7 +968,7 @@ mod tests {
             .build()
             .expect("facade should build");
 
-        let compiled = facade
+        let (compiled, _usage) = facade
             .query("show user ids")
             .await
             .expect("valid mock plan should compile");
