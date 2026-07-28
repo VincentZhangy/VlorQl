@@ -25,6 +25,7 @@ use futures::stream::Stream;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Duration;
 use vlorql_core::errors::{ConfigErrorKind, LlmErrorKind, VlorQLError};
 use vlorql_core::schema::QueryPlan;
@@ -219,6 +220,20 @@ pub(crate) const DEFAULT_API_BASE: &str = "https://api.openai.com/v1/chat/comple
 pub(crate) const DEFAULT_MAX_ATTEMPTS: usize = 3;
 pub(crate) const DEFAULT_RETRY_DELAY: Duration = Duration::from_secs(1);
 
+/// Token usage returned by an LLM provider.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct TokenUsage {
+    pub prompt_tokens: u64,
+    pub completion_tokens: u64,
+}
+
+/// Result of `stream_plan()`. The stream emits text deltas; after the
+/// stream ends, `usage` contains the provider's token usage (if any).
+pub struct StreamResult {
+    pub stream: Box<dyn Stream<Item = Result<String, VlorQLError>> + Send + Unpin>,
+    pub usage: Arc<tokio::sync::Mutex<Option<TokenUsage>>>,
+}
+
 /// A client that turns a natural-language question into a structured query plan.
 ///
 /// # Examples
@@ -238,8 +253,7 @@ pub(crate) const DEFAULT_RETRY_DELAY: Duration = Duration::from_secs(1);
 ///     joins: None, ctes: None, distinct: false, distinct_on: None, set_operation: None,
 /// };
 /// let client = MockLlmClient::success(plan);
-/// let result = client.generate_plan("test", "prompt", None).await;
-/// assert!(result.is_ok());
+/// let (_plan, _usage) = client.generate_plan("test", "prompt", None).await.unwrap();
 /// # }
 /// ```
 #[async_trait]
@@ -254,14 +268,14 @@ pub trait LlmClient: Send + Sync {
         question: &str,
         system_prompt: &str,
         temperature: Option<f32>,
-    ) -> Result<QueryPlan, VlorQLError>;
+    ) -> Result<(QueryPlan, TokenUsage), VlorQLError>;
 
     /// Streams raw text deltas as the LLM emits them.
     async fn stream_plan(
         &self,
         question: String,
         system_prompt: String,
-    ) -> Result<Box<dyn Stream<Item = Result<String, VlorQLError>> + Send + Unpin>, VlorQLError>;
+    ) -> Result<StreamResult, VlorQLError>;
 
     /// Returns the provider that produced this client.
     fn provider(&self) -> LlmProvider;
@@ -280,7 +294,7 @@ where
         question: &str,
         system_prompt: &str,
         temperature: Option<f32>,
-    ) -> Result<QueryPlan, VlorQLError> {
+    ) -> Result<(QueryPlan, TokenUsage), VlorQLError> {
         (**self)
             .generate_plan(question, system_prompt, temperature)
             .await
@@ -290,8 +304,7 @@ where
         &self,
         question: String,
         system_prompt: String,
-    ) -> Result<Box<dyn Stream<Item = Result<String, VlorQLError>> + Send + Unpin>, VlorQLError>
-    {
+    ) -> Result<StreamResult, VlorQLError> {
         (**self).stream_plan(question, system_prompt).await
     }
 
@@ -310,6 +323,7 @@ pub use local::{LocalBackend, LocalClient};
 pub use zhipu::ZhipuClient;
 pub use openai::OpenAIClient;
 pub use mock::MockLlmClient;
+
 
 /// Creates an LLM client from a populated [`LlmConfig`].
 ///
