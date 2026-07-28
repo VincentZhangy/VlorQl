@@ -207,7 +207,7 @@ pub enum InTarget {
 /// };
 /// assert!(matches!(pred, Predicate::Comparison { .. }));
 /// ```
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, Default)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Predicate {
     /// A comparison between two expressions.
@@ -273,14 +273,11 @@ pub enum Predicate {
     },
     /// A constant `true` value (used internally by the optimizer).
     #[serde(skip_serializing)]
+    #[default]
     True,
     /// A constant `false` value (used internally by the optimizer).
     #[serde(skip_serializing)]
     False,
 }
 
-impl Default for Predicate {
-    fn default() -> Self {
-        Predicate::True
-    }
-}
+
