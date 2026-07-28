@@ -682,10 +682,26 @@ fn normalize_impl(val: &mut Value) -> bool {
                 || (map.contains_key("left") && map.contains_key("op"));
 
             if is_predicate_like {
-                // This is a predicate-like object — run full predicate normalization.
+                // Preserve non-predicate fields that may be dropped by
+                // normalize_predicate's clear+rebuild operations (e.g.
+                // the "op: is_null" code path calls obj.clear()).
+                let preserved: Vec<(String, Value)> = map
+                    .iter()
+                    .filter(|(k, _)| {
+                        !matches!(k.as_str(),
+                            "type" | "left" | "right" | "op" | "child"
+                            | "expr" | "low" | "high" | "target"
+                            | "pattern" | "query")
+                    })
+                    .map(|(k, v)| (k.clone(), v.clone()))
+                    .collect();
+
                 let mut tmp = Value::Object(std::mem::take(map));
                 changed |= normalize_predicate(&mut tmp);
-                if let Value::Object(m) = tmp {
+                if let Value::Object(mut m) = tmp {
+                    for (k, v) in preserved {
+                        m.entry(k).or_insert(v);
+                    }
                     *map = m;
                 }
             }
