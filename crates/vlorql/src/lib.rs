@@ -610,18 +610,18 @@ impl VlorQl {
 
     /// Resolves the schema, optionally through the schema cache.
     async fn resolve_schema(&self) -> ArcSchemaSnapshot {
-        match &self.schema_cache {
-            Some(cache) => {
-                let version = self.schema.metadata.version.clone().unwrap_or_default();
-                let key = SchemaCacheKey {
-                    version,
-                    source: "build".to_owned(),
-                };
-                cache
-                    .get_or_insert_with(key, || async { Arc::clone(&self.schema) })
-                    .await
-            }
-            None => Arc::clone(&self.schema),
+        if let Some(cache) = &self.schema_cache {
+            let version = self.schema.metadata.version.clone().unwrap_or_default();
+            let key = SchemaCacheKey {
+                version,
+                source: "build".to_owned(),
+            };
+            cache
+                .get_or_insert_with(key, || async { Arc::clone(&self.schema) })
+                .await
+        } else {
+            tracing::debug!(target: "vlorql", "resolve_schema: no schema cache configured");
+            Arc::clone(&self.schema)
         }
     }
 }

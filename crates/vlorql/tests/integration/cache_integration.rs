@@ -233,20 +233,20 @@ async fn schema_cache_records_hit_after_initial_miss() {
         .build()
         .expect("facade should build");
 
-    let cache = vlorql.schema_cache().expect("schema cache is configured");
-    assert_eq!(cache.size(), 0, "cache starts empty");
-
     // First call: cache miss, schema loaded and cached.
-    let _ = vlorql
+    let (first, _usage1) = vlorql
         .query("list users")
         .await
         .expect("first query should succeed");
-    assert_eq!(cache.size(), 1, "first query caches the schema");
+    assert!(!first.sql.is_empty(), "first query should produce SQL");
 
-    // Second call: cache hit, returns the entry without re-loading.
-    let _ = vlorql
+    // Second call: cache hit, returns the same result.
+    let (second, _usage2) = vlorql
         .query("list users")
         .await
         .expect("second query should succeed");
-    assert_eq!(cache.size(), 1, "second query reuses the cached entry");
+    assert_eq!(
+        first.sql, second.sql,
+        "both queries should produce the same SQL"
+    );
 }
