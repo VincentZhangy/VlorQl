@@ -252,6 +252,12 @@ pub fn unwrap_array_sides(val: &mut Value) -> bool {
         for field in &["left", "right", "expr", "low", "high"] {
             changed |= unwrap_array_field(obj, field);
         }
+        // Fix array-valued `op` in comparisons: LLM sometimes outputs
+        // `"op":[{"type":"function_call","name":"between",...}, ...]` instead
+        // of `"op":"gt"`. Try to extract a string operator.
+        if pred_type == "comparison" {
+            changed |= unwrap_operator_field(obj);
+        }
     }
 
     changed
@@ -281,6 +287,33 @@ fn unwrap_array_field(obj: &mut serde_json::Map<String, Value>, field: &str) -> 
         return true;
     }
     false
+}
+
+/// Fix array-valued `op` in comparison predicates.
+///
+/// The LLM sometimes outputs `"op":[{"type":"function_call","name":"between",...},...]`
+/// instead of `"op":"gt"`. Try to extract a string operator from the array.
+#[must_use]
+fn unwrap_operator_field(obj: &mut serde_json::Map<String, Value>) -> bool {
+    let arr = match obj.get("op").and_then(|v| v.as_array()) {
+        Some(a) if !a.is_empty() => a.clone(),
+        _ => return false,
+    };
+    // Try first element as a string
+    if let Some(s) = arr[0].as_str() {
+        obj.insert("op".to_owned(), Value::String(s.to_owned()));
+        return true;
+    }
+    // Try first element as an object with a "name" field (e.g. function_call)
+    if let Some(obj_val) = arr[0].as_object()
+        && let Some(name) = obj_val.get("name").and_then(|v| v.as_str())
+    {
+        obj.insert("op".to_owned(), Value::String(name.to_owned()));
+        return true;
+    }
+    // Fallback: use "eq" as safe default
+    obj.insert("op".to_owned(), Value::String("eq".to_owned()));
+    true
 }
 
 /// Inject missing `right` field on comparison predicates.
@@ -603,8 +636,7 @@ pub fn normalize_predicate(val: &mut Value) -> bool {
             }
             // Known predicate types that don't recurse into sub-predicates
             // (their children are Expression, not Predicate):
-            "comparison" | "between" | "in" | "like" | "is_null" | "exists"
-            | "true" | "false" => {
+            "comparison" | "between" | "in" | "like" | "is_null" | "exists" | "true" | "false" => {
                 // no recursive sub-predicates to visit
             }
             other => {

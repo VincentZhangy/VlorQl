@@ -199,22 +199,23 @@ fn normalize_small_model(raw: &mut serde_json::Value) -> bool {
     for &field in &["limit", "offset"] {
         if let Some(v) = obj.get(field)
             && let Some(s) = v.as_str()
-                && let Ok(n) = s.parse::<u64>() {
-                    obj[field] = serde_json::json!(n);
-                    changed = true;
-                }
+            && let Ok(n) = s.parse::<u64>()
+        {
+            obj[field] = serde_json::json!(n);
+            changed = true;
+        }
     }
 
     // 4. Fix WHERE with missing `type` discriminator on predicates.
     if let Some(where_val) = obj.get_mut("where")
         && let Some(where_obj) = where_val.as_object_mut()
-            && !where_obj.contains_key("type")
-                && where_obj.contains_key("left")
-                && where_obj.contains_key("op")
-            {
-                where_obj.insert("type".to_owned(), "comparison".into());
-                changed = true;
-            }
+        && !where_obj.contains_key("type")
+        && where_obj.contains_key("left")
+        && where_obj.contains_key("op")
+    {
+        where_obj.insert("type".to_owned(), "comparison".into());
+        changed = true;
+    }
 
     changed
 }

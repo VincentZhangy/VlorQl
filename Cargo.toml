@@ -19,6 +19,9 @@ readme = "README.md"
 keywords = ["sql", "nlp", "query", "llm", "database"]
 categories = ["database", "compilers", "natural-language"]
 
+[workspace.metadata.husky.hooks]
+pre-commit = "cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings"
+
 [workspace.dependencies]
 thiserror = "1.0"
 serde = { version = "1.0", features = ["derive"] }

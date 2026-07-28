@@ -165,30 +165,32 @@ impl LlmClient for AnthropicClient {
         let extract = move |data: &Value| {
             // Anthropic: input_tokens in message_start, output_tokens in message_delta
             if let Some(u) = data.get("usage")
-                && let Ok(mut guard) = usage_clone.try_lock() {
-                    let current = guard.get_or_insert(TokenUsage::default());
-                    current.prompt_tokens = u
-                        .get("input_tokens")
-                        .and_then(|v| v.as_u64())
-                        .unwrap_or(current.prompt_tokens);
-                    current.completion_tokens = u
-                        .get("output_tokens")
-                        .and_then(|v| v.as_u64())
-                        .unwrap_or(current.completion_tokens);
-                }
+                && let Ok(mut guard) = usage_clone.try_lock()
+            {
+                let current = guard.get_or_insert(TokenUsage::default());
+                current.prompt_tokens = u
+                    .get("input_tokens")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(current.prompt_tokens);
+                current.completion_tokens = u
+                    .get("output_tokens")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(current.completion_tokens);
+            }
             if let Some(msg) = data.get("message")
                 && let Some(u) = msg.get("usage")
-                && let Ok(mut guard) = usage_clone.try_lock() {
-                    let current = guard.get_or_insert(TokenUsage::default());
-                    current.prompt_tokens = u
-                        .get("input_tokens")
-                        .and_then(|v| v.as_u64())
-                        .unwrap_or(current.prompt_tokens);
-                    current.completion_tokens = u
-                        .get("output_tokens")
-                        .and_then(|v| v.as_u64())
-                        .unwrap_or(current.completion_tokens);
-                }
+                && let Ok(mut guard) = usage_clone.try_lock()
+            {
+                let current = guard.get_or_insert(TokenUsage::default());
+                current.prompt_tokens = u
+                    .get("input_tokens")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(current.prompt_tokens);
+                current.completion_tokens = u
+                    .get("output_tokens")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(current.completion_tokens);
+            }
             extract_delta_text(data)
         };
         let stream = self.stream_with_sse(&endpoint, &body, extract).await?;

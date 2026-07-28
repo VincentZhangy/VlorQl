@@ -499,18 +499,19 @@ impl LlmClient for LocalClient {
                 let usage_clone = Arc::clone(&usage);
                 let extract = move |data: &Value| {
                     if let Some(u) = data.get("usage")
-                        && let Ok(mut guard) = usage_clone.try_lock() {
-                            *guard = Some(TokenUsage {
-                                prompt_tokens: u
-                                    .get("prompt_tokens")
-                                    .and_then(|v| v.as_u64())
-                                    .unwrap_or(0),
-                                completion_tokens: u
-                                    .get("completion_tokens")
-                                    .and_then(|v| v.as_u64())
-                                    .unwrap_or(0),
-                            });
-                        }
+                        && let Ok(mut guard) = usage_clone.try_lock()
+                    {
+                        *guard = Some(TokenUsage {
+                            prompt_tokens: u
+                                .get("prompt_tokens")
+                                .and_then(|v| v.as_u64())
+                                .unwrap_or(0),
+                            completion_tokens: u
+                                .get("completion_tokens")
+                                .and_then(|v| v.as_u64())
+                                .unwrap_or(0),
+                        });
+                    }
                     extract_delta_content(data)
                 };
                 let stream = self.stream_with_sse(&endpoint, &body, extract).await?;

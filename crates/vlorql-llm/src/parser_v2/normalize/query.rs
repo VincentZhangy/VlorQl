@@ -180,17 +180,56 @@ fn sanitize_null_array_entries(val: &mut serde_json::Value) -> bool {
     changed
 }
 
+/// Sanitize string values that contain JSON syntax residuals from
+/// corrupted LLM output (e.g. `"type':'column_ref'}]}};{"` inside a
+/// column name). Removes characters that have no place in a natural
+/// language identifier.
+///
+/// Scans the entire Value tree recursively.
+#[must_use]
+pub fn sanitize_strings(val: &mut serde_json::Value) -> bool {
+    let mut changed = false;
+    sanitize_strings_impl(val, &mut changed);
+    changed
+}
+
+fn sanitize_strings_impl(val: &mut serde_json::Value, changed: &mut bool) {
+    match val {
+        serde_json::Value::String(s) => {
+            let cleaned: String = s.chars().filter(|&c| c != '\'' && c != '`').collect();
+            if cleaned.len() != s.len() {
+                *s = cleaned;
+                *changed = true;
+            }
+        }
+        serde_json::Value::Object(map) => {
+            for v in map.values_mut() {
+                sanitize_strings_impl(v, changed);
+            }
+        }
+        serde_json::Value::Array(arr) => {
+            for v in arr.iter_mut() {
+                sanitize_strings_impl(v, changed);
+            }
+        }
+        _ => {}
+    }
+}
+
 /// Full query-level structure normalization.
 ///
-/// 1. Wrap top-level `descending` + `expr` into `order_by` (must run
+/// 1. Sanitize garbled strings in the entire tree.
+/// 2. Wrap top-level `descending` + `expr` into `order_by` (must run
 ///    before `strip_unknown_fields` so these fields are preserved).
-/// 2. Lift nested plan fields from `where` back to top level.
-/// 3. Strip unknown top-level fields.
-/// 4. Remove null entries from array fields.
-/// 5. Normalize string limit/offset to numbers.
+/// 3. Lift nested plan fields from `where` back to top level.
+/// 4. Strip unknown top-level fields.
+/// 5. Remove null entries from array fields.
+/// 6. Normalize string limit/offset to numbers.
 #[must_use]
 pub fn normalize(val: &mut serde_json::Value) -> bool {
     let mut changed = false;
+    // Sanitize garbled strings first, before any structural normalizations.
+    changed |= sanitize_strings(val);
     // Wrap first: expr + descending → order_by, before they get stripped.
     changed |= wrap_descending_expr(val);
     // Lift plan fields from within `where` before stripping.
