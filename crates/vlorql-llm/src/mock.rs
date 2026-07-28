@@ -1,10 +1,10 @@
+use crate::{LlmClient, LlmConfig, LlmProvider, StreamResult, TokenUsage};
 use async_trait::async_trait;
 use futures::stream;
 use serde_json::json;
 use std::sync::Arc;
 use vlorql_core::errors::{LlmErrorKind, VlorQLError};
 use vlorql_core::schema::QueryPlan;
-use crate::{LlmClient, LlmConfig, LlmProvider, StreamResult, TokenUsage};
 
 /// A deterministic client for unit and integration tests.
 ///
@@ -122,7 +122,9 @@ impl LlmClient for MockLlmClient {
                 json!({"source": "mock"}),
             );
             let stream = Box::new(stream::iter(vec![Err(err)]))
-                as Box<dyn futures::stream::Stream<Item = Result<String, VlorQLError>> + Send + Unpin>;
+                as Box<
+                    dyn futures::stream::Stream<Item = Result<String, VlorQLError>> + Send + Unpin,
+                >;
             return Ok(StreamResult { stream, usage });
         }
         let serialized = serde_json::to_string(&self.plan.clone().unwrap_or_else(default_plan))

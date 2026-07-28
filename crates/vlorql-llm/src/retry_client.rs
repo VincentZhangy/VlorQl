@@ -6,18 +6,18 @@
 
 use async_trait::async_trait;
 use futures::stream::Stream;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tokio::sync::mpsc;
 use tokio::time::sleep;
 use tracing::warn;
 use vlorql_core::errors::{LlmErrorKind, VlorQLError};
 use vlorql_core::schema::QueryPlan;
 
+use crate::TokenUsage;
 use crate::sse::{
     drive_sse_consumer_with, is_retryable, response_message, retry_backoff, sse_lines,
     transport_error, truncate,
 };
-use crate::TokenUsage;
 
 fn parse_usage_from_response(text: &str) -> TokenUsage {
     use serde_json::Value;
@@ -97,10 +97,7 @@ pub(crate) trait RetryableHttpClient: Send + Sync {
             match response {
                 Ok(resp) => {
                     let status = resp.status();
-                    let text = resp
-                        .text()
-                        .await
-                        .map_err(|error| transport_error(&error))?;
+                    let text = resp.text().await.map_err(|error| transport_error(&error))?;
                     if !status.is_success() {
                         let error = VlorQLError::llm(
                             LlmErrorKind::ApiError {
@@ -169,10 +166,7 @@ pub(crate) trait RetryableHttpClient: Send + Sync {
         endpoint: &str,
         body: &Value,
         extract_delta: F,
-    ) -> Result<
-        Box<dyn Stream<Item = Result<String, VlorQLError>> + Send + Unpin>,
-        VlorQLError,
-    >
+    ) -> Result<Box<dyn Stream<Item = Result<String, VlorQLError>> + Send + Unpin>, VlorQLError>
     where
         F: Fn(&Value) -> Option<String> + Send + 'static,
     {
@@ -199,14 +193,8 @@ pub(crate) trait RetryableHttpClient: Send + Sync {
         let max_attempts = self.max_attempts();
         let retry_base = DEFAULT_RETRY_DELAY;
         tokio::spawn(async move {
-            if !drive_sse_consumer_with(
-                line_stream,
-                tx,
-                max_attempts,
-                retry_base,
-                extract_delta,
-            )
-            .await
+            if !drive_sse_consumer_with(line_stream, tx, max_attempts, retry_base, extract_delta)
+                .await
             {
                 warn!("{label} SSE consumer ended before producing content");
             }

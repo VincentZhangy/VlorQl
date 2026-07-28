@@ -24,9 +24,7 @@ pub fn validate_against_schema(val: &Value) -> Result<(), Vec<String>> {
 
     let errors: Vec<String> = compiled
         .iter_errors(val)
-        .map(|e| {
-            format!("Schema violation: {e}")
-        })
+        .map(|e| format!("Schema violation: {e}"))
         .collect();
 
     if errors.is_empty() {

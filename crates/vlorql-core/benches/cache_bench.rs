@@ -10,7 +10,9 @@
 
 use criterion::{Criterion, criterion_group, criterion_main};
 use std::sync::Arc;
-use vlorql_core::cache::{CompileCache, LlmCacheKey, LlmResponseCache, SchemaCache, SchemaCacheKey};
+use vlorql_core::cache::{
+    CompileCache, LlmCacheKey, LlmResponseCache, SchemaCache, SchemaCacheKey,
+};
 use vlorql_core::compile::CompiledQuery;
 use vlorql_core::schema::{
     ColumnSchema, DataType, DialectProfile, FromClause, Projection, QueryPlan, SchemaMetadata,

@@ -1,3 +1,4 @@
+use crate::{MAX_RETRY_FEEDBACK_ERRORS, StreamEvent};
 use futures::StreamExt;
 use serde_json::json;
 use std::sync::Arc;
@@ -10,7 +11,6 @@ use vlorql_core::policy::{PolicyConfig, PolicyEngine};
 use vlorql_core::schema::{ArcSchemaSnapshot, DialectProfile, QueryPlan};
 use vlorql_core::validate::ValidationPipeline;
 use vlorql_llm::{LlmClient, detect_template_leak, parse_query_plan};
-use crate::{StreamEvent, MAX_RETRY_FEEDBACK_ERRORS};
 
 /// Sampling temperature for retry `attempt` (0 = first call). The first
 /// call keeps the configured default (deterministic); each retry nudges
@@ -23,7 +23,11 @@ pub(crate) fn retry_temperature(base: f32, attempt: usize) -> Option<f32> {
     }
 }
 
-pub(crate) fn format_retry_question_str(question: &str, error: &VlorQLError, attempt: usize) -> String {
+pub(crate) fn format_retry_question_str(
+    question: &str,
+    error: &VlorQLError,
+    attempt: usize,
+) -> String {
     let raw = error.to_string();
     let feedback = if attempt == 0 {
         raw.lines().next().unwrap_or(&raw).to_owned()

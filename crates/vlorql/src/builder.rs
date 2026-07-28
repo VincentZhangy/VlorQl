@@ -1,3 +1,4 @@
+use crate::{DEFAULT_MAX_RETRIES, VlorQl};
 use serde_json::json;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -13,7 +14,6 @@ use vlorql_core::schema::{
 };
 use vlorql_core::statistics::StatisticsProvider;
 use vlorql_llm::{LlmClient, LlmConfig, create_llm_client};
-use crate::{VlorQl, DEFAULT_MAX_RETRIES};
 
 /// Builder for [`VlorQl`].
 ///
@@ -214,8 +214,11 @@ impl VlorQlBuilder {
             let cache = handle.block_on(CompileCache::load(&path, max_size, ttl_seconds));
             self.compile_cache = Some(Arc::new(cache));
         } else {
-            self.compile_cache =
-                Some(Arc::new(CompileCache::with_persistence(max_size, ttl_seconds, path)));
+            self.compile_cache = Some(Arc::new(CompileCache::with_persistence(
+                max_size,
+                ttl_seconds,
+                path,
+            )));
         }
         self
     }

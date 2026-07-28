@@ -13,7 +13,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use anyhow::{Result, anyhow};
-use futures::stream::{Stream, StreamExt};
+use futures::stream::StreamExt;
 use vlorql::{CompiledQuery, SchemaSnapshot, SqlDialect, StreamEvent, VlorQl};
 use vlorql_core::errors::VlorQLError;
 use vlorql_core::policy::PolicyConfig;

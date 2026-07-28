@@ -134,7 +134,11 @@ impl<'a> QueryBuilder<'a> {
             }
             Expression::ColumnRef { table, column } => {
                 let max_depth = if self.in_cte { None } else { Some(1) };
-                buf.push_str(&self.render_qualified_identifier(table.as_deref(), column, max_depth)?);
+                buf.push_str(&self.render_qualified_identifier(
+                    table.as_deref(),
+                    column,
+                    max_depth,
+                )?);
                 Ok(())
             }
             Expression::FunctionCall {
@@ -516,7 +520,11 @@ impl<'a> QueryBuilder<'a> {
                     alias,
                 } => {
                     let max_depth = if self.in_cte { None } else { Some(1) };
-                    sql.push_str(&self.render_qualified_identifier(table.as_deref(), column, max_depth)?);
+                    sql.push_str(&self.render_qualified_identifier(
+                        table.as_deref(),
+                        column,
+                        max_depth,
+                    )?);
                     if let Some(alias) = alias {
                         write!(sql, " AS {}", self.quote_identifier(alias)?)
                             .map_err(formatting_error)?;

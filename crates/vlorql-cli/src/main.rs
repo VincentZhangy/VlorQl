@@ -115,7 +115,13 @@ async fn main() -> Result<()> {
             let facade = build_facade(
                 file_config,
                 dialect.as_deref(),
-                Some(LlmOverrides { provider, api_key, model, api_base, max_retries }),
+                Some(LlmOverrides {
+                    provider,
+                    api_key,
+                    model,
+                    api_base,
+                    max_retries,
+                }),
             )?;
             let (compiled, _usage) = facade
                 .query(&question)
@@ -195,7 +201,8 @@ fn build_facade(
 
     if let Some(overrides) = llm_overrides {
         let api_key_env = llm.api_key_env.as_deref().unwrap_or("LLM_API_KEY");
-        let api_key = overrides.api_key
+        let api_key = overrides
+            .api_key
             .or_else(|| env::var(api_key_env).ok())
             .filter(|key| !key.trim().is_empty());
         let model = overrides.model.or(llm.model);

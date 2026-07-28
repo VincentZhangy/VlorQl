@@ -139,7 +139,9 @@ impl CompileCache {
             key.plan_hash,
             key.dialect,
         );
-        self.inner.insert(key.clone(), Arc::new(query.clone())).await;
+        self.inner
+            .insert(key.clone(), Arc::new(query.clone()))
+            .await;
         self.entries.lock().unwrap().insert(key, query);
     }
 
@@ -243,8 +245,15 @@ impl CompileCache {
             }
         };
         for (key, query) in &entries {
-            cache.inner.insert(key.clone(), Arc::new(query.clone())).await;
-            cache.entries.lock().unwrap().insert(key.clone(), query.clone());
+            cache
+                .inner
+                .insert(key.clone(), Arc::new(query.clone()))
+                .await;
+            cache
+                .entries
+                .lock()
+                .unwrap()
+                .insert(key.clone(), query.clone());
         }
         cache
     }
@@ -562,7 +571,9 @@ mod tests {
         let dir = std::env::temp_dir();
         let path = dir.join(format!("compile_cache_test_corrupt_{}", std::process::id()));
         std::fs::remove_file(&path).ok();
-        tokio::fs::write(&path, b"not valid bincode data").await.expect("write");
+        tokio::fs::write(&path, b"not valid bincode data")
+            .await
+            .expect("write");
 
         let cache = CompileCache::load(&path, 1024, 60).await;
         assert_eq!(cache.size(), 0, "corrupt file should load as empty");

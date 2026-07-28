@@ -49,7 +49,10 @@ fn validate_plan_with_outer(
     // be in the GROUP BY clause, producing invalid SQL in most dialects.
     if plan.group_by.is_some()
         && plan.group_by.as_ref().is_some_and(|g| !g.is_empty())
-        && plan.select.iter().any(|p| matches!(p, Projection::Star { .. }))
+        && plan
+            .select
+            .iter()
+            .any(|p| matches!(p, Projection::Star { .. }))
     {
         errors.push(VlorQLError::validation(
             crate::errors::ValidationErrorKind::AggregationMismatch {

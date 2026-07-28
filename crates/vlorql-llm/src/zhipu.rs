@@ -251,11 +251,15 @@ impl LlmClient for ZhipuClient {
                 if let Ok(mut guard) = usage_clone.try_lock() {
                     *guard = Some(TokenUsage {
                         prompt_tokens: u.get("prompt_tokens").and_then(|v| v.as_u64()).unwrap_or(0),
-                        completion_tokens: u.get("completion_tokens").and_then(|v| v.as_u64()).unwrap_or(0),
+                        completion_tokens: u
+                            .get("completion_tokens")
+                            .and_then(|v| v.as_u64())
+                            .unwrap_or(0),
                     });
                 }
             }
-            data.pointer("/choices/0/delta/content").and_then(|v| v.as_str().map(String::from))
+            data.pointer("/choices/0/delta/content")
+                .and_then(|v| v.as_str().map(String::from))
         };
         let stream = self.stream_with_sse(&endpoint, &body, extract).await?;
         Ok(StreamResult { stream, usage })

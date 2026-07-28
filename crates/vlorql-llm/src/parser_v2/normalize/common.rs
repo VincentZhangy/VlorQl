@@ -74,7 +74,10 @@ pub fn canonical_data_type(dt: &str, value: Option<&Value>) -> Option<&'static s
 /// Returns `None` if the type is already canonical or unknown.
 #[must_use]
 pub fn resolve_sql_type_alias(dt: &str) -> Option<&'static str> {
-    DATA_TYPE_ALIASES.iter().find(|(from, _)| *from == dt).map(|(_, to)| *to)
+    DATA_TYPE_ALIASES
+        .iter()
+        .find(|(from, _)| *from == dt)
+        .map(|(_, to)| *to)
 }
 
 /// Returns `true` when the value is an empty JSON array `[]`.
@@ -117,7 +120,10 @@ mod tests {
     }
     #[test]
     fn canonical_data_type_number_float_value() {
-        assert_eq!(canonical_data_type("number", Some(&json!(3.14))), Some("float"));
+        assert_eq!(
+            canonical_data_type("number", Some(&json!(3.14))),
+            Some("float")
+        );
     }
     #[test]
     fn canonical_data_type_already_canonical() {

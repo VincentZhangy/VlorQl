@@ -203,7 +203,11 @@ fn fold_constant_comparison(predicate: &mut Predicate) -> bool {
             _ => None,
         };
         if let Some(result) = result {
-            *predicate = if result { Predicate::True } else { Predicate::False };
+            *predicate = if result {
+                Predicate::True
+            } else {
+                Predicate::False
+            };
             return true;
         }
     }
@@ -220,7 +224,11 @@ fn simplify_trivial_comparison(predicate: &mut Predicate) -> bool {
             op,
             ComparisonOperator::Eq | ComparisonOperator::Gte | ComparisonOperator::Lte
         );
-        *predicate = if is_eq { Predicate::True } else { Predicate::False };
+        *predicate = if is_eq {
+            Predicate::True
+        } else {
+            Predicate::False
+        };
         return true;
     }
     false
@@ -432,13 +440,6 @@ mod tests {
     use super::*;
     use serde_json::json;
     use vlorql_core::schema::DataType;
-
-    fn lit_bool(v: bool) -> Expression {
-        Expression::Literal {
-            value: json!(v),
-            data_type: DataType::Boolean,
-        }
-    }
 
     fn lit_int(v: i64) -> Expression {
         Expression::Literal {

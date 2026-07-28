@@ -279,5 +279,3 @@ pub enum Predicate {
     #[serde(skip_serializing)]
     False,
 }
-
-

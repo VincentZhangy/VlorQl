@@ -34,18 +34,18 @@ use vlorql_core::schema::QueryPlan;
 mod retry_client;
 pub(crate) use retry_client::RetryableHttpClient;
 
-pub(crate) mod sse;
 pub(crate) mod schema;
+pub(crate) mod sse;
 
 // ── Public: LLM providers ─────────────────────────────────────────
 pub mod anthropic;
 pub mod deepseek;
 pub mod local;
-pub mod zhipu;
-/// OpenAI-compatible chat-completions client.
-pub mod openai;
 /// A deterministic client for unit and integration tests.
 pub mod mock;
+/// OpenAI-compatible chat-completions client.
+pub mod openai;
+pub mod zhipu;
 
 // ── Public: V2 parse pipeline ─────────────────────────────────────
 pub mod parser_v2;
@@ -322,10 +322,9 @@ where
 pub use anthropic::AnthropicClient;
 pub use deepseek::DeepSeekClient;
 pub use local::{LocalBackend, LocalClient};
-pub use zhipu::ZhipuClient;
-pub use openai::OpenAIClient;
 pub use mock::MockLlmClient;
-
+pub use openai::OpenAIClient;
+pub use zhipu::ZhipuClient;
 
 /// Creates an LLM client from a populated [`LlmConfig`].
 ///
@@ -503,8 +502,8 @@ mod tests {
             .with_body(response_for(&expected))
             .create_async()
             .await;
-        let client = OpenAIClient::new("key", "local-model")
-            .with_api_base(format!("{}/", server.url()));
+        let client =
+            OpenAIClient::new("key", "local-model").with_api_base(format!("{}/", server.url()));
         let request_body = client.request_body("q", "s", None);
         assert_eq!(request_body["model"], "local-model");
         assert_eq!(request_body["response_format"]["type"], "json_object");
@@ -534,8 +533,8 @@ mod tests {
             .with_body(response_for(&expected))
             .create_async()
             .await;
-        let client = OpenAIClient::new("key", "local-model")
-            .with_api_base(format!("{}/v1", server.url()));
+        let client =
+            OpenAIClient::new("key", "local-model").with_api_base(format!("{}/v1", server.url()));
 
         let (actual, _usage) = client
             .generate_plan("q", "s", None)
@@ -560,8 +559,8 @@ mod tests {
             )
             .create_async()
             .await;
-        let client = OpenAIClient::new("key", "local-model")
-            .with_api_base(format!("{}/v1", server.url()));
+        let client =
+            OpenAIClient::new("key", "local-model").with_api_base(format!("{}/v1", server.url()));
 
         let error = client
             .generate_plan("q", "s", None)
@@ -631,8 +630,8 @@ mod tests {
             .create_async()
             .await;
 
-        let client = OpenAIClient::new("key", "local-model")
-            .with_api_base(format!("{}/v1", server.url()));
+        let client =
+            OpenAIClient::new("key", "local-model").with_api_base(format!("{}/v1", server.url()));
         let mut result = client
             .stream_plan("hi".to_owned(), "system".to_owned())
             .await
@@ -654,8 +653,8 @@ mod tests {
             .with_body(r#"{"error":{"message":"down"}}"#)
             .create_async()
             .await;
-        let client = OpenAIClient::new("key", "local-model")
-            .with_api_base(format!("{}/v1", server.url()));
+        let client =
+            OpenAIClient::new("key", "local-model").with_api_base(format!("{}/v1", server.url()));
         let outcome = client
             .stream_plan("hi".to_owned(), "system".to_owned())
             .await;

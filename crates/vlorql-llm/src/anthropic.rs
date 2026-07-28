@@ -167,8 +167,14 @@ impl LlmClient for AnthropicClient {
             if let Some(u) = data.get("usage") {
                 if let Ok(mut guard) = usage_clone.try_lock() {
                     let current = guard.get_or_insert(TokenUsage::default());
-                    current.prompt_tokens = u.get("input_tokens").and_then(|v| v.as_u64()).unwrap_or(current.prompt_tokens);
-                    current.completion_tokens = u.get("output_tokens").and_then(|v| v.as_u64()).unwrap_or(current.completion_tokens);
+                    current.prompt_tokens = u
+                        .get("input_tokens")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(current.prompt_tokens);
+                    current.completion_tokens = u
+                        .get("output_tokens")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(current.completion_tokens);
                 }
             }
             if let Some(msg) = data.get("message")
@@ -176,8 +182,14 @@ impl LlmClient for AnthropicClient {
             {
                 if let Ok(mut guard) = usage_clone.try_lock() {
                     let current = guard.get_or_insert(TokenUsage::default());
-                    current.prompt_tokens = u.get("input_tokens").and_then(|v| v.as_u64()).unwrap_or(current.prompt_tokens);
-                    current.completion_tokens = u.get("output_tokens").and_then(|v| v.as_u64()).unwrap_or(current.completion_tokens);
+                    current.prompt_tokens = u
+                        .get("input_tokens")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(current.prompt_tokens);
+                    current.completion_tokens = u
+                        .get("output_tokens")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(current.completion_tokens);
                 }
             }
             extract_delta_text(data)

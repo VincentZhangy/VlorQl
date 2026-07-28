@@ -356,11 +356,17 @@ fn parse_local_usage(body: &str, backend: LocalBackend) -> TokenUsage {
                 .get("usage")
                 .map(|u| TokenUsage {
                     prompt_tokens: u.get("prompt_tokens").and_then(|v| v.as_u64()).unwrap_or(0),
-                    completion_tokens: u.get("completion_tokens").and_then(|v| v.as_u64()).unwrap_or(0),
+                    completion_tokens: u
+                        .get("completion_tokens")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(0),
                 })
                 .unwrap_or_default(),
             LocalBackend::Ollama => TokenUsage {
-                prompt_tokens: val.get("prompt_eval_count").and_then(|v| v.as_u64()).unwrap_or(0),
+                prompt_tokens: val
+                    .get("prompt_eval_count")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0),
                 completion_tokens: val.get("eval_count").and_then(|v| v.as_u64()).unwrap_or(0),
             },
         },
@@ -401,10 +407,7 @@ impl LlmClient for LocalClient {
             match response {
                 Ok(resp) => {
                     let status = resp.status();
-                    let text = resp
-                        .text()
-                        .await
-                        .map_err(|error| transport_error(&error))?;
+                    let text = resp.text().await.map_err(|error| transport_error(&error))?;
                     if status.is_success() {
                         let plan = parse_completion_payload(&text, self.backend)?;
                         let usage = parse_local_usage(&text, self.backend);
@@ -498,8 +501,14 @@ impl LlmClient for LocalClient {
                     if let Some(u) = data.get("usage") {
                         if let Ok(mut guard) = usage_clone.try_lock() {
                             *guard = Some(TokenUsage {
-                                prompt_tokens: u.get("prompt_tokens").and_then(|v| v.as_u64()).unwrap_or(0),
-                                completion_tokens: u.get("completion_tokens").and_then(|v| v.as_u64()).unwrap_or(0),
+                                prompt_tokens: u
+                                    .get("prompt_tokens")
+                                    .and_then(|v| v.as_u64())
+                                    .unwrap_or(0),
+                                completion_tokens: u
+                                    .get("completion_tokens")
+                                    .and_then(|v| v.as_u64())
+                                    .unwrap_or(0),
                             });
                         }
                     }
@@ -538,7 +547,8 @@ impl LlmClient for LocalClient {
 
                 let output = tokio_stream::wrappers::UnboundedReceiverStream::new(rx);
                 Ok(StreamResult {
-                    stream: Box::new(Box::pin(output)) as Box<dyn Stream<Item = Result<String, VlorQLError>> + Send + Unpin>,
+                    stream: Box::new(Box::pin(output))
+                        as Box<dyn Stream<Item = Result<String, VlorQLError>> + Send + Unpin>,
                     usage,
                 })
             }

@@ -1,3 +1,7 @@
+use crate::schema::compact_query_plan_schema;
+use crate::sse::{transport_error, truncate};
+use crate::{DEFAULT_API_BASE, DEFAULT_MAX_ATTEMPTS};
+use crate::{LlmClient, LlmConfig, LlmProvider, RetryableHttpClient, StreamResult, TokenUsage};
 use async_trait::async_trait;
 use serde_json::{Value, json};
 use std::sync::Arc;
@@ -5,10 +9,6 @@ use std::time::Duration;
 use tracing::Instrument;
 use vlorql_core::errors::{LlmErrorKind, VlorQLError};
 use vlorql_core::schema::QueryPlan;
-use crate::{RetryableHttpClient, LlmClient, LlmConfig, LlmProvider, StreamResult, TokenUsage};
-use crate::schema::compact_query_plan_schema;
-use crate::sse::{transport_error, truncate};
-use crate::{DEFAULT_API_BASE, DEFAULT_MAX_ATTEMPTS};
 
 /// OpenAI-compatible chat-completions client.
 #[derive(Clone)]
@@ -29,7 +29,10 @@ impl std::fmt::Debug for OpenAIClient {
             .field("model", &self.model)
             .field("api_base", &self.api_base)
             .field("max_attempts", &self.max_attempts())
-            .field("strict_json_schema_override", &self.strict_json_schema_override)
+            .field(
+                "strict_json_schema_override",
+                &self.strict_json_schema_override,
+            )
             .field("provider", &self.config.provider)
             .finish()
     }
@@ -151,7 +154,12 @@ impl OpenAIClient {
         })
     }
 
-    pub(crate) fn request_body(&self, question: &str, system_prompt: &str, temperature: Option<f32>) -> Value {
+    pub(crate) fn request_body(
+        &self,
+        question: &str,
+        system_prompt: &str,
+        temperature: Option<f32>,
+    ) -> Value {
         let response_format = if self.supports_strict_json_schema() {
             json!({
                 "type": "json_schema",
@@ -218,8 +226,8 @@ impl RetryableHttpClient for OpenAIClient {
             .ok_or_else(|| {
                 VlorQLError::llm(
                     LlmErrorKind::ParseError {
-                        details:
-                            "OpenAI response did not contain choices[0].message.content".to_owned(),
+                        details: "OpenAI response did not contain choices[0].message.content"
+                            .to_owned(),
                     },
                     json!({"source": "provider_response"}),
                 )
@@ -297,12 +305,19 @@ impl LlmClient for OpenAIClient {
                 if let Some(u) = data.get("usage") {
                     if let Ok(mut guard) = usage_clone.try_lock() {
                         *guard = Some(TokenUsage {
-                            prompt_tokens: u.get("prompt_tokens").and_then(|v| v.as_u64()).unwrap_or(0),
-                            completion_tokens: u.get("completion_tokens").and_then(|v| v.as_u64()).unwrap_or(0),
+                            prompt_tokens: u
+                                .get("prompt_tokens")
+                                .and_then(|v| v.as_u64())
+                                .unwrap_or(0),
+                            completion_tokens: u
+                                .get("completion_tokens")
+                                .and_then(|v| v.as_u64())
+                                .unwrap_or(0),
                         });
                     }
                 }
-                data.pointer("/choices/0/delta/content").and_then(|v| v.as_str().map(String::from))
+                data.pointer("/choices/0/delta/content")
+                    .and_then(|v| v.as_str().map(String::from))
             };
             let stream = self.stream_with_sse(&endpoint, &body, extract).await?;
             Ok(StreamResult { stream, usage })

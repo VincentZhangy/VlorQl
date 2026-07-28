@@ -205,11 +205,10 @@ async fn query_exhausts_retries_then_returns_last_error() {
         .build()
         .expect("facade should build");
 
-    let error =
-        facade
-            .query("show user ids")
-            .await
-            .expect_err("exhausting retries should surface the last error");
+    let error = facade
+        .query("show user ids")
+        .await
+        .expect_err("exhausting retries should surface the last error");
     // The exact kind depends on the inner validator, but it must be a
     // validation error (the only retryable category).
     assert!(
@@ -232,11 +231,10 @@ async fn query_does_not_retry_non_retryable_llm_errors() {
         .build()
         .expect("facade should build");
 
-    let error =
-        facade
-            .query("anything")
-            .await
-            .expect_err("failure mock should bubble up an error");
+    let error = facade
+        .query("anything")
+        .await
+        .expect_err("failure mock should bubble up an error");
     assert!(matches!(
         error,
         VlorQLError::Llm {

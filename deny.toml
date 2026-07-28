@@ -19,6 +19,13 @@ ignore = [
     # opentelemetry_sdk v0.28.0 transitively depends on async-std (discontinued).
     # Upstream issue: https://github.com/open-telemetry/opentelemetry-rust/issues/2034
     "RUSTSEC-2025-0052",
+    # bincode v1.3.3 is unmaintained; used by vlorql-core for CompileCache persistence.
+    # Upstream: https://rustsec.org/advisories/RUSTSEC-2025-0141
+    "RUSTSEC-2025-0141",
+    # rsa v0.9.10 (transitive via sqlx-mysql) — Marvin Attack timing sidechannel.
+    # Upstream: https://rustsec.org/advisories/RUSTSEC-2023-0071
+    # Used only for MySQL authentication, not exposed to network adversaries.
+    "RUSTSEC-2023-0071",
 ]
 git-fetch-with-cli = true
 
@@ -30,9 +37,16 @@ allow = [
     "Unicode-3.0",
     "Unlicense",
     "BSL-1.0",
+    "ISC",
+    "Zlib",
+    "MPL-2.0",
+    "MIT-0",
 ]
 confidence-threshold = 0.8
-exceptions = []
+exceptions = [
+    # cargo-husky is a build-only dependency and does not ship a license file.
+    { name = "cargo-husky", allow = ["MIT"] },
+]
 
 [licenses.private]
 ignore = false

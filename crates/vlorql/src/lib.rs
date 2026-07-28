@@ -14,10 +14,10 @@
 
 #![deny(missing_docs)]
 
-pub mod execute;
-pub(crate) mod retry;
 /// Builder for [`VlorQl`] (re-exported from the `builder` submodule).
 pub mod builder;
+pub mod execute;
+pub(crate) mod retry;
 
 use futures::stream::Stream;
 use serde_json::json;
@@ -41,6 +41,7 @@ use crate::retry::{
     validation_errors_to_error,
 };
 
+pub use builder::VlorQlBuilder;
 pub use vlorql_core::cache::{CompileCache, PromptCache, SchemaCache, SchemaCacheKey};
 pub use vlorql_core::compile::{
     CompiledQuery, DialectConfig, DialectRegistry, Parameter, RewriteEngine, RewriteRule,
@@ -54,7 +55,6 @@ pub use vlorql_llm::{
     LlmClient, LlmConfig, LlmProvider, StreamResult, TokenUsage, create_llm_client,
     detect_template_leak, parse_query_plan, parse_query_plan_lenient,
 };
-pub use builder::VlorQlBuilder;
 
 const DEFAULT_MAX_RETRIES: usize = 3;
 
@@ -247,8 +247,7 @@ impl VlorQl {
                 schema_version,
                 model_fingerprint,
             };
-            let cached_plan: Option<Arc<QueryPlan>> =
-                self.llm_cache.get(&cache_key).await;
+            let cached_plan: Option<Arc<QueryPlan>> = self.llm_cache.get(&cache_key).await;
 
             let mut llm_question = question.to_owned();
             let mut last_usage = TokenUsage::default();
@@ -272,7 +271,8 @@ impl VlorQl {
                                 plan
                             }
                             Err(e) if e.is_retryable() && attempt < self.max_retries => {
-                                llm_question = format_retry_question_str(&llm_question, &e, attempt);
+                                llm_question =
+                                    format_retry_question_str(&llm_question, &e, attempt);
                                 continue;
                             }
                             Err(e) => return Err(e),
@@ -325,7 +325,8 @@ impl VlorQl {
                             if let Some(ref m) = self.metrics {
                                 m.cache_hit_counter.add(1, &[]);
                                 m.llm_prompt_tokens.add(last_usage.prompt_tokens, &[]);
-                                m.llm_completion_tokens.add(last_usage.completion_tokens, &[]);
+                                m.llm_completion_tokens
+                                    .add(last_usage.completion_tokens, &[]);
                             }
                             return Ok(((*cached).clone(), last_usage));
                         }
@@ -350,7 +351,8 @@ impl VlorQl {
 
                         if let Some(ref m) = self.metrics {
                             m.llm_prompt_tokens.add(last_usage.prompt_tokens, &[]);
-                            m.llm_completion_tokens.add(last_usage.completion_tokens, &[]);
+                            m.llm_completion_tokens
+                                .add(last_usage.completion_tokens, &[]);
                         }
                         let elapsed = start.elapsed().as_secs_f64();
                         if let Some(ref m) = self.metrics {
@@ -863,7 +865,9 @@ mod tests {
             let (plan, _usage) = self.generate_plan(&question, &system_prompt, None).await?;
             let serialized = serde_json::to_string(&plan).unwrap_or_default();
             let stream = Box::new(futures::stream::iter(vec![Ok(serialized)]))
-                as Box<dyn futures::stream::Stream<Item = Result<String, VlorQLError>> + Send + Unpin>;
+                as Box<
+                    dyn futures::stream::Stream<Item = Result<String, VlorQLError>> + Send + Unpin,
+                >;
             let usage = Arc::new(tokio::sync::Mutex::new(Some(TokenUsage::default())));
             Ok(StreamResult { stream, usage })
         }

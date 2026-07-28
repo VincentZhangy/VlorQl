@@ -185,7 +185,10 @@ fn normalize_small_model(raw: &mut serde_json::Value) -> bool {
 
     // 2. Fix `"from": "table_name"` (string) → `"from": {"table": "table_name"}`.
     {
-        let table_name = obj.get("from").and_then(|v| v.as_str()).map(|s| s.to_owned());
+        let table_name = obj
+            .get("from")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_owned());
         if let Some(name) = table_name {
             obj["from"] = serde_json::json!({"table": name});
             changed = true;
@@ -415,7 +418,8 @@ mod tests {
 
     #[test]
     fn small_model_fixes_limit_string() {
-        let mut val = json!({"select": [{"column": "id"}], "from": {"table": "users"}, "limit": "10"});
+        let mut val =
+            json!({"select": [{"column": "id"}], "from": {"table": "users"}, "limit": "10"});
         assert!(normalize_small_model(&mut val));
         assert_eq!(val["limit"], 10);
     }

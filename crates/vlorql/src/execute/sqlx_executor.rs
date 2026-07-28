@@ -119,17 +119,15 @@ impl<P: SqlxPool> SqlxExecutor<P> {
 #[async_trait]
 impl<P: SqlxPool + 'static> DatabaseExecutor for SqlxExecutor<P> {
     async fn execute(&self, query: &CompiledQuery) -> Result<QueryResult, VlorQLError> {
-        let rows = P::fetch_all(&self.pool, &query.sql)
-            .await
-            .map_err(|e| {
-                VlorQLError::config(
-                    ConfigErrorKind::ConfigFileError {
-                        path: "database".into(),
-                        reason: format!("query failed: {e}"),
-                    },
-                    serde_json::json!({}),
-                )
-            })?;
+        let rows = P::fetch_all(&self.pool, &query.sql).await.map_err(|e| {
+            VlorQLError::config(
+                ConfigErrorKind::ConfigFileError {
+                    path: "database".into(),
+                    reason: format!("query failed: {e}"),
+                },
+                serde_json::json!({}),
+            )
+        })?;
 
         let columns: Vec<String> = if rows.is_empty() {
             Vec::new()

@@ -343,7 +343,9 @@ impl LlmClient for StreamingMockClient {
         _system_prompt: String,
     ) -> Result<StreamResult, VlorQLError> {
         let chunks = self.chunks.clone();
-        let stream = Box::new(stream::iter(chunks.into_iter().map(Ok::<String, VlorQLError>)))
+        let stream = Box::new(stream::iter(
+            chunks.into_iter().map(Ok::<String, VlorQLError>),
+        ))
             as Box<dyn futures::stream::Stream<Item = Result<String, VlorQLError>> + Send + Unpin>;
         let usage = Arc::new(tokio::sync::Mutex::new(Some(TokenUsage::default())));
         Ok(StreamResult { stream, usage })

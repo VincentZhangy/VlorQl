@@ -688,10 +688,20 @@ fn normalize_impl(val: &mut Value) -> bool {
                 let preserved: Vec<(String, Value)> = map
                     .iter()
                     .filter(|(k, _)| {
-                        !matches!(k.as_str(),
-                            "type" | "left" | "right" | "op" | "child"
-                            | "expr" | "low" | "high" | "target"
-                            | "pattern" | "query")
+                        !matches!(
+                            k.as_str(),
+                            "type"
+                                | "left"
+                                | "right"
+                                | "op"
+                                | "child"
+                                | "expr"
+                                | "low"
+                                | "high"
+                                | "target"
+                                | "pattern"
+                                | "query"
+                        )
                     })
                     .map(|(k, v)| (k.clone(), v.clone()))
                     .collect();
