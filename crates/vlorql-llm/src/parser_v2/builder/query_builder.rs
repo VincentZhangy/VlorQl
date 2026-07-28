@@ -5,7 +5,7 @@
 //! the input has already been normalized.
 
 use serde_json::Value;
-use vlorql_core::schema::{CommonTableExpression, OrderByTerm, QueryPlan};
+use vlorql_core::schema::{CommonTableExpression, OrderByTerm, Predicate, QueryPlan};
 
 use super::expr_builder::{
     BuildError, build_expression, build_predicate, req_arr, req_obj, req_str,
@@ -35,6 +35,35 @@ pub fn build_plan(value: &Value) -> Result<QueryPlan, BuildError> {
     build_plan_from_obj(obj)
 }
 
+/// Extract an optional predicate field from a JSON object.
+fn optional_predicate(
+    obj: &serde_json::Map<String, serde_json::Value>,
+    field: &str,
+) -> Result<Option<Predicate>, BuildError> {
+    obj.get(field)
+        .and_then(|v| if v.is_null() { None } else { Some(v) })
+        .map(|v| build_predicate(v).map_err(|e| e.at(field)))
+        .transpose()
+}
+
+/// Extract and build an array field from a JSON object.
+fn build_array_field<T>(
+    obj: &serde_json::Map<String, serde_json::Value>,
+    field: &str,
+    builder: fn(&serde_json::Value) -> Result<T, BuildError>,
+) -> Result<Option<Vec<T>>, BuildError> {
+    obj.get(field)
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .enumerate()
+                .map(|(i, v)| builder(v).map_err(|e| e.at(&format!("{field}[{i}]"))))
+                .collect::<Result<Vec<_>, _>>()
+        })
+        .filter(|v: &Result<Vec<_>, _>| !v.as_ref().is_ok_and(|x| x.is_empty()))
+        .transpose()
+}
+
 /// Build a [`QueryPlan`] from a canonical JSON object map.
 pub fn build_plan_from_obj(obj: &serde_json::Map<String, Value>) -> Result<QueryPlan, BuildError> {
     let _path = "";
@@ -54,66 +83,16 @@ pub fn build_plan_from_obj(obj: &serde_json::Map<String, Value>) -> Result<Query
         "from",
     )?;
 
-    let r#where = obj
-        .get("where")
-        .and_then(|v| if v.is_null() { None } else { Some(v) })
-        .map(|v| build_predicate(v).map_err(|e| e.at("where")))
-        .transpose()?;
-
-    let group_by = obj
-        .get("group_by")
-        .and_then(|v| v.as_array())
-        .map(|arr| {
-            arr.iter()
-                .enumerate()
-                .map(|(i, v)| build_expression(v).map_err(|e| e.at(&format!("group_by[{i}]"))))
-                .collect::<Result<Vec<_>, _>>()
-        })
-        .filter(|v: &Result<Vec<_>, _>| !v.as_ref().is_ok_and(|x| x.is_empty()))
-        .transpose()?;
-
-    let having = obj
-        .get("having")
-        .and_then(|v| if v.is_null() { None } else { Some(v) })
-        .map(|v| build_predicate(v).map_err(|e| e.at("having")))
-        .transpose()?;
-
-    let order_by = obj
-        .get("order_by")
-        .and_then(|v| v.as_array())
-        .map(|arr| {
-            arr.iter()
-                .enumerate()
-                .map(|(i, v)| build_order_by_term(v).map_err(|e| e.at(&format!("order_by[{i}]"))))
-                .collect::<Result<Vec<_>, _>>()
-        })
-        .filter(|v: &Result<Vec<_>, _>| !v.as_ref().is_ok_and(|x| x.is_empty()))
-        .transpose()?;
+    let r#where = optional_predicate(obj, "where")?;
+    let group_by = build_array_field(obj, "group_by", |v| build_expression(v))?;
+    let having = optional_predicate(obj, "having")?;
+    let order_by = build_array_field(obj, "order_by", |v| build_order_by_term(v))?;
 
     let limit = obj.get("limit").and_then(|v| v.as_u64());
     let offset = obj.get("offset").and_then(|v| v.as_u64());
 
-    let joins = obj
-        .get("joins")
-        .and_then(|v| v.as_array())
-        .map(|arr| {
-            arr.iter()
-                .enumerate()
-                .map(|(i, v)| build_join_clause(v).map_err(|e| e.at(&format!("joins[{i}]"))))
-                .collect::<Result<Vec<_>, _>>()
-        })
-        .transpose()?;
-
-    let ctes = obj
-        .get("ctes")
-        .and_then(|v| v.as_array())
-        .map(|arr| {
-            arr.iter()
-                .enumerate()
-                .map(|(i, v)| build_cte(v).map_err(|e| e.at(&format!("ctes[{i}]"))))
-                .collect::<Result<Vec<_>, _>>()
-        })
-        .transpose()?;
+    let joins = build_array_field(obj, "joins", |v| build_join_clause(v))?;
+    let ctes = build_array_field(obj, "ctes", |v| build_cte(v))?;
 
     Ok(QueryPlan {
         select,
