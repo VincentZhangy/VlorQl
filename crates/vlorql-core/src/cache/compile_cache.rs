@@ -11,7 +11,10 @@ use crate::compile::CompiledQuery;
 use crate::schema::DialectProfile;
 use crate::validate::ValidatedPlan;
 use moka::future::Cache as MokaCache;
+use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
+use tokio::sync::RwLock;
 
 /// A cache for [`CompiledQuery`] values keyed by plan hash + dialect.
 ///
@@ -54,10 +57,12 @@ use std::sync::Arc;
 /// assert_eq!(cached.unwrap().sql, "SELECT \"id\" FROM \"users\"");
 /// # }
 /// ```
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct CompileCache {
     inner: MokaCache<CompileCacheKey, Arc<CompiledQuery>>,
+    entries: RwLock<HashMap<CompileCacheKey, CompiledQuery>>,
     max_size: u64,
+    persist_path: Option<PathBuf>,
 }
 
 impl CompileCache {
@@ -81,7 +86,12 @@ impl CompileCache {
             builder = builder.time_to_live(std::time::Duration::from_secs(ttl_seconds));
         }
         let inner = builder.build();
-        Self { inner, max_size }
+        Self {
+            inner,
+            entries: RwLock::new(HashMap::new()),
+            max_size,
+            persist_path: None,
+        }
     }
 
     /// Returns the cached compiled query for `plan` under `profile`, or

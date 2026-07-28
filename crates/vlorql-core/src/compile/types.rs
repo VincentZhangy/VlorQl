@@ -3,6 +3,7 @@
 use crate::errors::VlorQLError;
 use crate::schema::{DataType, SqlDialect};
 use crate::validate::ValidatedPlan;
+use serde::{Deserialize, Serialize};
 
 /// A SQL statement together with its ordered bind parameters and dialect.
 ///
@@ -25,7 +26,7 @@ use crate::validate::ValidatedPlan;
 /// };
 /// assert!(query.sql.contains("$1"));
 /// ```
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CompiledQuery {
     /// The rendered SQL with dialect-specific placeholders.
     pub sql: String,
@@ -49,7 +50,7 @@ pub struct CompiledQuery {
 /// };
 /// assert_eq!(param.value, 42);
 /// ```
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Parameter {
     /// The literal value, in the same JSON-compatible form used by [`serde_json::Value`].
     pub value: serde_json::Value,

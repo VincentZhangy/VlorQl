@@ -22,7 +22,9 @@ serde_yaml.workspace = true
 regex.workspace = true
 toml.workspace = true
 xxhash-rust = { version = "0.8", features = ["xxh3"] }
+tokio.workspace = true
 moka = { version = "0.12", features = ["future"] }
+bincode.workspace = true
 opentelemetry.workspace = true
 opentelemetry_sdk.workspace = true
 opentelemetry-otlp.workspace = true
