@@ -81,12 +81,13 @@ pub(crate) trait RetryableHttpClient: Send + Sync {
     fn parse_response(&self, body: &str) -> Result<QueryPlan, VlorQLError>;
 
     /// Send a non-streaming request with automatic retries on transient
-    /// failures, and parse the successful response into a [`QueryPlan`].
+    /// failures, parse the successful response into a [`QueryPlan`],
+    /// and extract token usage from the response.
     async fn generate_with_retry(
         &self,
         endpoint: &str,
         body: &Value,
-    ) -> Result<QueryPlan, VlorQLError> {
+    ) -> Result<(QueryPlan, TokenUsage), VlorQLError> {
         let max_attempts = self.max_attempts();
         let label = self.provider_label();
         let mut last_error: Option<VlorQLError> = None;
@@ -125,7 +126,9 @@ pub(crate) trait RetryableHttpClient: Send + Sync {
                         last_error = Some(error);
                         sleep(delay).await;
                     } else {
-                        return self.parse_response(&text);
+                        let plan = self.parse_response(&text)?;
+                        let usage = parse_usage_from_response(&text);
+                        return Ok((plan, usage));
                     }
                 }
                 Err(error) => {
