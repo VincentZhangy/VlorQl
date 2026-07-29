@@ -32,7 +32,7 @@ impl SchemaIndexer {
     pub async fn connect(url: &str) -> Result<Self, VlorQLError> {
         let client = qdrant_client::Qdrant::from_url(url)
             .build()
-            .map_err(|e| qdrant_error(e))?;
+            .map_err(qdrant_error)?;
         Ok(Self {
             client,
             collection_name: "vlorql_schema".to_owned(),
@@ -118,8 +118,9 @@ impl SchemaIndexer {
             // Table points have "name", column points have "table"
             for key in &["name", "table"] {
                 if let Some(name) = payload.get(*key).and_then(|v| v.as_str()) {
-                    if !tables.contains(&name.to_owned()) {
-                        tables.push(name.to_owned());
+                    let name = name.to_owned();
+                    if !tables.contains(&name) {
+                        tables.push(name);
                     }
                 }
             }
@@ -130,7 +131,7 @@ impl SchemaIndexer {
     /// Check Qdrant connection health.
     pub async fn health_check(&self) -> Result<(), VlorQLError> {
         self.client.health_check().await
-            .map_err(|e| qdrant_error(e))?;
+            .map_err(qdrant_error)?;
         Ok(())
     }
 }

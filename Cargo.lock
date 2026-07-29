@@ -4537,6 +4537,7 @@ dependencies = [
  "opentelemetry_sdk",
  "qdrant-client",
  "regex",
+ "reqwest",
  "rstest",
  "schemars",
  "serde",
