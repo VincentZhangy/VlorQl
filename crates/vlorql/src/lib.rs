@@ -480,6 +480,14 @@ impl VlorQl {
             )
         })?);
         let prompt_builder = self.build_prompt_builder(Arc::clone(&self.schema));
+
+        #[cfg(feature = "vector-search")]
+        if let Some(ref indexer) = self.schema_indexer {
+            if self.schema_indexed.compare_exchange(false, true, Ordering::Relaxed, Ordering::Relaxed).is_ok() {
+                indexer.index_schema(&self.schema).await.ok();
+            }
+        }
+
         let system_prompt = prompt_builder.build_system_prompt(question).await;
         let (event_tx, event_rx) = mpsc::unbounded_channel();
         let schema = Arc::clone(&self.schema);

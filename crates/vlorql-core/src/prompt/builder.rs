@@ -255,8 +255,6 @@ impl PromptBuilder {
             }
         }
 
-        #[cfg(not(feature = "vector-search"))]
-        let _ = user_question;
         self.filter_relevant_tables_tfidf(user_question)
     }
 

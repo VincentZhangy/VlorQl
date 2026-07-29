@@ -381,11 +381,6 @@ impl VlorQlBuilder {
 
         let vector_search = self.vector_search;
 
-        #[cfg(feature = "vector-search")]
-        let schema_indexer = self.schema_indexer;
-        #[cfg(not(feature = "vector-search"))]
-        let _schema_indexer: Option<Arc<()>> = None;
-
         Ok(VlorQl {
             schema,
             dialect,
@@ -406,7 +401,7 @@ impl VlorQlBuilder {
             executor: self.executor,
             vector_search,
             #[cfg(feature = "vector-search")]
-            schema_indexer,
+            schema_indexer: self.schema_indexer,
             #[cfg(feature = "vector-search")]
             schema_indexed: AtomicBool::new(false),
         })
