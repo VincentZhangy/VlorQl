@@ -4,7 +4,7 @@ use crate::cache::{PromptCache, PromptCacheKey, hash_policy};
 use crate::policy::{PolicyConfig, TablePolicy};
 use crate::prompt::PromptSkill;
 use crate::schema::{
-    ColumnSchema, DataType, DialectProfile, JoinType, SchemaSnapshot, SqlDialect, TableSchema,
+    ColumnSchema, DialectProfile, JoinType, SchemaSnapshot, SqlDialect, TableSchema,
 };
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
@@ -372,7 +372,7 @@ impl PromptBuilder {
                 .iter()
                 .filter(|c| self.column_visible(table, c, policy))
                 .map(|c| {
-                    let mut desc = format!("{} {}", c.name, data_type_name(c.data_type));
+                    let mut desc = format!("{} {}", c.name, c.data_type.type_name());
                     if let Some(ref fk) = c.foreign_key {
                         let _ = write!(desc, " → {}.{}", fk.foreign_table, fk.foreign_column);
                     }
@@ -897,24 +897,6 @@ fn is_generic_column_name(name: &str) -> bool {
 
 fn optional_limit(limit: Option<usize>) -> String {
     limit.map_or_else(|| "no explicit limit".to_owned(), |limit| limit.to_string())
-}
-
-fn data_type_name(data_type: DataType) -> &'static str {
-    match data_type {
-        DataType::Int => "int",
-        DataType::Float => "float",
-        DataType::String => "string",
-        DataType::Boolean => "boolean",
-        DataType::Date => "date",
-        DataType::Timestamp => "timestamp",
-        DataType::Json => "json",
-        DataType::Null => "null",
-        DataType::Uuid => "uuid",
-        DataType::Decimal => "decimal",
-        DataType::Array => "array",
-        DataType::Jsonb => "jsonb",
-        DataType::Blob => "blob",
-    }
 }
 
 fn sql_dialect_name(dialect: SqlDialect) -> &'static str {

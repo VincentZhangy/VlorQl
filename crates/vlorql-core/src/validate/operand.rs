@@ -142,7 +142,7 @@ impl<'a> OperandValidator<'a> {
                         return Some(inferred);
                     }
                     errors.push(type_mismatch_error(
-                        data_type_name(*data_type),
+                        data_type.type_name(),
                         json_value_type(value),
                         "literal",
                         json!({"value": value, "declared_type": data_type}),
@@ -462,7 +462,8 @@ fn validate_binary_operation(
             if !are_numeric(left, right) {
                 errors.push(type_mismatch_error(
                     "compatible numeric operands",
-                    format!("{} and {}", data_type_name(left), data_type_name(right)),
+                    format!("{} and {}", left.type_name(), right.type_name()
+),
                     format!("binary operator {operator:?}"),
                     json!({"left": left, "right": right, "operator": operator}),
                 ));
@@ -473,7 +474,8 @@ fn validate_binary_operation(
             if left != DataType::Boolean || right != DataType::Boolean {
                 errors.push(type_mismatch_error(
                     "boolean operands",
-                    format!("{} and {}", data_type_name(left), data_type_name(right)),
+                    format!("{} and {}", left.type_name(), right.type_name()
+),
                     format!("binary operator {operator:?}"),
                     json!({"left": left, "right": right, "operator": operator}),
                 ));
@@ -498,7 +500,8 @@ fn validate_binary_operation(
             if !is_string_compatible(left) || !is_string_compatible(right) {
                 errors.push(type_mismatch_error(
                     "string operands",
-                    format!("{} and {}", data_type_name(left), data_type_name(right)),
+                    format!("{} and {}", left.type_name(), right.type_name()
+),
                     format!("binary operator {operator:?}"),
                     json!({"left": left, "right": right, "operator": operator}),
                 ));
@@ -519,7 +522,8 @@ fn validate_comparison(
             if !is_string_compatible(left) || !is_string_compatible(right) {
                 errors.push(type_mismatch_error(
                     "string operands",
-                    format!("{} and {}", data_type_name(left), data_type_name(right)),
+                    format!("{} and {}", left.type_name(), right.type_name()
+),
                     format!("comparison {operator:?}"),
                     json!({"left": left, "right": right, "operator": operator}),
                 ));
@@ -540,8 +544,8 @@ fn validate_compatible_types(
             // Clear "side A vs side B" format so the LLM retry feedback
             // correctly identifies which side of the comparison has the
             // wrong type, instead of assuming one side is "correct".
-            format!("{} (left)", data_type_name(left)),
-            format!("{} (right)", data_type_name(right)),
+            format!("{} (left)", left.type_name()),
+            format!("{} (right)", right.type_name()),
             expression,
             json!({"left": left, "right": right}),
         ));
@@ -552,7 +556,8 @@ fn require_numeric(expression: &str, actual: DataType, errors: &mut Vec<VlorQLEr
     if !is_numeric(actual) && actual != DataType::Null {
         errors.push(type_mismatch_error(
             "numeric",
-            data_type_name(actual),
+            actual.type_name()
+,
             expression,
             json!({"actual": actual}),
         ));
@@ -563,7 +568,8 @@ fn require_string(expression: &str, actual: DataType, errors: &mut Vec<VlorQLErr
     if !is_string_compatible(actual) {
         errors.push(type_mismatch_error(
             "string",
-            data_type_name(actual),
+            actual.type_name()
+,
             expression,
             json!({"actual": actual}),
         ));
@@ -658,25 +664,6 @@ fn json_value_type(value: &Value) -> &'static str {
         Value::Object(_) => "object",
     }
 }
-
-fn data_type_name(data_type: DataType) -> &'static str {
-    match data_type {
-        DataType::Int => "int",
-        DataType::Float => "float",
-        DataType::String => "string",
-        DataType::Boolean => "boolean",
-        DataType::Date => "date",
-        DataType::Timestamp => "timestamp",
-        DataType::Json => "json",
-        DataType::Null => "null",
-        DataType::Uuid => "uuid",
-        DataType::Decimal => "decimal",
-        DataType::Array => "array",
-        DataType::Jsonb => "jsonb",
-        DataType::Blob => "blob",
-    }
-}
-
 fn is_numeric(data_type: DataType) -> bool {
     matches!(
         data_type,

@@ -6,7 +6,6 @@
 //! search to find relevant tables for a user question.
 
 use crate::errors::VlorQLError;
-use crate::schema::DataType;
 use std::collections::HashMap;
 use std::fmt;
 use std::sync::{LazyLock, Mutex};
@@ -139,7 +138,7 @@ impl SchemaIndexer {
 /// Generate a text description for a table (used for embedding).
 pub fn table_to_text(schema: &crate::schema::TableSchema) -> String {
     let cols: Vec<String> = schema.columns.iter()
-        .map(|c| format!("{} {}", c.name, data_type_name(c.data_type)))
+        .map(|c| format!("{} {}", c.name, c.data_type.type_name()))
         .collect();
     let desc = schema.description.as_ref()
         .map(|d| format!(" — {d}"))
@@ -152,26 +151,9 @@ pub fn column_to_text(table: &str, column: &crate::schema::ColumnSchema) -> Stri
     let desc = column.description.as_ref()
         .map(|d| format!(" — {d}"))
         .unwrap_or_default();
-    format!("Column: {}.{} {}{}", table, column.name, data_type_name(column.data_type), desc)
+    format!("Column: {}.{} {}{}", table, column.name, column.data_type.type_name(), desc)
 }
 
-fn data_type_name(data_type: DataType) -> &'static str {
-    match data_type {
-        DataType::Int => "int",
-        DataType::Float => "float",
-        DataType::String => "string",
-        DataType::Boolean => "boolean",
-        DataType::Date => "date",
-        DataType::Timestamp => "timestamp",
-        DataType::Json => "json",
-        DataType::Null => "null",
-        DataType::Uuid => "uuid",
-        DataType::Decimal => "decimal",
-        DataType::Array => "array",
-        DataType::Jsonb => "jsonb",
-        DataType::Blob => "blob",
-    }
-}
 
 /// OpenAI embedding dimension for text-embedding-3-small.
 #[cfg(feature = "vector-search")]
@@ -192,6 +174,13 @@ static HTTP_CLIENT: LazyLock<reqwest::Client> = LazyLock::new(reqwest::Client::n
 /// during schema indexing.
 #[cfg(feature = "vector-search")]
 async fn embed_text(text: &str) -> Result<Vec<f32>, VlorQLError> {
+    const OPENAI_EMBEDDING_URL: &str = "https://api.openai.com/v1/embeddings";
+    embed_text_at_url(text, OPENAI_EMBEDDING_URL).await
+}
+
+/// Inner function with configurable URL for testing.
+#[cfg(feature = "vector-search")]
+async fn embed_text_at_url(text: &str, url: &str) -> Result<Vec<f32>, VlorQLError> {
     {
         let cache = EMBEDDING_CACHE.lock().unwrap();
         if let Some(cached) = cache.get(text) {
@@ -211,7 +200,7 @@ async fn embed_text(text: &str) -> Result<Vec<f32>, VlorQLError> {
 
     let client = &*HTTP_CLIENT;
     let resp = client
-        .post("https://api.openai.com/v1/embeddings")
+        .post(url)
         .header("Authorization", format!("Bearer {api_key}"))
         .json(&serde_json::json!({
             "model": "text-embedding-3-small",
@@ -239,6 +228,19 @@ async fn embed_text(text: &str) -> Result<Vec<f32>, VlorQLError> {
         )
     })?;
 
+    let vector = parse_embedding_response(body)?;
+
+    {
+        let mut cache = EMBEDDING_CACHE.lock().unwrap();
+        cache.insert(text.to_owned(), vector.clone());
+    }
+
+    Ok(vector)
+}
+
+/// Extract the embedding vector from an OpenAI-compatible JSON response.
+#[cfg(feature = "vector-search")]
+fn parse_embedding_response(body: serde_json::Value) -> Result<Vec<f32>, VlorQLError> {
     let vector: Vec<f32> = body["data"][0]["embedding"]
         .as_array()
         .ok_or_else(|| {
@@ -253,12 +255,6 @@ async fn embed_text(text: &str) -> Result<Vec<f32>, VlorQLError> {
         .iter()
         .map(|v| v.as_f64().unwrap_or(0.0) as f32)
         .collect();
-
-    {
-        let mut cache = EMBEDDING_CACHE.lock().unwrap();
-        cache.insert(text.to_owned(), vector.clone());
-    }
-
     Ok(vector)
 }
 
@@ -270,4 +266,36 @@ fn qdrant_error(e: impl std::fmt::Display) -> VlorQLError {
         },
         serde_json::json!({}),
     )
+}
+
+#[cfg(test)]
+#[cfg(feature = "vector-search")]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_embedding_success() {
+        let body = serde_json::json!({
+            "data": [{"embedding": [0.1, 0.2, 0.3]}]
+        });
+        let result = parse_embedding_response(body);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), vec![0.1, 0.2, 0.3]);
+    }
+
+    #[test]
+    fn test_parse_embedding_missing_field() {
+        let body = serde_json::json!({
+            "data": [{"foo": "bar"}]
+        });
+        let result = parse_embedding_response(body);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_embedding_missing_data() {
+        let body = serde_json::json!({});
+        let result = parse_embedding_response(body);
+        assert!(result.is_err());
+    }
 }

@@ -38,6 +38,7 @@ tracing-opentelemetry.workspace = true
 
 [dev-dependencies]
 mockall.workspace = true
+
 rstest.workspace = true
 criterion.workspace = true
 tokio = { workspace = true }

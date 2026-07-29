@@ -51,6 +51,27 @@ pub enum DataType {
     Blob,
 }
 
+impl DataType {
+    /// Short human-readable name (lowercase) used in prompts and diagnostics.
+    pub fn type_name(self) -> &'static str {
+        match self {
+            DataType::Int => "int",
+            DataType::Float => "float",
+            DataType::String => "string",
+            DataType::Boolean => "boolean",
+            DataType::Date => "date",
+            DataType::Timestamp => "timestamp",
+            DataType::Json => "json",
+            DataType::Null => "null",
+            DataType::Uuid => "uuid",
+            DataType::Decimal => "decimal",
+            DataType::Array => "array",
+            DataType::Jsonb => "jsonb",
+            DataType::Blob => "blob",
+        }
+    }
+}
+
 /// Operators that combine two expressions or values.
 ///
 /// Used inside [`Expression::BinaryOp`](crate::schema::Expression::BinaryOp).
