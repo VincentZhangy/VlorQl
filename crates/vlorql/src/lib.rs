@@ -21,6 +21,8 @@ pub(crate) mod retry;
 
 use futures::stream::Stream;
 use serde_json::json;
+#[cfg(feature = "vector-search")]
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::UnboundedReceiverStream;
@@ -165,6 +167,9 @@ pub struct VlorQl {
     /// Optional SchemaIndexer for semantic table/column search (requires `vector-search` feature).
     #[cfg(feature = "vector-search")]
     schema_indexer: Option<Arc<SchemaIndexer>>,
+    /// One-shot guard to avoid re-indexing the schema on every query.
+    #[cfg(feature = "vector-search")]
+    schema_indexed: AtomicBool,
 }
 
 impl std::fmt::Debug for VlorQl {
@@ -194,6 +199,21 @@ impl VlorQl {
     /// Starts constructing a VlorQl facade.
     pub fn builder() -> VlorQlBuilder {
         VlorQlBuilder::default()
+    }
+
+    /// Creates a [`PromptBuilder`] configured with schema, dialect, policy,
+    /// and (when enabled) vector-search settings.
+    fn build_prompt_builder(&self, schema: Arc<SchemaSnapshot>) -> PromptBuilder {
+        #[allow(unused_mut)]
+        let mut builder = PromptBuilder::new(schema, self.dialect.clone(), self.policy.clone());
+        #[cfg(feature = "vector-search")]
+        {
+            builder = builder.with_vector_search(self.vector_search);
+            if let Some(ref indexer) = self.schema_indexer {
+                builder = builder.with_schema_indexer(Arc::clone(indexer));
+            }
+        }
+        builder
     }
 
     /// Generates a plan with the configured LLM, validates it, and compiles it.
@@ -235,22 +255,15 @@ impl VlorQl {
             let schema_version = schema.metadata.version.clone().unwrap_or_default();
 
             // Build the system prompt, optionally using the prompt cache.
-            #[allow(unused_mut)]
-            let mut prompt_builder = PromptBuilder::new(
-                Arc::clone(&schema),
-                self.dialect.clone(),
-                self.policy.clone(),
-            );
+            let prompt_builder = self.build_prompt_builder(Arc::clone(&schema));
+
             #[cfg(feature = "vector-search")]
-            {
-                prompt_builder = prompt_builder
-                    .with_vector_search(self.vector_search);
-                if let Some(ref indexer) = self.schema_indexer {
-                    prompt_builder = prompt_builder.with_schema_indexer(Arc::clone(indexer));
-                    // Index schema on first query
+            if let Some(ref indexer) = self.schema_indexer {
+                if self.schema_indexed.compare_exchange(false, true, Ordering::Relaxed, Ordering::Relaxed).is_ok() {
                     indexer.index_schema(&schema).await.ok();
                 }
             }
+
             let system_prompt = match &self.prompt_cache {
                 Some(cache) => {
                     prompt_builder
@@ -466,19 +479,7 @@ impl VlorQl {
                 json!({"operation": "query_stream"}),
             )
         })?);
-        #[allow(unused_mut)]
-        let mut prompt_builder = PromptBuilder::new(
-            Arc::clone(&self.schema),
-            self.dialect.clone(),
-            self.policy.clone(),
-        );
-        #[cfg(feature = "vector-search")]
-        {
-            prompt_builder = prompt_builder.with_vector_search(self.vector_search);
-            if let Some(ref indexer) = self.schema_indexer {
-                prompt_builder = prompt_builder.with_schema_indexer(Arc::clone(indexer));
-            }
-        }
+        let prompt_builder = self.build_prompt_builder(Arc::clone(&self.schema));
         let system_prompt = prompt_builder.build_system_prompt(question).await;
         let (event_tx, event_rx) = mpsc::unbounded_channel();
         let schema = Arc::clone(&self.schema);

@@ -117,6 +117,7 @@ fn is_small_model(fp: &str) -> bool {
         || fp_lower.contains("phi-3")
         || fp_lower.contains("deepseek-coder")
         || fp_lower.contains("gemma-2")
+        || fp_lower.contains("mistral-7b")
         || fp_lower.contains("tiny")
 }
 

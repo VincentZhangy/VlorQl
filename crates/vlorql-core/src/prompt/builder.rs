@@ -233,7 +233,7 @@ impl PromptBuilder {
 
         #[cfg(feature = "vector-search")]
         if self.vector_search {
-            let indexer = self.ensure_indexer().await;
+            let indexer = self.ensure_indexer();
             if let Some(ref indexer) = indexer {
                 match indexer.search(user_question, 5).await {
                     Ok(tables) if !tables.is_empty() => {
@@ -327,33 +327,17 @@ impl PromptBuilder {
             .collect()
     }
 
-    /// Lazily connects a [`SchemaIndexer`] to Qdrant when vector search is
-    /// enabled but no indexer has been supplied via
-    /// [`with_schema_indexer`].
+    /// Returns the configured [`SchemaIndexer`], if any.
     ///
-    /// Returns `None` (and logs a warning) if the connection fails, signalling
-    /// the caller to fall back to TF-IDF.
-    ///
-    /// [`with_schema_indexer`]: Self::with_schema_indexer
+    /// Returns `None` when vector search is disabled or no indexer has been
+    /// supplied via [`with_schema_indexer`], signalling the caller to fall
+    /// back to TF-IDF.
     #[cfg(feature = "vector-search")]
-    async fn ensure_indexer(
-        &self,
-    ) -> Option<Arc<crate::prompt::schema_index::SchemaIndexer>> {
-        if self.vector_search && self.schema_indexer.is_none() {
-            match crate::prompt::schema_index::SchemaIndexer::connect("http://localhost:6333")
-                .await
-            {
-                Ok(indexer) => {
-                    tracing::info!(target: "vlorql", "SchemaIndexer connected to Qdrant at localhost:6333");
-                    Some(Arc::new(indexer))
-                }
-                Err(e) => {
-                    tracing::warn!(target: "vlorql", "Failed to connect SchemaIndexer, falling back to TF-IDF: {e}");
-                    None
-                }
-            }
-        } else {
+    fn ensure_indexer(&self) -> Option<Arc<crate::prompt::schema_index::SchemaIndexer>> {
+        if self.vector_search {
             self.schema_indexer.clone()
+        } else {
+            None
         }
     }
 

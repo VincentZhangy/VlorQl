@@ -1,6 +1,8 @@
 use crate::{DEFAULT_MAX_RETRIES, VlorQl};
 use serde_json::json;
 use std::path::PathBuf;
+#[cfg(feature = "vector-search")]
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use vlorql_core::cache::{CompileCache, LlmResponseCache, PromptCache, SchemaCache};
 use vlorql_core::compile::{RewriteEngine, SqlCompiler, get_compiler};
@@ -405,6 +407,8 @@ impl VlorQlBuilder {
             vector_search,
             #[cfg(feature = "vector-search")]
             schema_indexer,
+            #[cfg(feature = "vector-search")]
+            schema_indexed: AtomicBool::new(false),
         })
     }
 }
