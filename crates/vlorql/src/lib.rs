@@ -36,6 +36,9 @@ use vlorql_core::prompt::PromptBuilder;
 use vlorql_core::schema::{ArcSchemaSnapshot, QueryPlan};
 use vlorql_core::validate::ValidationPipeline;
 
+#[cfg(feature = "vector-search")]
+use vlorql_core::prompt::schema_index::SchemaIndexer;
+
 use crate::retry::{
     format_retry_question, format_retry_question_str, retry_temperature, run_stream_with_retry,
     validation_errors_to_error,
@@ -157,6 +160,10 @@ pub struct VlorQl {
     telemetry_guard: Option<TelemetryGuard>,
     metrics: Option<Arc<VlorqMetrics>>,
     executor: Option<Arc<dyn DatabaseExecutor>>,
+    #[cfg(feature = "vector-search")]
+    vector_search: bool,
+    #[cfg(feature = "vector-search")]
+    schema_indexer: Option<Arc<SchemaIndexer>>,
 }
 
 impl std::fmt::Debug for VlorQl {
@@ -176,6 +183,8 @@ impl std::fmt::Debug for VlorQl {
             .field("llm_cache_size", &self.llm_cache.size())
             .field("max_retries", &self.max_retries)
             .field("has_executor", &self.executor.is_some())
+            .field("vector_search", &self.vector_search)
+            .field("has_schema_indexer", &self.schema_indexer.is_some())
             .finish()
     }
 }
@@ -225,18 +234,29 @@ impl VlorQl {
             let schema_version = schema.metadata.version.clone().unwrap_or_default();
 
             // Build the system prompt, optionally using the prompt cache.
-            let prompt_builder = PromptBuilder::new(
+            #[allow(unused_mut)]
+            let mut prompt_builder = PromptBuilder::new(
                 Arc::clone(&schema),
                 self.dialect.clone(),
                 self.policy.clone(),
             );
+            #[cfg(feature = "vector-search")]
+            {
+                prompt_builder = prompt_builder
+                    .with_vector_search(self.vector_search);
+                if let Some(ref indexer) = self.schema_indexer {
+                    prompt_builder = prompt_builder.with_schema_indexer(Arc::clone(indexer));
+                    // Index schema on first query
+                    indexer.index_schema(&schema).await.ok();
+                }
+            }
             let system_prompt = match &self.prompt_cache {
                 Some(cache) => {
                     prompt_builder
                         .build_system_prompt_with_cache(question, cache.as_ref())
                         .await
                 }
-                None => prompt_builder.build_system_prompt(question),
+                None => prompt_builder.build_system_prompt(question).await,
             };
 
             // Build cache key and check the LLM response cache.
@@ -445,12 +465,20 @@ impl VlorQl {
                 json!({"operation": "query_stream"}),
             )
         })?);
-        let system_prompt = PromptBuilder::new(
+        #[allow(unused_mut)]
+        let mut prompt_builder = PromptBuilder::new(
             Arc::clone(&self.schema),
             self.dialect.clone(),
             self.policy.clone(),
-        )
-        .build_system_prompt(question);
+        );
+        #[cfg(feature = "vector-search")]
+        {
+            prompt_builder = prompt_builder.with_vector_search(self.vector_search);
+            if let Some(ref indexer) = self.schema_indexer {
+                prompt_builder = prompt_builder.with_schema_indexer(Arc::clone(indexer));
+            }
+        }
+        let system_prompt = prompt_builder.build_system_prompt(question).await;
         let (event_tx, event_rx) = mpsc::unbounded_channel();
         let schema = Arc::clone(&self.schema);
         let dialect = self.dialect.clone();

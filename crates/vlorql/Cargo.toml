@@ -19,6 +19,7 @@ default = ["executor-postgres", "executor-mysql", "executor-sqlite"]
 executor-postgres = ["tokio-postgres", "tokio-postgres-rustls", "async-trait"]
 executor-mysql = ["sqlx", "sqlx/mysql", "sqlx/runtime-tokio"]
 executor-sqlite = ["sqlx", "sqlx/sqlite", "sqlx/runtime-tokio"]
+vector-search = ["vlorql-core/vector-search"]
 
 [dependencies]
 vlorql-core = { path = "../vlorql-core", version = "0.5.0" }

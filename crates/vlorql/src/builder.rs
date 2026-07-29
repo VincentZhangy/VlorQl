@@ -63,6 +63,10 @@ pub struct VlorQlBuilder {
     telemetry_guard: Option<TelemetryGuard>,
     metrics: Option<Arc<VlorqMetrics>>,
     executor: Option<Arc<dyn DatabaseExecutor>>,
+    #[cfg(feature = "vector-search")]
+    vector_search: bool,
+    #[cfg(feature = "vector-search")]
+    schema_indexer: Option<Arc<vlorql_core::prompt::schema_index::SchemaIndexer>>,
 }
 
 impl Default for VlorQlBuilder {
@@ -86,6 +90,10 @@ impl Default for VlorQlBuilder {
             telemetry_guard: None,
             metrics: None,
             executor: None,
+            #[cfg(feature = "vector-search")]
+            vector_search: false,
+            #[cfg(feature = "vector-search")]
+            schema_indexer: None,
         }
     }
 }
@@ -308,6 +316,25 @@ impl VlorQlBuilder {
         self
     }
 
+    /// Enables or disables vector-based schema retrieval via Qdrant.
+    ///
+    /// When enabled, the prompt builder will use semantic vector search
+    /// to find relevant tables. Default is `false`.
+    #[cfg(feature = "vector-search")]
+    #[must_use]
+    pub fn with_vector_search(mut self, enabled: bool) -> Self {
+        self.vector_search = enabled;
+        self
+    }
+
+    /// Supplies a SchemaIndexer for semantic schema retrieval via Qdrant.
+    #[cfg(feature = "vector-search")]
+    #[must_use]
+    pub fn with_schema_indexer(mut self, indexer: Arc<vlorql_core::prompt::schema_index::SchemaIndexer>) -> Self {
+        self.schema_indexer = Some(indexer);
+        self
+    }
+
     /// Builds the facade and verifies the required schema and dialect/compiler setup.
     pub fn build(self) -> Result<VlorQl, VlorQLError> {
         vlorql_core::observability::init_console_logging();
@@ -350,6 +377,16 @@ impl VlorQlBuilder {
             ))
         });
 
+        #[cfg(feature = "vector-search")]
+        let vector_search = self.vector_search;
+        #[cfg(not(feature = "vector-search"))]
+        let vector_search = false;
+
+        #[cfg(feature = "vector-search")]
+        let schema_indexer = self.schema_indexer;
+        #[cfg(not(feature = "vector-search"))]
+        let schema_indexer: Option<Arc<vlorql_core::prompt::schema_index::SchemaIndexer>> = None;
+
         Ok(VlorQl {
             schema,
             dialect,
@@ -368,6 +405,8 @@ impl VlorQlBuilder {
             telemetry_guard: self.telemetry_guard,
             metrics: self.metrics,
             executor: self.executor,
+            vector_search,
+            schema_indexer,
         })
     }
 }
