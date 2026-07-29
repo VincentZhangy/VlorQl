@@ -479,18 +479,18 @@ impl VlorQl {
                 json!({"operation": "query_stream"}),
             )
         })?);
-        let prompt_builder = self.build_prompt_builder(Arc::clone(&self.schema));
+        let schema = self.resolve_schema().await;
 
         #[cfg(feature = "vector-search")]
         if let Some(ref indexer) = self.schema_indexer {
             if self.schema_indexed.compare_exchange(false, true, Ordering::Relaxed, Ordering::Relaxed).is_ok() {
-                indexer.index_schema(&self.schema).await.ok();
+                indexer.index_schema(&schema).await.ok();
             }
         }
 
+        let prompt_builder = self.build_prompt_builder(Arc::clone(&schema));
         let system_prompt = prompt_builder.build_system_prompt(question).await;
         let (event_tx, event_rx) = mpsc::unbounded_channel();
-        let schema = Arc::clone(&self.schema);
         let dialect = self.dialect.clone();
         let policy = self.policy.clone();
         let compiler = Arc::clone(&self.compiler);
