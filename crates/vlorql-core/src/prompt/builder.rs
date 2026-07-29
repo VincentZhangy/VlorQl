@@ -39,7 +39,9 @@ use xxhash_rust::xxh3::Xxh3;
 ///     DialectProfile::default(),
 ///     PolicyConfig::default(),
 /// );
-/// let prompt = builder.build_system_prompt("Show me users");
+/// let prompt = tokio::runtime::Runtime::new()
+///     .expect("create runtime")
+///     .block_on(builder.build_system_prompt("Show me users"));
 /// assert!(prompt.contains("users"));
 /// assert!(prompt.contains("query plan"));
 /// ```

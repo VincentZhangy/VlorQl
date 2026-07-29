@@ -428,4 +428,45 @@ mod extra_tests {
         assert!(prompt.contains("(none available)"));
         assert!(!prompt.contains("## Example"));
     }
+
+    #[tokio::test]
+    async fn vector_search_disabled_falls_back_to_tfidf() {
+        let builder = PromptBuilder::new(
+            non_empty_schema(),
+            non_empty_dialect(),
+            non_empty_policy(),
+        )
+        .with_vector_search(false);
+        let tables = builder.filter_relevant_tables("Show me customer purchases").await;
+        assert!(tables.contains(&"orders".to_owned()),
+            "TF-IDF fallback should find orders table: got {tables:?}");
+    }
+
+    #[cfg(feature = "vector-search")]
+    #[tokio::test]
+    async fn vector_search_returns_relevant_tables() {
+        let indexer = match crate::prompt::schema_index::SchemaIndexer::connect("http://localhost:6334").await {
+            Ok(idx) => {
+                let _ = idx.index_schema(&*non_empty_schema()).await;
+                Arc::new(idx)
+            }
+            Err(_) => {
+                eprintln!("Skipping test: Qdrant not available on localhost:6334");
+                return;
+            }
+        };
+
+        let tables = PromptBuilder::new(
+            non_empty_schema(),
+            non_empty_dialect(),
+            non_empty_policy(),
+        )
+        .with_vector_search(true)
+        .with_schema_indexer(indexer)
+        .filter_relevant_tables("Show me customer purchases")
+        .await;
+
+        assert!(tables.contains(&"orders".to_owned()),
+            "vector search should find orders table: got {tables:?}");
+    }
 }
