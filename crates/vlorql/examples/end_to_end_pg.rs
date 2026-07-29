@@ -2668,7 +2668,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             .build()?,
         PolicyConfig::default(),
     );
-    let system_prompt = prompt_builder.build_system_prompt("列出总金额超过150的已完成订单");
+    let system_prompt = prompt_builder.build_system_prompt("列出总金额超过150的已完成订单").await;
     // 提示词很长，只显示开头和结尾
     let preview: String = system_prompt
         .chars()
