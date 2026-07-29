@@ -63,8 +63,9 @@ pub struct VlorQlBuilder {
     telemetry_guard: Option<TelemetryGuard>,
     metrics: Option<Arc<VlorqMetrics>>,
     executor: Option<Arc<dyn DatabaseExecutor>>,
-    #[cfg(feature = "vector-search")]
+    /// Enables vector-based schema retrieval via Qdrant (default: false).
     vector_search: bool,
+    /// Optional SchemaIndexer for semantic table/column search (requires `vector-search` feature).
     #[cfg(feature = "vector-search")]
     schema_indexer: Option<Arc<vlorql_core::prompt::schema_index::SchemaIndexer>>,
 }
@@ -90,7 +91,6 @@ impl Default for VlorQlBuilder {
             telemetry_guard: None,
             metrics: None,
             executor: None,
-            #[cfg(feature = "vector-search")]
             vector_search: false,
             #[cfg(feature = "vector-search")]
             schema_indexer: None,
@@ -377,15 +377,12 @@ impl VlorQlBuilder {
             ))
         });
 
-        #[cfg(feature = "vector-search")]
         let vector_search = self.vector_search;
-        #[cfg(not(feature = "vector-search"))]
-        let vector_search = false;
 
         #[cfg(feature = "vector-search")]
         let schema_indexer = self.schema_indexer;
         #[cfg(not(feature = "vector-search"))]
-        let schema_indexer: Option<Arc<vlorql_core::prompt::schema_index::SchemaIndexer>> = None;
+        let _schema_indexer: Option<Arc<()>> = None;
 
         Ok(VlorQl {
             schema,
@@ -406,6 +403,7 @@ impl VlorQlBuilder {
             metrics: self.metrics,
             executor: self.executor,
             vector_search,
+            #[cfg(feature = "vector-search")]
             schema_indexer,
         })
     }

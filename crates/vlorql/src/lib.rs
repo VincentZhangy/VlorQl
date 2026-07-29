@@ -160,32 +160,33 @@ pub struct VlorQl {
     telemetry_guard: Option<TelemetryGuard>,
     metrics: Option<Arc<VlorqMetrics>>,
     executor: Option<Arc<dyn DatabaseExecutor>>,
-    #[cfg(feature = "vector-search")]
+    /// Enables vector-based schema retrieval via Qdrant (default: false).
     vector_search: bool,
+    /// Optional SchemaIndexer for semantic table/column search (requires `vector-search` feature).
     #[cfg(feature = "vector-search")]
     schema_indexer: Option<Arc<SchemaIndexer>>,
 }
 
 impl std::fmt::Debug for VlorQl {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter
-            .debug_struct("VlorQl")
-            .field("schema", &self.schema)
-            .field("dialect", &self.dialect)
-            .field("policy", &self.policy)
-            .field("compiler_dialect", &self.compiler.dialect())
-            .field("has_rewrite_engine", &self.rewrite_engine.is_some())
-            .field("has_llm_client", &self.llm_client.is_some())
-            .field("has_optimizer", &self.optimizer.is_some())
-            .field("has_schema_cache", &self.schema_cache.is_some())
-            .field("has_compile_cache", &self.compile_cache.is_some())
-            .field("has_prompt_cache", &self.prompt_cache.is_some())
-            .field("llm_cache_size", &self.llm_cache.size())
-            .field("max_retries", &self.max_retries)
-            .field("has_executor", &self.executor.is_some())
-            .field("vector_search", &self.vector_search)
-            .field("has_schema_indexer", &self.schema_indexer.is_some())
-            .finish()
+        let mut d = formatter.debug_struct("VlorQl");
+        d.field("schema", &self.schema);
+        d.field("dialect", &self.dialect);
+        d.field("policy", &self.policy);
+        d.field("compiler_dialect", &self.compiler.dialect());
+        d.field("has_rewrite_engine", &self.rewrite_engine.is_some());
+        d.field("has_llm_client", &self.llm_client.is_some());
+        d.field("has_optimizer", &self.optimizer.is_some());
+        d.field("has_schema_cache", &self.schema_cache.is_some());
+        d.field("has_compile_cache", &self.compile_cache.is_some());
+        d.field("has_prompt_cache", &self.prompt_cache.is_some());
+        d.field("llm_cache_size", &self.llm_cache.size());
+        d.field("max_retries", &self.max_retries);
+        d.field("has_executor", &self.executor.is_some());
+        d.field("vector_search", &self.vector_search);
+        #[cfg(feature = "vector-search")]
+        d.field("has_schema_indexer", &self.schema_indexer.is_some());
+        d.finish()
     }
 }
 
