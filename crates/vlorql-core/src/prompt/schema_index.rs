@@ -7,12 +7,21 @@
 
 use crate::errors::VlorQLError;
 use crate::schema::DataType;
+use std::fmt;
 
 /// Indexes schema table/column text descriptions into Qdrant for
 /// semantic retrieval. Lazy-initialized on first use.
 pub struct SchemaIndexer {
     client: qdrant_client::Qdrant,
     collection_name: String,
+}
+
+impl fmt::Debug for SchemaIndexer {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SchemaIndexer")
+            .field("collection_name", &self.collection_name)
+            .finish()
+    }
 }
 
 #[cfg(feature = "vector-search")]
