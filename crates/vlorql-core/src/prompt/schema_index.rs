@@ -182,6 +182,10 @@ const EMBEDDING_DIM: u64 = 512;
 static EMBEDDING_CACHE: LazyLock<Mutex<HashMap<String, Vec<f32>>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
+/// Shared HTTP client for OpenAI API calls.
+#[cfg(feature = "vector-search")]
+static HTTP_CLIENT: LazyLock<reqwest::Client> = LazyLock::new(reqwest::Client::new);
+
 /// Embed text using OpenAI text-embedding-3-small API.
 ///
 /// Results are cached per unique input text to avoid redundant API calls
@@ -205,7 +209,7 @@ async fn embed_text(text: &str) -> Result<Vec<f32>, VlorQLError> {
         )
     })?;
 
-    let client = reqwest::Client::new();
+    let client = &*HTTP_CLIENT;
     let resp = client
         .post("https://api.openai.com/v1/embeddings")
         .header("Authorization", format!("Bearer {api_key}"))
