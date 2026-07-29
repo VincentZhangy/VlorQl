@@ -7,7 +7,9 @@
 
 use crate::errors::VlorQLError;
 use crate::schema::DataType;
+use std::collections::HashMap;
 use std::fmt;
+use std::sync::{LazyLock, Mutex};
 
 /// Indexes schema table/column text descriptions into Qdrant for
 /// semantic retrieval. Lazy-initialized on first use.
@@ -51,7 +53,7 @@ impl SchemaIndexer {
         let exists = collections.collections.iter()
             .any(|c| c.name == self.collection_name);
         if !exists {
-            let params = VectorParamsBuilder::new(384, Distance::Cosine);
+            let params = VectorParamsBuilder::new(EMBEDDING_DIM, Distance::Cosine);
             self.client.create_collection(
                 CreateCollectionBuilder::new(self.collection_name.clone())
                     .vectors_config(params)
@@ -170,11 +172,89 @@ fn data_type_name(data_type: DataType) -> &'static str {
     }
 }
 
-/// Embed text to a vector. Currently uses a zero-vector placeholder.
-/// In production, replace this with all-MiniLM-L6-v2 or an embedding API.
-async fn embed_text(_text: &str) -> Result<Vec<f32>, VlorQLError> {
-    // TODO: Replace with real embedding (ONNX runtime or API call)
-    Ok(vec![0.0f32; 384])
+/// OpenAI embedding dimension for text-embedding-3-small.
+#[cfg(feature = "vector-search")]
+const EMBEDDING_DIM: u64 = 512;
+
+/// Embedding cache: input text → embedding vector.
+#[cfg(feature = "vector-search")]
+static EMBEDDING_CACHE: LazyLock<Mutex<HashMap<String, Vec<f32>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// Embed text using OpenAI text-embedding-3-small API.
+///
+/// Results are cached per unique input text to avoid redundant API calls
+/// during schema indexing.
+#[cfg(feature = "vector-search")]
+async fn embed_text(text: &str) -> Result<Vec<f32>, VlorQLError> {
+    {
+        let cache = EMBEDDING_CACHE.lock().unwrap();
+        if let Some(cached) = cache.get(text) {
+            return Ok(cached.clone());
+        }
+    }
+
+    let api_key = std::env::var("OPENAI_API_KEY").map_err(|_| {
+        VlorQLError::config(
+            crate::errors::ConfigErrorKind::ConfigFileError {
+                path: "OPENAI_API_KEY".into(),
+                reason: "OPENAI_API_KEY environment variable not set".into(),
+            },
+            serde_json::json!({}),
+        )
+    })?;
+
+    let client = reqwest::Client::new();
+    let resp = client
+        .post("https://api.openai.com/v1/embeddings")
+        .header("Authorization", format!("Bearer {api_key}"))
+        .json(&serde_json::json!({
+            "model": "text-embedding-3-small",
+            "input": text,
+        }))
+        .send()
+        .await
+        .map_err(|e| {
+            VlorQLError::config(
+                crate::errors::ConfigErrorKind::ConfigFileError {
+                    path: "vector_search".into(),
+                    reason: format!("OpenAI embedding request failed: {e}"),
+                },
+                serde_json::json!({}),
+            )
+        })?;
+
+    let body: serde_json::Value = resp.json().await.map_err(|e| {
+        VlorQLError::config(
+            crate::errors::ConfigErrorKind::ConfigFileError {
+                path: "vector_search".into(),
+                reason: format!("OpenAI embedding parse failed: {e}"),
+            },
+            serde_json::json!({}),
+        )
+    })?;
+
+    let vector: Vec<f32> = body["data"][0]["embedding"]
+        .as_array()
+        .ok_or_else(|| {
+            VlorQLError::config(
+                crate::errors::ConfigErrorKind::ConfigFileError {
+                    path: "vector_search".into(),
+                    reason: "OpenAI embedding response missing embedding field".into(),
+                },
+                serde_json::json!({}),
+            )
+        })?
+        .iter()
+        .map(|v| v.as_f64().unwrap_or(0.0) as f32)
+        .collect();
+
+    {
+        let mut cache = EMBEDDING_CACHE.lock().unwrap();
+        cache.insert(text.to_owned(), vector.clone());
+    }
+
+    Ok(vector)
 }
 
 fn qdrant_error(e: impl std::fmt::Display) -> VlorQLError {
