@@ -58,6 +58,11 @@ pub struct PromptBuilder {
     /// that reference it. Built once in [`Self::new`] to avoid O(n²) traversal
     /// in [`Self::expand_foreign_key_neighbors`].
     reverse_fk_index: HashMap<String, Vec<String>>,
+    /// Enables vector-based schema retrieval via Qdrant (default: false).
+    vector_search: bool,
+    /// Optional schema indexer for semantic table/column search.
+    #[cfg(feature = "vector-search")]
+    schema_indexer: Option<Arc<crate::prompt::schema_index::SchemaIndexer>>,
 }
 
 impl PromptBuilder {
@@ -72,6 +77,9 @@ impl PromptBuilder {
             include_examples: true,
             skill: None,
             reverse_fk_index,
+            vector_search: false,
+            #[cfg(feature = "vector-search")]
+            schema_indexer: None,
         }
     }
 
@@ -89,12 +97,35 @@ impl PromptBuilder {
         self
     }
 
+    /// Enables or disables vector-based schema retrieval via Qdrant.
+    #[must_use]
+    pub fn with_vector_search(mut self, enabled: bool) -> Self {
+        self.vector_search = enabled;
+        self
+    }
+
+    /// Attaches a pre-built [`SchemaIndexer`] for semantic table/column search.
+    ///
+    /// Only available when the `vector-search` cargo feature is enabled.
+    #[must_use]
+    #[cfg(feature = "vector-search")]
+    pub fn with_schema_indexer(
+        mut self,
+        indexer: Arc<crate::prompt::schema_index::SchemaIndexer>,
+    ) -> Self {
+        self.schema_indexer = Some(indexer);
+        self
+    }
+
     /// Builds the complete system prompt for one user question.
     ///
     /// The question is used only for schema retrieval and is deliberately not copied
     /// into the system prompt, preventing user text from becoming system instructions.
-    pub fn build_system_prompt(&self, user_question: &str) -> String {
-        let relevant_tables = self.filter_relevant_tables(user_question);
+    ///
+    /// This method is async because schema retrieval may issue vector-search
+    /// queries against Qdrant when the `vector-search` feature is enabled.
+    pub async fn build_system_prompt(&self, user_question: &str) -> String {
+        let relevant_tables = self.filter_relevant_tables(user_question).await;
         self.build_system_prompt_for_tables(&relevant_tables)
     }
 
@@ -153,7 +184,7 @@ impl PromptBuilder {
         // Compute the relevant table set first so it can be included
         // in the cache key — different questions that match different
         // tables must produce different cache entries.
-        let relevant_tables = self.filter_relevant_tables(user_question);
+        let relevant_tables = self.filter_relevant_tables(user_question).await;
 
         // Hash the relevant table names for the cache key.
         let mut hasher = Xxh3::new();
@@ -178,11 +209,61 @@ impl PromptBuilder {
         prompt
     }
 
-    /// Selects relevant tables using direct name matches and lightweight TF-IDF scoring.
+    /// Selects relevant tables for a user question.
     ///
-    /// A direct match also includes one-hop foreign-key neighbors. If no table scores,
-    /// all tables are returned so that retrieval cannot accidentally hide the answer.
-    pub fn filter_relevant_tables(&self, user_question: &str) -> Vec<String> {
+    /// When the `vector-search` feature is enabled and [`with_vector_search`] has
+    /// been turned on, the builder first queries the [`SchemaIndexer`] for a
+    /// semantic top-k of tables. If that returns a non-empty set the foreign-key
+    /// neighbours are expanded and the result is returned. On any failure —
+    /// feature disabled, vector search off, indexer unavailable, or an empty
+    /// result — the method falls back to the lightweight TF-IDF scorer in
+    /// [`filter_relevant_tables_tfidf`].
+    ///
+    /// A direct match also includes one-hop foreign-key neighbors. If no table
+    /// scores, all tables are returned so that retrieval cannot accidentally
+    /// hide the answer.
+    ///
+    /// [`with_vector_search`]: Self::with_vector_search
+    pub async fn filter_relevant_tables(&self, user_question: &str) -> Vec<String> {
+        if self.schema.tables.is_empty() {
+            return Vec::new();
+        }
+
+        #[cfg(feature = "vector-search")]
+        if self.vector_search {
+            let indexer = self.ensure_indexer().await;
+            if let Some(ref indexer) = indexer {
+                match indexer.search(user_question, 5).await {
+                    Ok(tables) if !tables.is_empty() => {
+                        let set: HashSet<String> = tables.into_iter().collect();
+                        let expanded = self.expand_foreign_key_neighbors(&set);
+                        let result: Vec<String> = self
+                            .schema
+                            .tables
+                            .iter()
+                            .filter(|t| expanded.contains(&t.name))
+                            .map(|t| t.name.clone())
+                            .collect();
+                        if !result.is_empty() {
+                            return result;
+                        }
+                    }
+                    _ => { /* fall through to TF-IDF */ }
+                }
+            }
+        }
+
+        #[cfg(not(feature = "vector-search"))]
+        let _ = user_question;
+        self.filter_relevant_tables_tfidf(user_question)
+    }
+
+    /// Lightweight TF-IDF fallback for [`filter_relevant_tables`].
+    ///
+    /// Scores every table against the user question using token overlap and
+    /// phrase matching, then expands the matched set by one hop of foreign-key
+    /// neighbours. Returns all tables when nothing scores.
+    fn filter_relevant_tables_tfidf(&self, user_question: &str) -> Vec<String> {
         if self.schema.tables.is_empty() {
             return Vec::new();
         }
@@ -242,6 +323,36 @@ impl PromptBuilder {
             .filter(|table| expanded.contains(&table.name))
             .map(|table| table.name.clone())
             .collect()
+    }
+
+    /// Lazily connects a [`SchemaIndexer`] to Qdrant when vector search is
+    /// enabled but no indexer has been supplied via
+    /// [`with_schema_indexer`].
+    ///
+    /// Returns `None` (and logs a warning) if the connection fails, signalling
+    /// the caller to fall back to TF-IDF.
+    ///
+    /// [`with_schema_indexer`]: Self::with_schema_indexer
+    #[cfg(feature = "vector-search")]
+    async fn ensure_indexer(
+        &self,
+    ) -> Option<Arc<crate::prompt::schema_index::SchemaIndexer>> {
+        if self.vector_search && self.schema_indexer.is_none() {
+            match crate::prompt::schema_index::SchemaIndexer::connect("http://localhost:6333")
+                .await
+            {
+                Ok(indexer) => {
+                    tracing::info!(target: "vlorql", "SchemaIndexer connected to Qdrant at localhost:6333");
+                    Some(Arc::new(indexer))
+                }
+                Err(e) => {
+                    tracing::warn!(target: "vlorql", "Failed to connect SchemaIndexer, falling back to TF-IDF: {e}");
+                    None
+                }
+            }
+        } else {
+            self.schema_indexer.clone()
+        }
     }
 
     /// Returns the shared schema snapshot used by the builder.
