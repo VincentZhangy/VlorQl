@@ -678,7 +678,7 @@ fn bench_query_build(c: &mut Criterion) {
             &config,
             |bencher, config| {
                 bencher.iter(|| {
-                    let result = QueryBuilder::new(criterion::black_box(&plan), config).build();
+                    let result = QueryBuilder::new(criterion::black_box(&plan), config).unwrap().build();
                     criterion::black_box(result.expect("complex plan should compile"))
                 })
             },
@@ -702,7 +702,7 @@ fn bench_from_subquery(c: &mut Criterion) {
             &config,
             |bencher, config| {
                 bencher.iter(|| {
-                    let result = QueryBuilder::new(criterion::black_box(&plan), config).build();
+                    let result = QueryBuilder::new(criterion::black_box(&plan), config).unwrap().build();
                     criterion::black_box(result.expect("subquery plan should compile"))
                 })
             },
@@ -726,7 +726,7 @@ fn bench_new_data_types(c: &mut Criterion) {
             &config,
             |bencher, config| {
                 bencher.iter(|| {
-                    let result = QueryBuilder::new(criterion::black_box(&plan), config).build();
+                    let result = QueryBuilder::new(criterion::black_box(&plan), config).unwrap().build();
                     criterion::black_box(result.expect("new-data-types plan should compile"))
                 })
             },
@@ -750,7 +750,7 @@ fn bench_decimal_literal(c: &mut Criterion) {
             &config,
             |bencher, config| {
                 bencher.iter(|| {
-                    let result = QueryBuilder::new(criterion::black_box(&plan), config).build();
+                    let result = QueryBuilder::new(criterion::black_box(&plan), config).unwrap().build();
                     criterion::black_box(result.expect("decimal literal plan should compile"))
                 })
             },
@@ -774,7 +774,7 @@ fn bench_cte_query(c: &mut Criterion) {
             &config,
             |bencher, config| {
                 bencher.iter(|| {
-                    let result = QueryBuilder::new(criterion::black_box(&plan), config).build();
+                    let result = QueryBuilder::new(criterion::black_box(&plan), config).unwrap().build();
                     criterion::black_box(result.expect("CTE query plan should compile"))
                 })
             },

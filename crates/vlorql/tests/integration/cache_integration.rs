@@ -185,7 +185,7 @@ async fn clear_all_caches_does_not_break_queries() {
         .expect("query before clear should succeed");
 
     // Clear all caches.
-    vlorql.clear_all_caches();
+    vlorql.clear_all_caches().await;
 
     // Subsequent queries should still work (result from fresh compilation).
     let (result, _usage) = vlorql
