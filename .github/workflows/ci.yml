@@ -150,5 +150,8 @@ jobs:
             ${{ runner.os }}-miri-
       # Only run Miri on the core crate to limit runtime.
       # Run lib tests only (no doc-tests, no benches) — Miri is interpreted and very slow.
+      # permissive-provenance silences known crossbeam-epoch false positives.
       - name: Run cargo miri test (core only)
+        env:
+          MIRIFLAGS: -Zmiri-permissive-provenance
         run: cargo miri test -p vlorql-core --lib --no-fail-fast
