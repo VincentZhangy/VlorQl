@@ -94,16 +94,21 @@ pub struct ConfigCompiler(pub Arc<DialectConfig>);
 
 impl SqlCompiler for ConfigCompiler {
     fn compile(&self, plan: &crate::validate::ValidatedPlan) -> Result<CompiledQuery, VlorQLError> {
-        let (sql, parameters) = super::QueryBuilder::new(plan, &self.0).build()?;
+        let (sql, parameters) = super::QueryBuilder::new(plan, &self.0)?.build()?;
+        // The dialect was validated inside QueryBuilder::new above, so
+        // `dialect_from_name` is guaranteed to return Some here.
+        let dialect = super::dialect_config::dialect_from_name(&self.0.name)
+            .unwrap_or_else(|| unreachable!("dialect was validated in QueryBuilder::new"));
         Ok(CompiledQuery {
             sql,
             parameters,
-            dialect: SqlDialect::Postgres,
+            dialect,
         })
     }
 
     fn dialect(&self) -> SqlDialect {
-        SqlDialect::Postgres
+        super::dialect_config::dialect_from_name(&self.0.name)
+            .unwrap_or(SqlDialect::Postgres)
     }
 }
 

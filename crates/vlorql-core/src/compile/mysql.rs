@@ -9,7 +9,7 @@ pub struct MySQLCompiler;
 impl SqlCompiler for MySQLCompiler {
     fn compile(&self, plan: &ValidatedPlan) -> Result<CompiledQuery, VlorQLError> {
         let config = DialectConfig::default_mysql();
-        let (sql, parameters) = QueryBuilder::new(plan, &config).build()?;
+        let (sql, parameters) = QueryBuilder::new(plan, &config)?.build()?;
         Ok(CompiledQuery {
             sql,
             parameters,

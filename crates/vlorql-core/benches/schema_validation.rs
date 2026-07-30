@@ -70,15 +70,15 @@ fn build_query_plan() -> QueryPlan {
             let right_table = format!("table_{i:04}");
             let right_alias = format!("t{i}");
             let on = Predicate::Comparison {
-                left: Expression::ColumnRef {
+                left: Box::new(Expression::ColumnRef {
                     table: Some("table_0000".to_owned()),
                     column: "col_0".to_owned(),
-                },
+                }),
                 op: ComparisonOperator::Eq,
-                right: Expression::ColumnRef {
+                right: Box::new(Expression::ColumnRef {
                     table: Some(right_alias.clone()),
                     column: "col_0".to_owned(),
-                },
+                }),
             };
             JoinClause {
                 join_type: JoinType::Inner,
@@ -247,15 +247,15 @@ fn build_decimal_query_plan() -> QueryPlan {
         ],
         from: FromClause::table("financials_00".to_owned(), Some("f00".to_owned())),
         r#where: Some(Predicate::Comparison {
-            left: Expression::ColumnRef {
+            left: Box::new(Expression::ColumnRef {
                 table: Some("f00".to_owned()),
                 column: "amount".to_owned(),
-            },
+            }),
             op: ComparisonOperator::Gt,
-            right: Expression::Literal {
+            right: Box::new(Expression::Literal {
                 value: json!(0),
                 data_type: DataType::Decimal,
-            },
+            }),
         }),
         group_by: None,
         having: None,
@@ -266,15 +266,15 @@ fn build_decimal_query_plan() -> QueryPlan {
             join_type: JoinType::Inner,
             right_table: FromClause::table("financials_01".to_owned(), Some("f01".to_owned())),
             on: Predicate::Comparison {
-                left: Expression::ColumnRef {
+                left: Box::new(Expression::ColumnRef {
                     table: Some("f00".to_owned()),
                     column: "amount".to_owned(),
-                },
+                }),
                 op: ComparisonOperator::Eq,
-                right: Expression::ColumnRef {
+                right: Box::new(Expression::ColumnRef {
                     table: Some("f01".to_owned()),
                     column: "amount".to_owned(),
-                },
+                }),
             },
         }]),
         ctes: None,

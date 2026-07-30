@@ -160,45 +160,45 @@ fn too_many_joins_is_rejected() {
             join_type: JoinType::Inner,
             right_table: FromClause::table("users".to_owned(), Some("u2".to_owned())),
             on: Predicate::Comparison {
-                left: Expression::ColumnRef {
+                left: Box::new(Expression::ColumnRef {
                     table: Some("users".to_owned()),
                     column: "id".to_owned(),
-                },
+                }),
                 op: ComparisonOperator::Eq,
-                right: Expression::ColumnRef {
+                right: Box::new(Expression::ColumnRef {
                     table: Some("u2".to_owned()),
                     column: "id".to_owned(),
-                },
+                }),
             },
         },
         JoinClause {
             join_type: JoinType::Inner,
             right_table: FromClause::table("users".to_owned(), Some("u3".to_owned())),
             on: Predicate::Comparison {
-                left: Expression::ColumnRef {
+                left: Box::new(Expression::ColumnRef {
                     table: Some("users".to_owned()),
                     column: "id".to_owned(),
-                },
+                }),
                 op: ComparisonOperator::Eq,
-                right: Expression::ColumnRef {
+                right: Box::new(Expression::ColumnRef {
                     table: Some("u3".to_owned()),
                     column: "id".to_owned(),
-                },
+                }),
             },
         },
         JoinClause {
             join_type: JoinType::Inner,
             right_table: FromClause::table("users".to_owned(), Some("u4".to_owned())),
             on: Predicate::Comparison {
-                left: Expression::ColumnRef {
+                left: Box::new(Expression::ColumnRef {
                     table: Some("users".to_owned()),
                     column: "id".to_owned(),
-                },
+                }),
                 op: ComparisonOperator::Eq,
-                right: Expression::ColumnRef {
+                right: Box::new(Expression::ColumnRef {
                     table: Some("u4".to_owned()),
                     column: "id".to_owned(),
-                },
+                }),
             },
         },
     ]);
@@ -220,15 +220,15 @@ fn disallowed_join_type_is_rejected() {
         join_type: JoinType::Right,
         right_table: FromClause::table("users".to_owned(), Some("u2".to_owned())),
         on: Predicate::Comparison {
-            left: Expression::ColumnRef {
+            left: Box::new(Expression::ColumnRef {
                 table: Some("users".to_owned()),
                 column: "id".to_owned(),
-            },
+            }),
             op: ComparisonOperator::Eq,
-            right: Expression::ColumnRef {
+            right: Box::new(Expression::ColumnRef {
                 table: Some("u2".to_owned()),
                 column: "id".to_owned(),
-            },
+            }),
         },
     }]);
     let errors = DialectValidator::validate(&plan, &restricted_profile())
@@ -289,10 +289,10 @@ fn function_not_in_allowlist_is_rejected() {
     plan.select = vec![Projection::Expr {
         expression: Expression::FunctionCall {
             name: "sum".to_owned(),
-            args: vec![Expression::ColumnRef {
+            args: Box::new(vec![Expression::ColumnRef {
                 table: Some("users".to_owned()),
                 column: "id".to_owned(),
-            }],
+            }]),
             distinct: false,
         },
         alias: None,
@@ -311,10 +311,10 @@ fn explicitly_denied_function_is_rejected() {
     plan.select = vec![Projection::Expr {
         expression: Expression::FunctionCall {
             name: "load_extension".to_owned(),
-            args: vec![Expression::Literal {
+            args: Box::new(vec![Expression::Literal {
                 value: serde_json::Value::String("/tmp/evil.so".to_owned()),
                 data_type: DataType::String,
-            }],
+            }]),
             distinct: false,
         },
         alias: None,
@@ -333,10 +333,10 @@ fn distinct_keyword_is_rejected_when_disallowed() {
     plan.select = vec![Projection::Expr {
         expression: Expression::FunctionCall {
             name: "count".to_owned(),
-            args: vec![Expression::ColumnRef {
+            args: Box::new(vec![Expression::ColumnRef {
                 table: Some("users".to_owned()),
                 column: "id".to_owned(),
-            }],
+            }]),
             distinct: true,
         },
         alias: None,
@@ -395,45 +395,45 @@ fn multiple_dialect_violations_are_collected_together() {
             join_type: JoinType::Right,
             right_table: FromClause::table("users".to_owned(), Some("u2".to_owned())),
             on: Predicate::Comparison {
-                left: Expression::ColumnRef {
+                left: Box::new(Expression::ColumnRef {
                     table: Some("users".to_owned()),
                     column: "id".to_owned(),
-                },
+                }),
                 op: ComparisonOperator::Eq,
-                right: Expression::ColumnRef {
+                right: Box::new(Expression::ColumnRef {
                     table: Some("u2".to_owned()),
                     column: "id".to_owned(),
-                },
+                }),
             },
         },
         JoinClause {
             join_type: JoinType::Right,
             right_table: FromClause::table("users".to_owned(), Some("u3".to_owned())),
             on: Predicate::Comparison {
-                left: Expression::ColumnRef {
+                left: Box::new(Expression::ColumnRef {
                     table: Some("users".to_owned()),
                     column: "id".to_owned(),
-                },
+                }),
                 op: ComparisonOperator::Eq,
-                right: Expression::ColumnRef {
+                right: Box::new(Expression::ColumnRef {
                     table: Some("u3".to_owned()),
                     column: "id".to_owned(),
-                },
+                }),
             },
         },
         JoinClause {
             join_type: JoinType::Right,
             right_table: FromClause::table("users".to_owned(), Some("u4".to_owned())),
             on: Predicate::Comparison {
-                left: Expression::ColumnRef {
+                left: Box::new(Expression::ColumnRef {
                     table: Some("users".to_owned()),
                     column: "id".to_owned(),
-                },
+                }),
                 op: ComparisonOperator::Eq,
-                right: Expression::ColumnRef {
+                right: Box::new(Expression::ColumnRef {
                     table: Some("u4".to_owned()),
                     column: "id".to_owned(),
-                },
+                }),
             },
         },
     ]);
@@ -441,10 +441,10 @@ fn multiple_dialect_violations_are_collected_together() {
     plan.select = vec![Projection::Expr {
         expression: Expression::FunctionCall {
             name: "load_extension".to_owned(),
-            args: vec![Expression::Literal {
+            args: Box::new(vec![Expression::Literal {
                 value: serde_json::Value::String("/tmp/evil.so".to_owned()),
                 data_type: DataType::String,
-            }],
+            }]),
             distinct: true,
         },
         alias: None,

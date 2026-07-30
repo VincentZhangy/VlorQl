@@ -9,7 +9,7 @@ pub struct SQLiteCompiler;
 impl SqlCompiler for SQLiteCompiler {
     fn compile(&self, plan: &ValidatedPlan) -> Result<CompiledQuery, VlorQLError> {
         let config = DialectConfig::default_sqlite();
-        let (sql, parameters) = QueryBuilder::new(plan, &config).build()?;
+        let (sql, parameters) = QueryBuilder::new(plan, &config)?.build()?;
         Ok(CompiledQuery {
             sql,
             parameters,

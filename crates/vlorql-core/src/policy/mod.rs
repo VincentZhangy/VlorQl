@@ -88,12 +88,12 @@ mod tests {
     fn equality_filter(table: &str, column: &str, value: serde_json::Value) -> RowFilter {
         RowFilter {
             condition: Predicate::Comparison {
-                left: column_ref(table, column),
+                left: Box::new(column_ref(table, column)),
                 op: ComparisonOperator::Eq,
-                right: Expression::Literal {
+                right: Box::new(Expression::Literal {
                     value,
                     data_type: DataType::String,
-                },
+                }),
             },
             description: format!("Restrict {table}.{column}"),
         }
@@ -175,7 +175,7 @@ mod tests {
         });
         let mut plan = plan_with_columns(&["id"]);
         plan.r#where = Some(Predicate::IsNull {
-            expr: column_ref("users", "password_hash"),
+            expr: Box::new(column_ref("users", "password_hash")),
         });
 
         let errors = engine
@@ -225,9 +225,9 @@ mod tests {
             join_type: JoinType::Inner,
             right_table: FromClause::table("accounts".to_owned(), Some("a".to_owned())),
             on: Predicate::Comparison {
-                left: column_ref("users", "id"),
+                left: Box::new(column_ref("users", "id")),
                 op: ComparisonOperator::Eq,
-                right: column_ref("a", "owner_id"),
+                right: Box::new(column_ref("a", "owner_id")),
             },
         }]);
 
@@ -365,17 +365,17 @@ mod extra_tests {
     fn apply_row_filters_returns_none_for_unrelated_table() {
         let config = PolicyConfig {
             row_filters: vec![RowFilter {
-                condition: Predicate::Comparison {
-                    left: Expression::ColumnRef {
-                        table: Some("other".to_owned()),
-                        column: "id".to_owned(),
-                    },
-                    op: ComparisonOperator::Eq,
-                    right: Expression::Literal {
-                        value: serde_json::json!(1),
-                        data_type: DataType::Int,
-                    },
-                },
+            condition: Predicate::Comparison {
+                left: Box::new(Expression::ColumnRef {
+                    table: Some("other".to_owned()),
+                    column: "id".to_owned(),
+                }),
+                op: ComparisonOperator::Eq,
+                right: Box::new(Expression::Literal {
+                    value: serde_json::json!(1),
+                    data_type: DataType::Int,
+                }),
+            },
                 description: "other-table filter".to_owned(),
             }],
             ..PolicyConfig::default()
@@ -472,15 +472,15 @@ mod extra_tests {
                 join_type: JoinType::Inner,
                 right_table: FromClause::table("accounts".to_owned(), Some("a".to_owned())),
                 on: Predicate::Comparison {
-                    left: Expression::ColumnRef {
+                    left: Box::new(Expression::ColumnRef {
                         table: Some("users".to_owned()),
                         column: "id".to_owned(),
-                    },
+                    }),
                     op: ComparisonOperator::Eq,
-                    right: Expression::ColumnRef {
+                    right: Box::new(Expression::ColumnRef {
                         table: Some("a".to_owned()),
                         column: "owner_id".to_owned(),
-                    },
+                    }),
                 },
             }]),
             ctes: None,
@@ -537,15 +537,15 @@ mod extra_tests {
         fn make_filter(column: &str, value: serde_json::Value) -> RowFilter {
             RowFilter {
                 condition: Predicate::Comparison {
-                    left: Expression::ColumnRef {
+                    left: Box::new(Expression::ColumnRef {
                         table: Some("users".to_owned()),
                         column: column.to_owned(),
-                    },
+                    }),
                     op: ComparisonOperator::Eq,
-                    right: Expression::Literal {
+                    right: Box::new(Expression::Literal {
                         value,
                         data_type: DataType::String,
-                    },
+                    }),
                 },
                 description: format!("filter on {column}"),
             }

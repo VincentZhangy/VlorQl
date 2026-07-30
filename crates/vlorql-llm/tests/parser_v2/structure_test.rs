@@ -16,7 +16,7 @@ fn openai_style_output() {
     // OpenAI typically outputs clean JSON that needs minimal normalization.
     let mut val = serde_json::json!({
         "select": [{"type": "column_ref", "table": "users", "column": "name"}],
-        "from": {"table": "users"},
+        "from": {"type": "table", "table": "users"},
         "where": {"type": "comparison", "left": {"type": "column_ref", "column": "age"}, "op": "gt", "right": {"type": "literal", "value": 18, "data_type": "int"}}
     });
     assert!(
@@ -324,7 +324,7 @@ fn full_multi_stage_normalize() {
 fn idempotent_normalize() {
     let mut val = serde_json::json!({
         "select": [{"type": "star"}],
-        "from": {"table": "users"},
+        "from": {"type": "table", "table": "users"},
         "where": {
             "type": "comparison",
             "left": {"type": "column_ref", "column": "age"},

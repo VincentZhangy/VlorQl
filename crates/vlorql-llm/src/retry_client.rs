@@ -72,7 +72,7 @@ pub(crate) trait RetryableHttpClient: Send + Sync {
         body: &Value,
     ) -> Result<reqwest::Response, VlorQLError>;
 
-    /// Parse a successful HTTP response body into a [`QueryPlan`].
+    /// Parse a successful HTTP response body into a [`QueryPlan`](vlorql_core::schema::QueryPlan).
     ///
     /// The input is the raw response text (the full JSON body returned by
     /// the provider). Implementors should first extract the assistant's
@@ -81,7 +81,7 @@ pub(crate) trait RetryableHttpClient: Send + Sync {
     fn parse_response(&self, body: &str) -> Result<QueryPlan, VlorQLError>;
 
     /// Send a non-streaming request with automatic retries on transient
-    /// failures, parse the successful response into a [`QueryPlan`],
+    /// failures, parse the successful response into a [`QueryPlan`](vlorql_core::schema::QueryPlan),
     /// and extract token usage from the response.
     async fn generate_with_retry(
         &self,

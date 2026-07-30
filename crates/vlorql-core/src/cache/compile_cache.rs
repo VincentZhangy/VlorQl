@@ -17,7 +17,7 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::Mutex;
+use tokio::sync::Mutex;
 
 /// A cache for [`CompiledQuery`] values keyed by plan hash + dialect.
 ///
@@ -142,20 +142,25 @@ impl CompileCache {
         self.inner
             .insert(key.clone(), Arc::new(query.clone()))
             .await;
-        self.entries.lock().unwrap().insert(key, query);
+        self.entries.lock().await.insert(key, query);
     }
 
     /// Removes the cache entry for `plan` under `profile`.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Ok(())` unconditionally; errors from the underlying
+    /// cache are propagated through the `Result` by the caller.
     pub async fn invalidate_plan(&self, plan: &ValidatedPlan, profile: &DialectProfile) {
         let key = CompileCacheKey::new(plan, profile);
         self.inner.invalidate(&key).await;
-        self.entries.lock().unwrap().remove(&key);
+        self.entries.lock().await.remove(&key);
     }
 
     /// Removes all entries from the cache.
-    pub fn clear(&self) {
+    pub async fn clear(&self) {
         self.inner.invalidate_all();
-        self.entries.lock().unwrap().clear();
+        self.entries.lock().await.clear();
     }
 
     /// Returns the number of entries currently in the cache.
@@ -190,7 +195,7 @@ impl CompileCache {
             return Ok(());
         };
         let bytes = {
-            let entries = self.entries.lock().unwrap();
+            let entries = self.entries.lock().await;
             bincode::serialize(&*entries).map_err(|e| {
                 VlorQLError::config(
                     ConfigErrorKind::ConfigFileError {
@@ -252,7 +257,7 @@ impl CompileCache {
             cache
                 .entries
                 .lock()
-                .unwrap()
+                .await
                 .insert(key.clone(), query.clone());
         }
         cache

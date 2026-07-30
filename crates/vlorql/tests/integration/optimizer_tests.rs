@@ -77,15 +77,15 @@ fn plan_with_joins() -> QueryPlan {
             join_type: JoinType::Inner,
             right_table: FromClause::table("orders".to_owned(), Some("o".to_owned())),
             on: Predicate::Comparison {
-                left: Expression::ColumnRef {
+                left: Box::new(Expression::ColumnRef {
                     table: Some("users".to_owned()),
                     column: "id".to_owned(),
-                },
+                }),
                 op: vlorql_core::schema::ComparisonOperator::Eq,
-                right: Expression::ColumnRef {
+                right: Box::new(Expression::ColumnRef {
                     table: Some("o".to_owned()),
                     column: "owner_id".to_owned(),
-                },
+                }),
             },
         }]),
         ctes: None,

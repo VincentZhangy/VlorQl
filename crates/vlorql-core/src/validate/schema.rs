@@ -334,7 +334,7 @@ fn validate_subqueries_in_expression(
                     ));
                 }
             }
-            for argument in args {
+            for argument in args.iter() {
                 validate_subqueries_in_expression(argument, schema, errors, outer_scope);
             }
         }
@@ -473,15 +473,15 @@ mod tests {
                 right_table: FromClause::table("products".to_owned(), None),
                 // Hallucinated `users.product_id` — invalid, but must be ignored.
                 on: Predicate::Comparison {
-                    left: Expression::ColumnRef {
+                    left: Box::new(Expression::ColumnRef {
                         table: Some("products".to_owned()),
                         column: "id".to_owned(),
-                    },
+                    }),
                     op: ComparisonOperator::Eq,
-                    right: Expression::ColumnRef {
+                    right: Box::new(Expression::ColumnRef {
                         table: Some("users".to_owned()),
                         column: "product_id".to_owned(),
-                    },
+                    }),
                 },
             }]),
             ctes: None,
@@ -514,15 +514,15 @@ mod tests {
                 join_type: JoinType::Inner,
                 right_table: FromClause::table("products".to_owned(), None),
                 on: Predicate::Comparison {
-                    left: Expression::ColumnRef {
+                    left: Box::new(Expression::ColumnRef {
                         table: Some("products".to_owned()),
                         column: "id".to_owned(),
-                    },
+                    }),
                     op: ComparisonOperator::Eq,
-                    right: Expression::ColumnRef {
+                    right: Box::new(Expression::ColumnRef {
                         table: Some("users".to_owned()),
                         column: "product_id".to_owned(),
-                    },
+                    }),
                 },
             }]),
             ctes: None,

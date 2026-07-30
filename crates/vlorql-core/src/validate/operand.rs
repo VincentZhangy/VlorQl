@@ -183,7 +183,7 @@ impl<'a> OperandValidator<'a> {
                 if let Some(op) = operand {
                     self.validate_expression_inner(op, scope, errors);
                 }
-                for wt in when_thens {
+                for wt in when_thens.iter() {
                     self.validate_expression_inner(&wt.when, scope, errors);
                     self.validate_expression_inner(&wt.then, scope, errors);
                 }

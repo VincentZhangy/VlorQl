@@ -46,7 +46,7 @@ fn literal_str(value: &str) -> Expression {
 fn count_of(table: &str, column: &str) -> Expression {
     Expression::FunctionCall {
         name: "COUNT".to_owned(),
-        args: vec![column_ref(table, column)],
+        args: Box::new(vec![column_ref(table, column)]),
         distinct: false,
     }
 }
@@ -68,9 +68,9 @@ fn leaf_cte() -> QueryPlan {
         ],
         from: FromClause::table("orders".to_owned(), None),
         r#where: Some(Predicate::Comparison {
-            left: column_ref("orders", "status"),
+            left: Box::new(column_ref("orders", "status")),
             op: ComparisonOperator::Eq,
-            right: literal_str("paid"),
+            right: Box::new(literal_str("paid")),
         }),
         group_by: None,
         having: None,
@@ -107,12 +107,12 @@ fn orders_with_customers_cte() -> QueryPlan {
         ],
         from: FromClause::table("paid_orders".to_owned(), Some("o".to_owned())),
         r#where: Some(Predicate::Comparison {
-            left: column_ref("c", "active"),
+            left: Box::new(column_ref("c", "active")),
             op: ComparisonOperator::Eq,
-            right: Expression::Literal {
+            right: Box::new(Expression::Literal {
                 value: json!(true),
                 data_type: DataType::Boolean,
-            },
+            }),
         }),
         group_by: None,
         having: None,
@@ -123,9 +123,9 @@ fn orders_with_customers_cte() -> QueryPlan {
             join_type: JoinType::Inner,
             right_table: FromClause::table("customers".to_owned(), Some("c".to_owned())),
             on: Predicate::Comparison {
-                left: column_ref("o", "customer_id"),
+                left: Box::new(column_ref("o", "customer_id")),
                 op: ComparisonOperator::Eq,
-                right: column_ref("c", "id"),
+                right: Box::new(column_ref("c", "id")),
             },
         }]),
         ctes: Some(vec![CommonTableExpression {
@@ -159,7 +159,7 @@ fn build_complex_plan() -> ValidatedPlan {
             Projection::Expr {
                 expression: Expression::FunctionCall {
                     name: "SUM".to_owned(),
-                    args: vec![column_ref("p", "amount")],
+                    args: Box::new(vec![column_ref("p", "amount")]),
                     distinct: true,
                 },
                 alias: Some("revenue".to_owned()),
@@ -169,7 +169,7 @@ fn build_complex_plan() -> ValidatedPlan {
         r#where: Some(Predicate::And {
             left: Box::new(Predicate::Or {
                 left: Box::new(Predicate::In {
-                    expr: column_ref("r", "region"),
+                    expr: Box::new(column_ref("r", "region")),
                     target: InTarget::Values(vec![
                         literal_str("us"),
                         literal_str("eu"),
@@ -177,18 +177,18 @@ fn build_complex_plan() -> ValidatedPlan {
                     ]),
                 }),
                 right: Box::new(Predicate::Between {
-                    expr: column_ref("r", "order_id"),
-                    low: literal_int(1000),
-                    high: literal_int(999_999),
+                    expr: Box::new(column_ref("r", "order_id")),
+                    low: Box::new(literal_int(1000)),
+                    high: Box::new(literal_int(999_999)),
                 }),
             }),
             right: Box::new(Predicate::And {
                 left: Box::new(Predicate::Like {
-                    expr: column_ref("r", "customer_name"),
+                    expr: Box::new(column_ref("r", "customer_name")),
                     pattern: "A%".to_owned(),
                 }),
                 right: Box::new(Predicate::IsNull {
-                    expr: column_ref("s", "refunded_at"),
+                    expr: Box::new(column_ref("s", "refunded_at")),
                 }),
             }),
         }),
@@ -198,15 +198,15 @@ fn build_complex_plan() -> ValidatedPlan {
             column_ref("s", "tier"),
         ]),
         having: Some(Predicate::Comparison {
-            left: count_of("r", "order_id"),
+            left: Box::new(count_of("r", "order_id")),
             op: ComparisonOperator::Gt,
-            right: literal_int(5),
+            right: Box::new(literal_int(5)),
         }),
         order_by: Some(vec![
             OrderByTerm {
                 expr: Expression::FunctionCall {
                     name: "SUM".to_owned(),
-                    args: vec![column_ref("p", "amount")],
+                    args: Box::new(vec![column_ref("p", "amount")]),
                     distinct: true,
                 },
                 descending: true,
@@ -223,36 +223,36 @@ fn build_complex_plan() -> ValidatedPlan {
                 join_type: JoinType::Left,
                 right_table: FromClause::table("payments".to_owned(), Some("p".to_owned())),
                 on: Predicate::Comparison {
-                    left: column_ref("r", "order_id"),
+                    left: Box::new(column_ref("r", "order_id")),
                     op: ComparisonOperator::Eq,
-                    right: column_ref("p", "order_id"),
+                    right: Box::new(column_ref("p", "order_id")),
                 },
             },
             JoinClause {
                 join_type: JoinType::Right,
                 right_table: FromClause::table("subscriptions".to_owned(), Some("s".to_owned())),
                 on: Predicate::Comparison {
-                    left: column_ref("r", "customer_name"),
+                    left: Box::new(column_ref("r", "customer_name")),
                     op: ComparisonOperator::Eq,
-                    right: column_ref("s", "customer_name"),
+                    right: Box::new(column_ref("s", "customer_name")),
                 },
             },
             JoinClause {
                 join_type: JoinType::Full,
                 right_table: FromClause::table("tiers".to_owned(), Some("t".to_owned())),
                 on: Predicate::Comparison {
-                    left: column_ref("s", "tier"),
+                    left: Box::new(column_ref("s", "tier")),
                     op: ComparisonOperator::Eq,
-                    right: column_ref("t", "name"),
+                    right: Box::new(column_ref("t", "name")),
                 },
             },
             JoinClause {
                 join_type: JoinType::Inner,
                 right_table: FromClause::table("addresses".to_owned(), Some("a".to_owned())),
                 on: Predicate::Comparison {
-                    left: column_ref("r", "customer_name"),
+                    left: Box::new(column_ref("r", "customer_name")),
                     op: ComparisonOperator::Eq,
-                    right: column_ref("a", "customer_name"),
+                    right: Box::new(column_ref("a", "customer_name")),
                 },
             },
         ]),
@@ -273,9 +273,9 @@ fn build_complex_plan() -> ValidatedPlan {
                     }],
                     from: FromClause::table("orders".to_owned(), None),
                     r#where: Some(Predicate::Comparison {
-                        left: column_ref("orders", "total"),
+                        left: Box::new(column_ref("orders", "total")),
                         op: ComparisonOperator::Gt,
-                        right: literal_int(10_000),
+                        right: Box::new(literal_int(10_000)),
                     }),
                     group_by: None,
                     having: None,
@@ -300,7 +300,7 @@ fn build_complex_plan() -> ValidatedPlan {
                     }],
                     from: FromClause::table("customers".to_owned(), None),
                     r#where: Some(Predicate::IsNull {
-                        expr: column_ref("customers", "deleted_at"),
+                        expr: Box::new(column_ref("customers", "deleted_at")),
                     }),
                     group_by: None,
                     having: None,
@@ -345,12 +345,12 @@ fn build_from_subquery_plan() -> ValidatedPlan {
         ],
         from: FromClause::table("users".to_owned(), None),
         r#where: Some(Predicate::Comparison {
-            left: column_ref("users", "active"),
+            left: Box::new(column_ref("users", "active")),
             op: ComparisonOperator::Eq,
-            right: Expression::Literal {
+            right: Box::new(Expression::Literal {
                 value: json!(true),
                 data_type: DataType::Boolean,
-            },
+            }),
         }),
         group_by: None,
         having: None,
@@ -382,12 +382,12 @@ fn build_from_subquery_plan() -> ValidatedPlan {
             alias: Some("sq".to_owned()),
         },
         r#where: Some(Predicate::Comparison {
-            left: column_ref("sq", "tenant_id"),
+            left: Box::new(column_ref("sq", "tenant_id")),
             op: ComparisonOperator::Eq,
-            right: Expression::Literal {
+            right: Box::new(Expression::Literal {
                 value: json!("tenant-1"),
                 data_type: DataType::String,
-            },
+            }),
         }),
         group_by: None,
         having: None,
@@ -444,15 +444,15 @@ fn build_decimal_literal_plan() -> ValidatedPlan {
         ],
         from: FromClause::table("inventory".to_owned(), None),
         r#where: Some(Predicate::Comparison {
-            left: Expression::Literal {
+            left: Box::new(Expression::Literal {
                 value: json!(0.00),
                 data_type: DataType::Decimal,
-            },
+            }),
             op: ComparisonOperator::Gt,
-            right: Expression::Literal {
+            right: Box::new(Expression::Literal {
                 value: json!(0),
                 data_type: DataType::Decimal,
-            },
+            }),
         }),
         group_by: None,
         having: None,
@@ -496,9 +496,9 @@ fn build_cte_query_plan() -> ValidatedPlan {
             ],
             from: FromClause::table("events".to_owned(), None),
             r#where: Some(Predicate::Comparison {
-                left: column_ref("events", "event_type"),
+                left: Box::new(column_ref("events", "event_type")),
                 op: ComparisonOperator::Eq,
-                right: literal_str("purchase"),
+                right: Box::new(literal_str("purchase")),
             }),
             group_by: None,
             having: None,
@@ -545,9 +545,9 @@ fn build_cte_query_plan() -> ValidatedPlan {
                 join_type: JoinType::Inner,
                 right_table: FromClause::table("users".to_owned(), Some("u".to_owned())),
                 on: Predicate::Comparison {
-                    left: column_ref("b", "event_id"),
+                    left: Box::new(column_ref("b", "event_id")),
                     op: ComparisonOperator::Eq,
-                    right: column_ref("u", "id"),
+                    right: Box::new(column_ref("u", "id")),
                 },
             }]),
             ctes: None,
@@ -576,18 +576,18 @@ fn build_cte_query_plan() -> ValidatedPlan {
         ],
         from: FromClause::table("enriched".to_owned(), Some("e".to_owned())),
         r#where: Some(Predicate::Comparison {
-            left: column_ref("e", "event_type"),
+            left: Box::new(column_ref("e", "event_type")),
             op: ComparisonOperator::Eq,
-            right: literal_str("purchase"),
+            right: Box::new(literal_str("purchase")),
         }),
         group_by: Some(vec![
             column_ref("e", "event_id"),
             column_ref("e", "user_name"),
         ]),
         having: Some(Predicate::Comparison {
-            left: count_of("e", "event_id"),
+            left: Box::new(count_of("e", "event_id")),
             op: ComparisonOperator::Gt,
-            right: literal_int(1),
+            right: Box::new(literal_int(1)),
         }),
         order_by: Some(vec![OrderByTerm {
             expr: column_ref("e", "user_name"),
@@ -639,15 +639,15 @@ fn build_new_data_types_plan() -> ValidatedPlan {
         ],
         from: FromClause::table("products".to_owned(), None),
         r#where: Some(Predicate::Comparison {
-            left: Expression::Literal {
+            left: Box::new(Expression::Literal {
                 value: json!(true),
                 data_type: DataType::Boolean,
-            },
+            }),
             op: ComparisonOperator::Eq,
-            right: Expression::Literal {
+            right: Box::new(Expression::Literal {
                 value: json!(true),
                 data_type: DataType::Boolean,
-            },
+            }),
         }),
         group_by: None,
         having: None,

@@ -1,16 +1,19 @@
 //! FromClause / table builder: canonical JSON → [`FromClause`].
 
 use serde_json::Value;
-use vlorql_core::schema::FromClause;
+use vlorql_core::schema::{FromClause, QueryPlan};
 
-use super::expr_builder::{BuildError, opt_str, req_obj, req_str};
+use super::expr_builder::{BuildError, opt_str, req_obj};
+use super::query_builder::build_plan_from_obj;
 
 /// Build a [`FromClause`] from a canonical JSON object.
 ///
-/// Expected shape:
-/// ```json
-/// {"table": "users", "alias": "u"}
-/// ```
+/// Recognized shapes:
+/// - `{"table": "users", "alias": "u"}` — plain table reference
+/// - `{"type": "subquery", "query": {...}, "alias": "t"}` — derived table
+///   (`FROM (SELECT ...) AS t`)
+/// - `{"type": "table", "table": "users", "alias": "u"}` — explicit `type`
+///   discriminator emitted by some LLMs
 ///
 /// # Examples
 ///
@@ -23,7 +26,39 @@ use super::expr_builder::{BuildError, opt_str, req_obj, req_str};
 /// ```
 pub fn build_from_clause(val: &Value, parent: &str) -> Result<FromClause, BuildError> {
     let obj = req_obj(val, parent)?;
-    let table = req_str(obj, "table", parent)?.to_owned();
+    let type_str = obj.get("type").and_then(|t| t.as_str());
+
+    // Subquery: {"type": "subquery", "query": {...}, "alias": "..."}
+    if type_str == Some("subquery") || type_str == Some("SubQuery") {
+        let query_obj = req_obj(
+            obj.get("query")
+                .ok_or_else(|| BuildError::new("query", "missing `query` field on subquery"))?,
+            "query",
+        )?;
+        let query: QueryPlan = build_plan_from_obj(query_obj)?;
+        let alias = opt_str(obj, "alias").map(|s| s.to_owned());
+        return Ok(FromClause::Subquery {
+            query: Box::new(query),
+            alias,
+        });
+    }
+
+    // Table (with or without explicit `type: "table"` discriminator).
+    // Fallback: if `table` is null (LLM bug), try `alias` as table name.
+    let table = match obj.get("table").and_then(|v| v.as_str()) {
+        Some(name) => name.to_owned(),
+        None => {
+            // Try alias as fallback table name.
+            if let Some(alias) = opt_str(obj, "alias") {
+                alias.to_owned()
+            } else {
+                return Err(BuildError::new(
+                    parent,
+                    "expected string `table`, got null (and no `alias` fallback)",
+                ));
+            }
+        }
+    };
     let alias = opt_str(obj, "alias").map(|s| s.to_owned());
     Ok(FromClause::table(table, alias))
 }
@@ -50,8 +85,17 @@ mod tests {
     }
 
     #[test]
-    fn build_from_clause_missing_table() {
+    fn build_from_clause_missing_table_falls_back_to_alias() {
+        // When `table` is absent, `alias` is now used as the table name.
         let val = json!({"alias": "u"});
+        let from = build_from_clause(&val, "from").unwrap();
+        assert_eq!(from.table_name().unwrap(), "u");
+        assert_eq!(from.alias(), Some("u".to_owned()));
+    }
+
+    #[test]
+    fn build_from_clause_null_table_and_alias_errors() {
+        let val = json!({"table": null, "alias": null});
         let result = build_from_clause(&val, "from");
         assert!(result.is_err());
     }

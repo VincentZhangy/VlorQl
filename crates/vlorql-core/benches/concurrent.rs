@@ -118,10 +118,10 @@ fn build_query_plan() -> QueryPlan {
             Projection::Expr {
                 expression: Expression::FunctionCall {
                     name: "COUNT".to_owned(),
-                    args: vec![Expression::ColumnRef {
+                    args: Box::new(vec![Expression::ColumnRef {
                         table: Some("o".to_owned()),
                         column: "id".to_owned(),
-                    }],
+                    }]),
                     distinct: false,
                 },
                 alias: Some("order_count".to_owned()),
@@ -130,26 +130,26 @@ fn build_query_plan() -> QueryPlan {
         from: FromClause::table("users".to_owned(), Some("u".to_owned())),
         r#where: Some(Predicate::And {
             left: Box::new(Predicate::Comparison {
-                left: Expression::ColumnRef {
+                left: Box::new(Expression::ColumnRef {
                     table: Some("u".to_owned()),
                     column: "active".to_owned(),
-                },
+                }),
                 op: ComparisonOperator::Eq,
-                right: Expression::Literal {
+                right: Box::new(Expression::Literal {
                     value: json!(true),
                     data_type: DataType::Boolean,
-                },
+                }),
             }),
             right: Box::new(Predicate::Comparison {
-                left: Expression::ColumnRef {
+                left: Box::new(Expression::ColumnRef {
                     table: Some("u".to_owned()),
                     column: "tenant_id".to_owned(),
-                },
+                }),
                 op: ComparisonOperator::Eq,
-                right: Expression::Literal {
+                right: Box::new(Expression::Literal {
                     value: json!("tenant-1"),
                     data_type: DataType::String,
-                },
+                }),
             }),
         }),
         group_by: Some(vec![Expression::ColumnRef {
@@ -164,15 +164,15 @@ fn build_query_plan() -> QueryPlan {
             join_type: JoinType::Left,
             right_table: FromClause::table("orders".to_owned(), Some("o".to_owned())),
             on: Predicate::Comparison {
-                left: Expression::ColumnRef {
+                left: Box::new(Expression::ColumnRef {
                     table: Some("u".to_owned()),
                     column: "id".to_owned(),
-                },
+                }),
                 op: ComparisonOperator::Eq,
-                right: Expression::ColumnRef {
+                right: Box::new(Expression::ColumnRef {
                     table: Some("o".to_owned()),
                     column: "customer_id".to_owned(),
-                },
+                }),
             },
         }]),
         ctes: None,

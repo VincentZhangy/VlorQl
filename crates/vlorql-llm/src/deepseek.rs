@@ -15,7 +15,7 @@
 //!   mode, so the system prompt must include a JSON Schema example and
 //!   the word "json" for the model to honour the structured output.
 //!   The returned `content` is then validated client-side by attempting
-//!   to deserialise it into a [`QueryPlan`].
+//!   to deserialise it into a [`QueryPlan`](vlorql_core::schema::QueryPlan).
 //! * Operators upgrading from `deepseek-chat` / `deepseek-reasoner`
 //!   (deprecated on 2026-07-24) should switch to `deepseek-v4-flash` or
 //!   `deepseek-v4-pro`. Building a client with a deprecated model name
@@ -232,7 +232,7 @@ impl LlmClient for DeepSeekClient {
     }
 }
 
-/// Parses a DeepSeek chat-completions JSON response into a [`QueryPlan`].
+/// Parses a DeepSeek chat-completions JSON response into a [`QueryPlan`](vlorql_core::schema::QueryPlan).
 ///
 /// Empty `content` payloads are converted into a dedicated
 /// `LlmErrorKind::ParseError` so callers can distinguish a refusal (or

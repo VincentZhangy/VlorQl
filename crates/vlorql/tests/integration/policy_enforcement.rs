@@ -255,15 +255,15 @@ fn row_filter_combines_with_user_supplied_where() {
     let policy = PolicyEngine::new(row_filter_policy());
     let mut plan = base_plan();
     plan.r#where = Some(Predicate::Comparison {
-        left: Expression::ColumnRef {
+        left: Box::new(Expression::ColumnRef {
             table: Some("users".to_owned()),
             column: "name".to_owned(),
-        },
+        }),
         op: ComparisonOperator::Eq,
-        right: Expression::Literal {
+        right: Box::new(Expression::Literal {
             value: json!("alice"),
             data_type: DataType::String,
-        },
+        }),
     });
 
     let row_filter = policy

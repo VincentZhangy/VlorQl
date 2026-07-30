@@ -13,10 +13,21 @@ use std::collections::HashSet;
 /// (FROM table + all JOIN right-hand sides).
 fn scope_tables(plan: &QueryPlan) -> HashSet<String> {
     let mut tables = HashSet::new();
-    tables.insert(plan.from.table_name().unwrap().to_owned());
+    // INVARIANT: a valid plan always has a FROM clause with a table name.
+    tables.insert(
+        plan.from
+            .table_name()
+            .expect("invariant: FROM clause must have a table name")
+            .to_owned(),
+    );
     if let Some(ref joins) = plan.joins {
         for join in joins {
-            tables.insert(join.right_table.table_name().unwrap().to_owned());
+            tables.insert(
+                join.right_table
+                    .table_name()
+                    .expect("invariant: JOIN right table must have a table name")
+                    .to_owned(),
+            );
         }
     }
     tables
@@ -32,7 +43,7 @@ fn collect_tables_in_expr(expr: &Expression, tables: &mut HashSet<String>) {
             // Unqualified column reference — no table to add.
         }
         Expression::FunctionCall { args, .. } => {
-            for arg in args {
+            for arg in args.iter() {
                 collect_tables_in_expr(arg, tables);
             }
         }
@@ -48,7 +59,7 @@ fn collect_tables_in_expr(expr: &Expression, tables: &mut HashSet<String>) {
             if let Some(op) = operand {
                 collect_tables_in_expr(op, tables);
             }
-            for wt in when_thens {
+            for wt in when_thens.iter() {
                 collect_tables_in_expr(&wt.when, tables);
                 collect_tables_in_expr(&wt.then, tables);
             }
@@ -60,7 +71,7 @@ fn collect_tables_in_expr(expr: &Expression, tables: &mut HashSet<String>) {
             collect_tables_in_plan(query, tables);
         }
         Expression::WindowFunction { args, .. } => {
-            for arg in args {
+            for arg in args.iter() {
                 collect_tables_in_expr(arg, tables);
             }
         }
@@ -194,15 +205,15 @@ fn find_join_for(
                         join_type: JoinType::Inner,
                         right_table: FromClause::table(missing_table.to_owned(), None),
                         on: Predicate::Comparison {
-                            left: Expression::ColumnRef {
+                            left: Box::new(Expression::ColumnRef {
                                 table: Some(scope_table.clone()),
                                 column: col.name.clone(),
-                            },
+                            }),
                             op: crate::schema::ComparisonOperator::Eq,
-                            right: Expression::ColumnRef {
+                            right: Box::new(Expression::ColumnRef {
                                 table: Some(missing_table.to_owned()),
                                 column: fk.foreign_column.clone(),
-                            },
+                            }),
                         },
                     });
                 }
@@ -220,15 +231,15 @@ fn find_join_for(
                     join_type: JoinType::Inner,
                     right_table: FromClause::table(missing_table.to_owned(), None),
                     on: Predicate::Comparison {
-                        left: Expression::ColumnRef {
+                        left: Box::new(Expression::ColumnRef {
                             table: Some(fk.foreign_table.clone()),
                             column: fk.foreign_column.clone(),
-                        },
+                        }),
                         op: crate::schema::ComparisonOperator::Eq,
-                        right: Expression::ColumnRef {
+                        right: Box::new(Expression::ColumnRef {
                             table: Some(missing_table.to_owned()),
                             column: col.name.clone(),
-                        },
+                        }),
                     },
                 });
             }
@@ -243,15 +254,15 @@ fn find_join_for(
                     join_type: JoinType::Inner,
                     right_table: FromClause::table(missing_table.to_owned(), None),
                     on: Predicate::Comparison {
-                        left: Expression::ColumnRef {
+                        left: Box::new(Expression::ColumnRef {
                             table: Some(local_table.clone()),
                             column: local_column.clone(),
-                        },
+                        }),
                         op: crate::schema::ComparisonOperator::Eq,
-                        right: Expression::ColumnRef {
+                        right: Box::new(Expression::ColumnRef {
                             table: Some(missing_table.to_owned()),
                             column: fk_column.clone(),
-                        },
+                        }),
                     },
                 });
             }
@@ -278,7 +289,7 @@ pub(crate) fn drop_hallucinated_joins(plan: &mut QueryPlan, schema: &SchemaSnaps
     let before = joins.len();
     joins.retain(|join| {
         schema
-            .get_table(join.right_table.table_name().unwrap())
+            .get_table(join.right_table.table_name().expect("invariant: JOIN right table must have a table name"))
             .is_some()
     });
     let removed = joins.len() != before;
@@ -348,7 +359,7 @@ pub fn fix_missing_joins(plan: &mut QueryPlan, schema: &SchemaSnapshot) -> bool 
                 if plan.joins.is_none() {
                     plan.joins = Some(Vec::new());
                 }
-                plan.joins.as_mut().unwrap().push(join);
+                plan.joins.as_mut().expect("invariant: joins was just initialized").push(join);
                 scope.insert(table.clone());
                 found_any = true;
                 changed = true;
@@ -560,7 +571,7 @@ mod tests {
             if let Expression::ColumnRef {
                 table: Some(t),
                 column: c,
-            } = left
+            } = left.as_ref()
             {
                 assert_eq!(t, "orders");
                 assert_eq!(c, "user_id");
@@ -570,7 +581,7 @@ mod tests {
             if let Expression::ColumnRef {
                 table: Some(t),
                 column: c,
-            } = right
+            } = right.as_ref()
             {
                 assert_eq!(t, "users");
                 assert_eq!(c, "id");
@@ -611,15 +622,15 @@ mod tests {
                 join_type: JoinType::Inner,
                 right_table: FromClause::table("users".to_owned(), None),
                 on: Predicate::Comparison {
-                    left: Expression::ColumnRef {
+                    left: Box::new(Expression::ColumnRef {
                         table: Some("orders".to_owned()),
                         column: "user_id".to_owned(),
-                    },
+                    }),
                     op: crate::schema::ComparisonOperator::Eq,
-                    right: Expression::ColumnRef {
+                    right: Box::new(Expression::ColumnRef {
                         table: Some("users".to_owned()),
                         column: "id".to_owned(),
-                    },
+                    }),
                 },
             }]),
             ctes: None,
@@ -642,10 +653,10 @@ mod tests {
                 Projection::Expr {
                     expression: Expression::FunctionCall {
                         name: "sum".to_owned(),
-                        args: vec![Expression::ColumnRef {
+                        args: Box::new(vec![Expression::ColumnRef {
                             table: Some("order_items".to_owned()),
                             column: "quantity".to_owned(),
-                        }],
+                        }]),
                         distinct: false,
                     },
                     alias: Some("total_qty".to_owned()),

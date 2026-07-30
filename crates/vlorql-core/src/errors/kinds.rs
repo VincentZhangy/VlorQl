@@ -229,4 +229,10 @@ pub enum ConfigErrorKind {
         /// Human-readable description of the read or parse failure.
         reason: String,
     },
+    /// An internal operation failed (e.g. a blocking task join error).
+    #[error("internal error: {reason}")]
+    InternalError {
+        /// Human-readable description of the failure.
+        reason: String,
+    },
 }

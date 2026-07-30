@@ -1,4 +1,4 @@
-//! Optimize layer: AST optimization for [`QueryPlan`].
+//! Optimize layer: AST optimization for [`QueryPlan`](vlorql_core::schema::QueryPlan).
 //!
 //! Applies semantic-preserving transformations to produce a more
 //! efficient query plan before SQL compilation.
@@ -15,7 +15,7 @@ pub mod rewrite;
 
 use vlorql_core::schema::QueryPlan;
 
-/// Run all optimization passes on a [`QueryPlan`].
+/// Run all optimization passes on a [`QueryPlan`](vlorql_core::schema::QueryPlan).
 ///
 /// Returns `true` if any optimization was applied.
 #[must_use]
@@ -80,9 +80,9 @@ mod tests {
 
     fn true_pred() -> Predicate {
         Predicate::Comparison {
-            left: lit_bool(true),
+            left: Box::new(lit_bool(true)),
             op: ComparisonOperator::Eq,
-            right: lit_bool(true),
+            right: Box::new(lit_bool(true)),
         }
     }
 
@@ -109,9 +109,9 @@ mod tests {
         let mut plan = base_plan();
         plan.r#where = Some(Predicate::And {
             left: Box::new(Predicate::Comparison {
-                left: col("age"),
+                left: Box::new(col("age")),
                 op: ComparisonOperator::Gt,
-                right: lit_int(18),
+                right: Box::new(lit_int(18)),
             }),
             right: Box::new(true_pred()),
         });
@@ -131,9 +131,9 @@ mod tests {
             right_table: FromClause::table("orders".to_owned(), None),
             on: Predicate::And {
                 left: Box::new(Predicate::Comparison {
-                    left: col("user_id"),
+                    left: Box::new(col("user_id")),
                     op: ComparisonOperator::Eq,
-                    right: col("id"),
+                    right: Box::new(col("id")),
                 }),
                 right: Box::new(true_pred()),
             },
@@ -167,9 +167,9 @@ mod tests {
     fn no_change_for_canonical() {
         let mut plan = base_plan();
         plan.r#where = Some(Predicate::Comparison {
-            left: col("age"),
+            left: Box::new(col("age")),
             op: ComparisonOperator::Gt,
-            right: lit_int(18),
+            right: Box::new(lit_int(18)),
         });
         assert!(!optimize(&mut plan));
     }
@@ -185,12 +185,12 @@ mod tests {
                 from: FromClause::table("users".to_owned(), None),
                 r#where: Some(Predicate::And {
                     left: Box::new(Predicate::Comparison {
-                        left: col("status"),
+                        left: Box::new(col("status")),
                         op: ComparisonOperator::Eq,
-                        right: Expression::Literal {
+                        right: Box::new(Expression::Literal {
                             value: json!("active"),
                             data_type: DataType::String,
-                        },
+                        }),
                     }),
                     right: Box::new(true_pred()),
                 }),

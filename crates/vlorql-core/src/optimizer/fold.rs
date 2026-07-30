@@ -124,7 +124,7 @@ impl ExpressionFold for ConstantFolding {
                 distinct,
             } => Expression::FunctionCall {
                 name: name.clone(),
-                args: args.iter().map(|a| self.fold_expression(a)).collect(),
+                args: Box::new(args.iter().map(|a| self.fold_expression(a)).collect()),
                 distinct: *distinct,
             },
             other => default_fold_expression(self, other),
@@ -162,7 +162,7 @@ impl ExpressionFold for ConstantFolding {
                         return bool_predicate(true);
                     }
                 }
-                Predicate::IsNull { expr }
+                Predicate::IsNull { expr: Box::new(expr) }
             }
             Predicate::And { left, right } => {
                 let left = self.fold_predicate(left);
@@ -336,7 +336,7 @@ fn predicate_is_bool_literal(pred: &Predicate) -> Option<bool> {
     if let Predicate::Comparison { left, op, right } = pred
         && matches!(op, ComparisonOperator::Eq)
         && let (Expression::Literal { value: lv, .. }, Expression::Literal { value: rv, .. }) =
-            (left, right)
+            (left.as_ref(), right.as_ref())
     {
         // true = true, false = false
         if lv == rv {
@@ -454,9 +454,9 @@ fn bool_predicate(value: bool) -> Predicate {
         data_type: DataType::Boolean,
     };
     Predicate::Comparison {
-        left: lit.clone(),
+        left: Box::new(lit.clone()),
         op: ComparisonOperator::Eq,
-        right: lit,
+        right: Box::new(lit),
     }
 }
 
@@ -512,17 +512,17 @@ mod tests {
     #[test]
     fn folds_constant_side_of_predicate() {
         let pred = Predicate::Comparison {
-            left: column("age"),
+            left: Box::new(column("age")),
             op: ComparisonOperator::Gt,
-            right: binop(lit_int(20), BinaryOperator::Add, lit_int(5)),
+            right: Box::new(binop(lit_int(20), BinaryOperator::Add, lit_int(5))),
         };
         let folded = ConstantFolding.fold_predicate(&pred);
         assert_eq!(
             folded,
             Predicate::Comparison {
-                left: column("age"),
+                left: Box::new(column("age")),
                 op: ComparisonOperator::Gt,
-                right: lit_int(25),
+                right: Box::new(lit_int(25)),
             }
         );
     }
@@ -603,9 +603,9 @@ mod tests {
     #[test]
     fn not_not_x_is_x() {
         let inner = Predicate::Comparison {
-            left: column("age"),
+            left: Box::new(column("age")),
             op: ComparisonOperator::Gt,
-            right: lit_int(18),
+            right: Box::new(lit_int(18)),
         };
         let pred = Predicate::Not {
             child: Box::new(Predicate::Not {
@@ -619,9 +619,9 @@ mod tests {
     fn not_literal_comparison_is_folded() {
         let pred = Predicate::Not {
             child: Box::new(Predicate::Comparison {
-                left: lit_int(1),
+                left: Box::new(lit_int(1)),
                 op: ComparisonOperator::Eq,
-                right: lit_int(2),
+                right: Box::new(lit_int(2)),
             }),
         };
         let folded = ConstantFolding.fold_predicate(&pred);
@@ -630,7 +630,7 @@ mod tests {
 
     #[test]
     fn is_null_on_non_null_literal_is_false() {
-        let pred = Predicate::IsNull { expr: lit_int(42) };
+        let pred = Predicate::IsNull { expr: Box::new(lit_int(42)) };
         assert_eq!(ConstantFolding.fold_predicate(&pred), bool_predicate(false));
     }
 
@@ -669,18 +669,18 @@ mod tests {
         let pred = Predicate::And {
             left: Box::new(bool_predicate(true)),
             right: Box::new(Predicate::Comparison {
-                left: column("x"),
+                left: Box::new(column("x")),
                 op: ComparisonOperator::Eq,
-                right: lit_int(1),
+                right: Box::new(lit_int(1)),
             }),
         };
         let folded = ConstantFolding.fold_predicate(&pred);
         assert_eq!(
             folded,
             Predicate::Comparison {
-                left: column("x"),
+                left: Box::new(column("x")),
                 op: ComparisonOperator::Eq,
-                right: lit_int(1),
+                right: Box::new(lit_int(1)),
             }
         );
     }
@@ -690,18 +690,18 @@ mod tests {
         let pred = Predicate::Or {
             left: Box::new(bool_predicate(false)),
             right: Box::new(Predicate::Comparison {
-                left: column("x"),
+                left: Box::new(column("x")),
                 op: ComparisonOperator::Eq,
-                right: lit_int(1),
+                right: Box::new(lit_int(1)),
             }),
         };
         let folded = ConstantFolding.fold_predicate(&pred);
         assert_eq!(
             folded,
             Predicate::Comparison {
-                left: column("x"),
+                left: Box::new(column("x")),
                 op: ComparisonOperator::Eq,
-                right: lit_int(1),
+                right: Box::new(lit_int(1)),
             }
         );
     }

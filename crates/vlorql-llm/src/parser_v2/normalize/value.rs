@@ -91,6 +91,7 @@ pub fn is_canonical(dt: &str) -> bool {
             | "string"
             | "float"
             | "boolean"
+            | "date"
             | "timestamp"
             | "null"
             | "json"
@@ -279,5 +280,25 @@ mod tests {
         assert!(is_canonical("array"));
         assert!(is_canonical("jsonb"));
         assert!(is_canonical("blob"));
+        assert!(is_canonical("date"), "date must be a canonical DataType");
+    }
+
+    #[test]
+    fn date_alias_stays_date_not_timestamp() {
+        // Regression: `date` used to be silently lifted to `timestamp`,
+        // collapsing two distinct DataType variants.  Both must stay independent.
+        assert_eq!(resolve_data_type("date"), Some("date"));
+        assert_ne!(resolve_data_type("date"), Some("timestamp"));
+    }
+
+    #[test]
+    fn date_literal_preserves_data_type_through_normalize() {
+        let mut val = json!({"type": "literal", "value": "2024-01-01", "data_type": "date"});
+        assert!(!normalize(&mut val), "canonical date must not be rewritten");
+        assert_eq!(
+            val.get("data_type").and_then(|v| v.as_str()),
+            Some("date"),
+            "date must not be lifted to timestamp through the normalize pipeline"
+        );
     }
 }

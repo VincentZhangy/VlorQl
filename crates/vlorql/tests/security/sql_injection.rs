@@ -73,15 +73,15 @@ fn base_plan() -> QueryPlan {
 fn plan_with_string_literal(value: &str) -> QueryPlan {
     let mut plan = base_plan();
     plan.r#where = Some(Predicate::Comparison {
-        left: Expression::ColumnRef {
+        left: Box::new(Expression::ColumnRef {
             table: Some("users".to_owned()),
             column: "name".to_owned(),
-        },
+        }),
         op: ComparisonOperator::Eq,
-        right: Expression::Literal {
+        right: Box::new(Expression::Literal {
             value: serde_json::Value::String(value.to_owned()),
             data_type: DataType::String,
-        },
+        }),
     });
     plan
 }
@@ -193,15 +193,15 @@ fn integer_overflow_or_tautology_is_parameterized_not_interpolated() {
     // never be substituted into the SQL.
     let mut plan = base_plan();
     plan.r#where = Some(Predicate::Comparison {
-        left: Expression::ColumnRef {
+        left: Box::new(Expression::ColumnRef {
             table: Some("users".to_owned()),
             column: "id".to_owned(),
-        },
+        }),
         op: ComparisonOperator::Eq,
-        right: Expression::Literal {
+        right: Box::new(Expression::Literal {
             value: serde_json::json!(0_i64),
             data_type: DataType::Int,
-        },
+        }),
     });
     let validated = ValidatedPlan(Arc::new(plan));
     let compiled = compile_postgres(validated);
@@ -294,15 +294,15 @@ fn mysql_limit_offset_does_not_interpolate_literals() {
     use vlorql_core::compile::MySQLCompiler;
     let mut plan = base_plan();
     plan.r#where = Some(Predicate::Comparison {
-        left: Expression::ColumnRef {
+        left: Box::new(Expression::ColumnRef {
             table: Some("users".to_owned()),
             column: "name".to_owned(),
-        },
+        }),
         op: ComparisonOperator::Eq,
-        right: Expression::Literal {
+        right: Box::new(Expression::Literal {
             value: serde_json::Value::String("alice'; DROP TABLE x".to_owned()),
             data_type: DataType::String,
-        },
+        }),
     });
     let validated = ValidatedPlan(Arc::new(plan));
     let compiled = MySQLCompiler.compile(&validated).expect("mysql compiles");

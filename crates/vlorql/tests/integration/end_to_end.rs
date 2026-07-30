@@ -48,15 +48,15 @@ async fn query_runs_prompt_validation_and_compilation() {
 async fn query_emits_parameterized_where_clause() {
     let mut plan = base_plan();
     plan.r#where = Some(Predicate::Comparison {
-        left: Expression::ColumnRef {
+        left: Box::new(Expression::ColumnRef {
             table: Some("users".to_owned()),
             column: "id".to_owned(),
-        },
+        }),
         op: ComparisonOperator::Gt,
-        right: Expression::Literal {
+        right: Box::new(Expression::Literal {
             value: json!(5),
             data_type: DataType::Int,
-        },
+        }),
     });
 
     let facade = facade_with(plan, open_policy(), "postgres");
@@ -343,15 +343,15 @@ async fn dialect_smoke(
 fn plan_with_bad_where() -> QueryPlan {
     let mut plan = base_plan();
     plan.r#where = Some(Predicate::Comparison {
-        left: Expression::ColumnRef {
+        left: Box::new(Expression::ColumnRef {
             table: Some("users".to_owned()),
             column: "name".to_owned(),
-        },
+        }),
         op: ComparisonOperator::Gt,
-        right: Expression::Literal {
+        right: Box::new(Expression::Literal {
             value: json!(1),
             data_type: DataType::Int,
-        },
+        }),
     });
     plan
 }

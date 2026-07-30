@@ -246,7 +246,7 @@ impl VlorQlBuilder {
 
     /// Configures an [`LlmResponseCache`] with the given capacity and TTL.
     ///
-    /// Caches LLM-generated [`QueryPlan`] values keyed by question text,
+    /// Caches LLM-generated [`QueryPlan`](vlorql_core::schema::QueryPlan) values keyed by question text,
     /// schema version, and model fingerprint, avoiding redundant LLM
     /// invocations for identical questions.
     #[must_use]
@@ -286,7 +286,7 @@ impl VlorQlBuilder {
         self
     }
 
-    /// Supplies a [`DatabaseExecutor`] that can run compiled SQL queries.
+    /// Supplies a `DatabaseExecutor` that can run compiled SQL queries.
     ///
     /// When an executor is configured, you can use [`VlorQl::run`] to
     /// perform the full plan → validate → compile → execute pipeline

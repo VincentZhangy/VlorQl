@@ -102,6 +102,14 @@ pub fn builtin_functions() -> Vec<FunctionDef> {
             .max_args(None)
             .dialects(&[Dialect::Generic])
             .build(),
+        FunctionDefBuilder::new("concat")
+            .kind(FunctionKind::Scalar)
+            .min_args(1)
+            .max_args(None)
+            .param_types(&[Some(DataType::String)])
+            .return_type(DataType::String)
+            .dialects(&[Dialect::Generic])
+            .build(),
         FunctionDefBuilder::new("abs")
             .alias("absval")
             .kind(FunctionKind::Scalar)

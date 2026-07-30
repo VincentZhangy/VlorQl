@@ -445,9 +445,9 @@ mod tests {
 
     fn gt(left: Expression, right: Expression) -> Predicate {
         Predicate::Comparison {
-            left,
+            left: Box::new(left),
             op: ComparisonOperator::Gt,
-            right,
+            right: Box::new(right),
         }
     }
 

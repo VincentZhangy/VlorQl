@@ -394,11 +394,39 @@ fn fix_empty_join_on(val: &mut serde_json::Value) -> bool {
 }
 
 /// Crude singularization: strips trailing `s` (or `_items` → `_item`).
+///
 /// Not linguistically perfect, but good enough for FK column naming.
+///
+/// # Limitations
+///
+/// This is a **heuristic** used only for inferring missing ON-clause FK
+/// column names. It deliberately refuses to strip the trailing `s` from
+/// a small allow-list of common singular words that end in `s`
+/// (`series`, `status`, `address`, …) — these would otherwise be
+/// mangled into non-existent column names (`serie`, `statu`, `addres`).
+/// Irregular plurals (`data`, `media`, `analyses`, …) are also passed
+/// through untouched, since their singulars (`datum`, `medium`, …)
+/// rarely appear as FK column names in real schemas.
 fn singularize(s: &str) -> &str {
+    // Known singular words that end in 's' — stripping would corrupt them.
+    // Kept lowercase; checked case-insensitively.
+    const SINGULAR_S_WORDS: &[&str] = &[
+        "series", "species", "status", "address", "addresses", "campus",
+        "analysis", "diagnosis", "basis", "crisis", "thesis", "radius",
+        "genus", "corpus", "income", "release", "license", "expense",
+        "database", "index", "matrix", "axis", "gas", "bus", "is", "this",
+        "items", // common false positive — `_items` is itself plural marker
+    ];
+
     // Stripping the trailing `s` covers both the general plural case
     // (products → product, users → user) and `_items` → `_item`.
     if s.ends_with('s') && s.len() > 1 {
+        // Case-insensitive check against the allow-list.  We must not strip
+        // the trailing `s` from `series` / `status` / `address` etc.
+        let lower = s.to_ascii_lowercase();
+        if SINGULAR_S_WORDS.iter().any(|w| *w == lower) {
+            return s;
+        }
         &s[..s.len() - 1]
     } else {
         s // already singular or irregular
@@ -580,5 +608,83 @@ mod tests {
             "joins": [{"join_type": "inner", "right_table": {"table": "orders"}, "on": {"type": "comparison"}}]
         });
         assert!(!normalize(&mut val));
+    }
+
+    #[test]
+    fn infer_missing_on_preserves_series_table() {
+        // Regression: `series` ends in 's' but is singular.  singularize
+        // used to mangle it into `serie`, producing a non-existent FK
+        // column (`series_id` was renamed to `serie_id`).  It must now
+        // be left intact.
+        let mut val = json!({
+            "select": [{"type": "star"}],
+            "from": {"table": "shows"},
+            "joins": [{"join_type": "inner", "right_table": {"table": "series"}}]
+        });
+        assert!(normalize(&mut val));
+        let on = val.pointer("/joins/0/on").expect("ON must be inferred");
+        // The inferred FK column must be `series_id`, not `serie_id`.
+        let right_col = on
+            .get("right")
+            .and_then(|r| r.get("column"))
+            .and_then(|c| c.as_str())
+            .unwrap_or("(missing)");
+        assert_eq!(
+            right_col, "series_id",
+            "singular words ending in 's' must not be mangled"
+        );
+    }
+
+    #[test]
+    fn infer_missing_on_preserves_status_table() {
+        let mut val = json!({
+            "select": [{"type": "star"}],
+            "from": {"table": "tickets"},
+            "joins": [{"join_type": "inner", "right_table": {"table": "status"}}]
+        });
+        assert!(normalize(&mut val));
+        let on = val.pointer("/joins/0/on").expect("ON must be inferred");
+        let right_col = on
+            .get("right")
+            .and_then(|r| r.get("column"))
+            .and_then(|c| c.as_str())
+            .unwrap_or("(missing)");
+        assert_eq!(right_col, "status_id", "status is singular; must not become statu_id");
+    }
+
+    #[test]
+    fn infer_missing_on_preserves_address_table_case_insensitive() {
+        // Mixed-case `Address` must also be protected (case-insensitive lookup).
+        let mut val = json!({
+            "select": [{"type": "star"}],
+            "from": {"table": "users"},
+            "joins": [{"join_type": "inner", "right_table": {"table": "Address"}}]
+        });
+        assert!(normalize(&mut val));
+        let on = val.pointer("/joins/0/on").expect("ON must be inferred");
+        let right_col = on
+            .get("right")
+            .and_then(|r| r.get("column"))
+            .and_then(|c| c.as_str())
+            .unwrap_or("(missing)");
+        assert_eq!(right_col, "Address_id", "Address is singular; trailing s must not be stripped");
+    }
+
+    #[test]
+    fn infer_missing_on_still_singularizes_regular_plurals() {
+        // Sanity: the fix must NOT break the original heuristic for real plurals.
+        let mut val = json!({
+            "select": [{"type": "star"}],
+            "from": {"table": "users"},
+            "joins": [{"join_type": "inner", "right_table": {"table": "orders"}}]
+        });
+        assert!(normalize(&mut val));
+        let on = val.pointer("/joins/0/on").expect("ON must be inferred");
+        let right_col = on
+            .get("right")
+            .and_then(|r| r.get("column"))
+            .and_then(|c| c.as_str())
+            .unwrap_or("(missing)");
+        assert_eq!(right_col, "order_id", "orders → order_id (regular plural still singularized)");
     }
 }

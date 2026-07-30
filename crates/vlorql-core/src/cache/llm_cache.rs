@@ -25,7 +25,7 @@ pub struct LlmCacheKey {
     pub model_fingerprint: String,
 }
 
-/// A cache for LLM-generated [`QueryPlan`] values keyed by
+/// [`QueryPlan`](crate::schema::QueryPlan) values keyed by
 /// [`LlmCacheKey`].
 ///
 /// The cache uses a concurrent, bounded map provided by `moka`.
@@ -70,13 +70,13 @@ impl LlmResponseCache {
         Self { inner }
     }
 
-    /// Returns the cached [`QueryPlan`] for `key`, or `None` on a
+    /// [`QueryPlan`](crate::schema::QueryPlan) for `key`, or `None` on a
     /// miss.
     pub async fn get(&self, key: &LlmCacheKey) -> Option<Arc<QueryPlan>> {
         self.inner.get(key).await
     }
 
-    /// Inserts a [`QueryPlan`] into the cache under `key`.
+    /// [`QueryPlan`](crate::schema::QueryPlan) into the cache under `key`.
     pub async fn insert(&self, key: LlmCacheKey, plan: Arc<QueryPlan>) {
         self.inner.insert(key, plan).await;
     }

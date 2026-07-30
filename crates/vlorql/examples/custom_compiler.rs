@@ -53,7 +53,7 @@ impl SqlCompiler for DuckDbCompiler {
         //    unquoted identifiers, so this is safe.
         let mut config = DialectConfig::default_sqlite();
         config.identifier_quote = "never".to_owned();
-        let (sql, parameters) = QueryBuilder::new(plan, &config).build()?;
+        let (sql, parameters) = QueryBuilder::new(plan, &config)?.build()?;
 
         // 2. Apply DuckDB-specific post-processing. Here we just flip
         //    `LIMIT n OFFSET m` to `OFFSET m LIMIT n`. A real implementation
@@ -163,15 +163,15 @@ fn sample_plan() -> QueryPlan {
         ],
         from: FromClause::table("users".to_owned(), None),
         r#where: Some(Predicate::Comparison {
-            left: Expression::ColumnRef {
+            left: Box::new(Expression::ColumnRef {
                 table: Some("users".to_owned()),
                 column: "id".to_owned(),
-            },
+            }),
             op: ComparisonOperator::Gt,
-            right: Expression::Literal {
+            right: Box::new(Expression::Literal {
                 value: json!(10),
                 data_type: DataType::Int,
-            },
+            }),
         }),
         group_by: None,
         having: None,

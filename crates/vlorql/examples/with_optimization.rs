@@ -147,12 +147,12 @@ fn build_test_plan() -> QueryPlan {
         ],
         from: FromClause::table("users".to_owned(), None),
         r#where: Some(Predicate::Comparison {
-            left: Expression::ColumnRef {
+            left: Box::new(Expression::ColumnRef {
                 table: Some("orders".to_owned()),
                 column: "total".to_owned(),
-            },
+            }),
             op: ComparisonOperator::Gt,
-            right: Expression::BinaryOp {
+            right: Box::new(Expression::BinaryOp {
                 left: Box::new(Expression::Literal {
                     value: serde_json::json!(100),
                     data_type: DataType::Int,
@@ -162,7 +162,7 @@ fn build_test_plan() -> QueryPlan {
                     value: serde_json::json!(50),
                     data_type: DataType::Int,
                 }),
-            },
+            }),
         }),
         group_by: None,
         having: None,
@@ -173,15 +173,15 @@ fn build_test_plan() -> QueryPlan {
             join_type: JoinType::Inner,
             right_table: FromClause::table("orders".to_owned(), None),
             on: Predicate::Comparison {
-                left: Expression::ColumnRef {
+                left: Box::new(Expression::ColumnRef {
                     table: Some("users".to_owned()),
                     column: "id".to_owned(),
-                },
+                }),
                 op: ComparisonOperator::Eq,
-                right: Expression::ColumnRef {
+                right: Box::new(Expression::ColumnRef {
                     table: Some("orders".to_owned()),
                     column: "user_id".to_owned(),
-                },
+                }),
             },
         }]),
         ctes: None,

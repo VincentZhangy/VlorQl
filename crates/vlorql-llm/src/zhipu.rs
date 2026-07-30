@@ -274,7 +274,7 @@ impl LlmClient for ZhipuClient {
     }
 }
 
-/// Parses a Zhipu chat-completions JSON response into a [`QueryPlan`].
+/// Parses a Zhipu chat-completions JSON response into a [`QueryPlan`](vlorql_core::schema::QueryPlan).
 fn parse_completion_payload(body: &str) -> Result<QueryPlan, VlorQLError> {
     let value: Value = serde_json::from_str(body).map_err(|error| {
         VlorQLError::llm(

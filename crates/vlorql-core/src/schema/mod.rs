@@ -37,15 +37,15 @@ mod tests {
             }],
             from: FromClause::table("users".to_owned(), None),
             r#where: Some(Predicate::Comparison {
-                left: Expression::ColumnRef {
+                left: Box::new(Expression::ColumnRef {
                     table: Some("users".to_owned()),
                     column: "active".to_owned(),
-                },
+                }),
                 op: ComparisonOperator::Eq,
-                right: Expression::Literal {
+                right: Box::new(Expression::Literal {
                     value: json!(true),
                     data_type: DataType::Boolean,
-                },
+                }),
             }),
             group_by: None,
             having: None,

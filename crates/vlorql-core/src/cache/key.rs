@@ -24,7 +24,7 @@ pub struct SchemaCacheKey {
 
 /// Key used to cache compiled SQL results.
 ///
-/// The key is derived from the [`QueryPlan`](crate::schema::QueryPlan)
+/// [`QueryPlan`](crate::schema::QueryPlan)(crate::schema::QueryPlan)
 /// content (via a deterministic hash of its normalised JSON form) and
 /// the dialect/quoting parameters that affect the generated SQL.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -66,6 +66,7 @@ impl CompileCacheKey {
     /// let key = CompileCacheKey::new(&validated, &profile);
     /// assert!(key.plan_hash != 0);
     /// ```
+    #[must_use]
     pub fn new(plan: &ValidatedPlan, profile: &DialectProfile) -> Self {
         let normalized = super::normalize::normalize_plan(plan);
         let hash = xxh3_64(normalized.as_bytes());

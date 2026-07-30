@@ -96,7 +96,8 @@ pub fn normalize_item(item: &mut serde_json::Value) -> bool {
     changed
 }
 
-/// Normalize all items in the `order_by` array.
+/// Normalize all items in the `order_by` array, and resolve alias references
+/// against the `select` list.
 ///
 /// Returns `true` if any item was modified.
 #[must_use]
@@ -106,13 +107,23 @@ pub fn normalize(val: &mut serde_json::Value) -> bool {
     };
     let mut changed = false;
 
-    // Normalize order_by items (OrderByTerm with expr + descending).
+    // Build alias map BEFORE mutably borrowing order_by (avoids borrow conflict).
+    let alias_map = build_alias_map_from_select(obj);
+
+    // Step 1: Normalize order_by items (OrderByTerm with expr + descending).
     if let Some(arr) = obj.get_mut("order_by").and_then(|v| v.as_array_mut()) {
         for item in arr.iter_mut() {
             changed |= normalize_item(item);
         }
         // Remove items that still don't have `expr` after normalization.
         arr.retain(|item| item.as_object().is_some_and(|o| o.contains_key("expr")));
+
+        // Step 1b: Resolve alias references in ORDER BY against SELECT.
+        // When ORDER BY uses an alias name (e.g. `ORDER BY user_name` where
+        // `user_name` is defined as `CONCAT(name, ',') AS user_name` in SELECT),
+        // replace the order_by expression with the SELECT's expression so the
+        // validator can resolve it.
+        changed |= resolve_order_by_aliases(arr, &alias_map);
     }
 
     // Normalize group_by items: LLMs often emit them as
@@ -132,6 +143,79 @@ pub fn normalize(val: &mut serde_json::Value) -> bool {
         }
     }
 
+    changed
+}
+
+/// Build a map of SELECT alias → expression from the plan object.
+fn build_alias_map_from_select(obj: &serde_json::Map<String, Value>) -> Vec<(String, Value)> {
+    let Some(select_arr) = obj.get("select").and_then(|v| v.as_array()) else {
+        return Vec::new();
+    };
+    let mut alias_map: Vec<(String, Value)> = Vec::new();
+    for item in select_arr {
+        let item_obj = match item.as_object() {
+            Some(o) => o,
+            None => continue,
+        };
+        let alias = match item_obj.get("alias").and_then(|v| v.as_str()) {
+            Some(a) if !a.is_empty() => a,
+            _ => continue,
+        };
+        let expr = match item_obj.get("type").and_then(|t| t.as_str()) {
+            Some("expr") => item_obj.get("expression").cloned(),
+            Some("column_ref") => Some(item.clone()),
+            _ => None,
+        };
+        if let Some(e) = expr {
+            alias_map.push((alias.to_owned(), e));
+        }
+    }
+    alias_map
+}
+
+/// Resolve ORDER BY alias references against SELECT projections.
+///
+/// When `ORDER BY user_name` is written but `user_name` is an alias defined
+/// in SELECT (e.g. `CONCAT(name, ',') AS user_name`), replace the ORDER BY
+/// expression with the SELECT's inner expression so the validator can resolve
+/// the referenced column or function.
+#[allow(clippy::ptr_arg)]
+fn resolve_order_by_aliases(
+    order_by: &mut Vec<Value>,
+    alias_map: &[(String, Value)],
+) -> bool {
+    if alias_map.is_empty() {
+        return false;
+    }
+
+    let mut changed = false;
+    for order_item in order_by.iter_mut() {
+        let Some(order_obj) = order_item.as_object_mut() else {
+            continue;
+        };
+        let Some(expr) = order_obj.get_mut("expr") else {
+            continue;
+        };
+        let Some(expr_obj) = expr.as_object() else {
+            continue;
+        };
+        // Only match column_ref expressions.
+        let col_name = match expr_obj.get("type").and_then(|t| t.as_str()) {
+            Some("column_ref") => expr_obj.get("column").and_then(|v| v.as_str()),
+            _ => continue,
+        };
+        let Some(col_name) = col_name else {
+            continue;
+        };
+        // Check if this column name matches a SELECT alias.
+        for (alias_name, select_expr) in alias_map.iter() {
+            if col_name.eq_ignore_ascii_case(alias_name) {
+                *expr = select_expr.clone();
+                changed = true;
+                break;
+            }
+        }
+    }
     changed
 }
 

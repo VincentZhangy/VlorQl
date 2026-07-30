@@ -56,13 +56,13 @@ impl fmt::Display for ValidationError {
     }
 }
 
-/// The result of validating a [`QueryPlan`].
+/// The result of validating a [`QueryPlan`](vlorql_core::schema::QueryPlan).
 ///
 /// `Ok(())` when the plan is valid, `Err(Vec<ValidationError>)` when
 /// one or more issues were found.
 pub type ValidationResult = Result<(), Vec<ValidationError>>;
 
-/// Run the full validation pipeline on a [`QueryPlan`].
+/// Run the full validation pipeline on a [`QueryPlan`](vlorql_core::schema::QueryPlan).
 ///
 /// Returns `Ok(())` when the plan is valid, or `Err(errors)` with all
 /// discovered issues.

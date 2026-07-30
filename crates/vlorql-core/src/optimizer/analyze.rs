@@ -28,9 +28,9 @@ pub type ColumnRef = (Option<String>, String);
 /// use vlorql_core::optimizer::analyze::split_conjuncts;
 ///
 /// let pred = Predicate::Comparison {
-///     left: Expression::ColumnRef { table: None, column: "x".to_owned() },
+///     left: Box::new(Expression::ColumnRef { table: None, column: "x".to_owned() }),
 ///     op: ComparisonOperator::Eq,
-///     right: Expression::Literal { value: 1.into(), data_type: DataType::Int },
+///     right: Box::new(Expression::Literal { value: 1.into(), data_type: DataType::Int }),
 /// };
 /// let conjuncts = split_conjuncts(&pred);
 /// assert_eq!(conjuncts.len(), 1);
@@ -60,9 +60,9 @@ fn collect_conjuncts(pred: &Predicate, out: &mut Vec<Predicate>) {
 /// use vlorql_core::optimizer::analyze::combine_conjuncts;
 ///
 /// let pred = Predicate::Comparison {
-///     left: Expression::ColumnRef { table: None, column: "x".to_owned() },
+///     left: Box::new(Expression::ColumnRef { table: None, column: "x".to_owned() }),
 ///     op: ComparisonOperator::Eq,
-///     right: Expression::Literal { value: 1.into(), data_type: DataType::Int },
+///     right: Box::new(Expression::Literal { value: 1.into(), data_type: DataType::Int }),
 /// };
 /// let result = combine_conjuncts(vec![pred]);
 /// assert!(result.is_some());
@@ -157,9 +157,9 @@ mod tests {
 
     fn cmp(left: Expression, right: Expression) -> Predicate {
         Predicate::Comparison {
-            left,
+            left: Box::new(left),
             op: ComparisonOperator::Eq,
-            right,
+            right: Box::new(right),
         }
     }
 

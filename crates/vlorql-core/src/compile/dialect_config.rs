@@ -1,11 +1,27 @@
 //! Config-driven SQL dialect definitions.
 
 use crate::errors::{ConfigErrorKind, VlorQLError};
+use crate::schema::SqlDialect;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::HashMap;
 use std::path::Path;
+
+/// Map a dialect config name to a [`SqlDialect`] enum variant.
+///
+/// Returns `None` when the name does not match a known dialect family.
+/// Callers should treat `None` as an error — the builder will later
+/// reject unknown dialects during [`build()`](super::QueryBuilder::build).
+#[must_use]
+pub fn dialect_from_name(name: &str) -> Option<SqlDialect> {
+    match name.to_lowercase().as_str() {
+        "postgres" | "postgresql" => Some(SqlDialect::Postgres),
+        "sqlite" => Some(SqlDialect::Sqlite),
+        "mysql" | "my_sql" => Some(SqlDialect::MySql),
+        _ => None,
+    }
+}
 
 /// A configurable SQL dialect definition loaded from TOML/YAML.
 #[allow(missing_docs)]

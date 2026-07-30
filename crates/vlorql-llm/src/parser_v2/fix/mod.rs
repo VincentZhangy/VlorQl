@@ -1,4 +1,4 @@
-//! Auto Fix layer: opinionated, safe fixes for [`QueryPlan`] AST.
+//! Auto Fix layer: opinionated, safe fixes for [`QueryPlan`](vlorql_core::schema::QueryPlan) AST.
 //!
 //! This layer runs after the [builder](crate::parser_v2::builder) and
 //! before the [validator](crate::parser_v2::validate).  It applies

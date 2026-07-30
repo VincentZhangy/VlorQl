@@ -232,7 +232,7 @@ impl BoundDialectValidator<'_> {
                 if *distinct && !self.profile.allow_distinct {
                     errors.push(self.feature_disabled("distinct"));
                 }
-                for argument in args {
+                for argument in args.iter() {
                     self.validate_expression(argument, errors);
                 }
             }
@@ -252,7 +252,7 @@ impl BoundDialectValidator<'_> {
                 if let Some(op) = operand {
                     self.validate_expression(op, errors);
                 }
-                for wt in when_thens {
+                for wt in when_thens.iter() {
                     self.validate_expression(&wt.when, errors);
                     self.validate_expression(&wt.then, errors);
                 }
@@ -296,7 +296,7 @@ impl BoundDialectValidator<'_> {
                 if *distinct && !self.profile.allow_distinct {
                     errors.push(self.feature_disabled("distinct"));
                 }
-                for argument in args {
+                for argument in args.iter() {
                     self.validate_expression(argument, errors);
                 }
                 // Validate expressions inside the window spec.

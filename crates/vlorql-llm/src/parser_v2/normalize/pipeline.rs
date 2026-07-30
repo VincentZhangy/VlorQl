@@ -21,6 +21,7 @@ use super::operators;
 use super::order;
 use super::query;
 use super::select;
+use super::set_op;
 use super::table;
 use super::value;
 use super::where_;
@@ -35,6 +36,12 @@ pub fn normalize(val: &mut serde_json::Value) -> bool {
     // Stage 1: Field name aliases.
     // Must run before structural stages so repairs see canonical names.
     changed |= aliases::normalize_field_names(val);
+
+    // Stage 1b: Set-operation lifting (UNION/INTERSECT/EXCEPT).
+    // Must run BEFORE `query::strip_unknown_fields` (Stage 2), otherwise
+    // bare top-level keys like `union_all` / `minus` get stripped as
+    // unknown before we can lift them into `set_operation`.
+    changed |= set_op::normalize(val);
 
     // Stage 2: Structure normalization.
     // Order matters: array → select → table → where → join → query.
@@ -55,6 +62,11 @@ pub fn normalize(val: &mut serde_json::Value) -> bool {
     // Stage 4: Order-by normalization (after aliases, structure, and expr).
     changed |= order::normalize(val); // normalize order_by items
 
+    // Stage 4b: Set-operation normalization (UNION/INTERSECT/EXCEPT).
+    // Runs after structure so `set_operation` is not stripped as unknown,
+    // and before CTE recursion so nested set operations are normalized.
+    changed |= set_op::normalize(val);
+
     // Stage 5: Recurse into CTE sub-queries.
     // CTE sub-plans are independent QueryPlan JSON objects that need
     // the full normalize pipeline applied to them.
@@ -64,23 +76,6 @@ pub fn normalize(val: &mut serde_json::Value) -> bool {
         for cte in ctes.iter_mut() {
             if let Some(query) = cte.get_mut("query") {
                 changed |= normalize(query);
-            }
-        }
-    }
-
-    // Stage 6: Downgrade recursive CTE flags.
-    // Small models sometimes set `recursive: true` on CTEs, which the
-    // current builder/compiler does not support.  Downgrade to `false`
-    // with a warning so the plan can still compile (as non-recursive).
-    if let Some(obj) = val.as_object_mut()
-        && let Some(ctes) = obj.get_mut("ctes").and_then(|v| v.as_array_mut())
-    {
-        for cte in ctes.iter_mut() {
-            if let Some(recursive) = cte.get_mut("recursive")
-                && recursive.as_bool() == Some(true)
-            {
-                *recursive = serde_json::Value::Bool(false);
-                changed = true;
             }
         }
     }
@@ -356,7 +351,7 @@ mod tests {
     fn pipeline_no_change_for_canonical() {
         let mut val = json!({
             "select": [{"type": "star"}],
-            "from": {"table": "users"},
+            "from": {"type": "table", "table": "users"},
             "where": {
                 "type": "comparison",
                 "left": {"type": "column_ref", "column": "age"},

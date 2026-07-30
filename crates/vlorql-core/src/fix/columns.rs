@@ -162,9 +162,9 @@ const SQL_KEYWORDS: &[&str] = &[
 fn fix_expr(expr: &mut Expression) -> bool {
     match expr {
         Expression::ColumnRef { table, column }
-            if !column.is_empty() && parse_arithmetic_column(column).is_some() =>
+            if !column.is_empty() =>
         {
-            let (left, op, right) = parse_arithmetic_column(column).unwrap();
+            let Some((left, op, right)) = parse_arithmetic_column(column) else { return false; };
             let new_expr = Expression::BinaryOp {
                 left: Box::new(col_ref(table.clone(), &left)),
                 op,
@@ -174,15 +174,15 @@ fn fix_expr(expr: &mut Expression) -> bool {
             true
         }
         Expression::ColumnRef { table, column }
-            if !column.is_empty() && parse_sql_function_column(column).is_some() =>
+            if !column.is_empty() =>
         {
+            let Some((name, args)) = parse_sql_function_column(column) else { return false; };
             let table_str = table.as_deref();
-            let (name, args) = parse_sql_function_column(column).unwrap();
             let expr_args: Vec<Expression> =
                 args.iter().map(|a| arg_to_expr(table_str, a)).collect();
             let new_expr = Expression::FunctionCall {
                 name: name.to_lowercase(),
-                args: expr_args,
+                args: Box::new(expr_args),
                 distinct: false,
             };
             *expr = new_expr;
@@ -283,7 +283,7 @@ fn fix_proj(proj: &mut Projection) -> bool {
                     args.iter().map(|a| arg_to_expr(table_str, a)).collect();
                 let new_expr = Expression::FunctionCall {
                     name: name.to_lowercase(),
-                    args: expr_args,
+                    args: Box::new(expr_args),
                     distinct: false,
                 };
                 let old_alias = alias.take();
@@ -411,10 +411,10 @@ mod tests {
                 Projection::Expr {
                     expression: Expression::FunctionCall {
                         name: "sum".to_owned(),
-                        args: vec![Expression::ColumnRef {
+                        args: Box::new(vec![Expression::ColumnRef {
                             table: Some("order_items".to_owned()),
                             column: "unit_price * quantity".to_owned(),
-                        }],
+                        }]),
                         distinct: false,
                     },
                     alias: Some("total_sold".to_owned()),

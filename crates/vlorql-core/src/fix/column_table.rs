@@ -387,10 +387,10 @@ mod tests {
                 Projection::Expr {
                     expression: Expression::FunctionCall {
                         name: "string_agg".to_owned(),
-                        args: vec![Expression::ColumnRef {
+                        args: Box::new(vec![Expression::ColumnRef {
                             table: Some("order_items".to_owned()),
                             column: "name".to_owned(),
-                        }],
+                        }]),
                         distinct: false,
                     },
                     alias: Some("product_names".to_owned()),

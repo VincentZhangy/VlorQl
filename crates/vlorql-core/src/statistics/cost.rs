@@ -286,15 +286,15 @@ mod tests {
     async fn scan_with_filter_reads_all_rows_but_emits_fewer() {
         // status = 'active' has selectivity 1/4, so 2500 rows survive.
         let filter = Predicate::Comparison {
-            left: Expression::ColumnRef {
+            left: Box::new(Expression::ColumnRef {
                 table: Some("users".to_owned()),
                 column: "status".to_owned(),
-            },
+            }),
             op: ComparisonOperator::Eq,
-            right: Expression::Literal {
+            right: Box::new(Expression::Literal {
                 value: json!("active"),
                 data_type: DataType::String,
-            },
+            }),
         };
         let cost = estimator()
             .estimate_scan("users", Some(&filter))

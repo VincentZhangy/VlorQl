@@ -35,15 +35,15 @@ fn build_chain_join_plan(n: usize) -> QueryPlan {
             join_type: JoinType::Inner,
             right_table: FromClause::table(cur.clone(), None),
             on: Predicate::Comparison {
-                left: Expression::ColumnRef {
+                left: Box::new(Expression::ColumnRef {
                     table: Some(prev),
                     column: "id".to_owned(),
-                },
+                }),
                 op: ComparisonOperator::Eq,
-                right: Expression::ColumnRef {
+                right: Box::new(Expression::ColumnRef {
                     table: Some(cur),
                     column: format!("fk{}", i - 1),
-                },
+                }),
             },
         });
     }

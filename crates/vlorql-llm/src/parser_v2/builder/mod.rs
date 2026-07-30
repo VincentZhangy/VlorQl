@@ -1,8 +1,8 @@
-//! Builder layer: canonical JSON → [`QueryPlan`] AST.
+//! Builder layer: canonical JSON → [`QueryPlan`](vlorql_core::schema::QueryPlan) AST.
 //!
 //! This layer consumes the canonical JSON produced by the
 //! [normalize](crate::parser_v2::normalize) layer and produces a
-//! typed [`QueryPlan`].  It does **no** repair — it assumes the input
+//! typed [`QueryPlan`](vlorql_core::schema::QueryPlan).  It does **no** repair — it assumes the input
 //! has already been normalized.
 //!
 //! # Sub-modules

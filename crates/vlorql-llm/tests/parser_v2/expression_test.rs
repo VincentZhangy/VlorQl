@@ -320,7 +320,7 @@ fn qwen_style_missing_expression_types() {
 fn idempotent_after_full_pipeline() {
     let mut val = serde_json::json!({
         "select": [{"type": "star"}],
-        "from": {"table": "users"},
+        "from": {"type": "table", "table": "users"},
         "where": {
             "type": "comparison",
             "left": {"type": "column_ref", "column": "age"},

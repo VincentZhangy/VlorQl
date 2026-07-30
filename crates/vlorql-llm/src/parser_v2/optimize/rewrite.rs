@@ -14,7 +14,7 @@
 
 use vlorql_core::schema::QueryPlan;
 
-/// Run all SQL rewrite rules on a [`QueryPlan`].
+/// Run all SQL rewrite rules on a [`QueryPlan`](vlorql_core::schema::QueryPlan).
 ///
 /// Returns `true` if any rewrite was applied.
 ///

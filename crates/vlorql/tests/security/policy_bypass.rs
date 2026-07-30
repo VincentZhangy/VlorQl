@@ -85,15 +85,15 @@ fn policy_with_restricted_users() -> PolicyConfig {
             denied_columns: vec!["password_hash".to_owned()],
             row_filter: Some(vlorql_core::policy::RowFilter {
                 condition: Predicate::Comparison {
-                    left: Expression::ColumnRef {
+                    left: Box::new(Expression::ColumnRef {
                         table: Some("users".to_owned()),
                         column: "id".to_owned(),
-                    },
+                    }),
                     op: ComparisonOperator::Gt,
-                    right: Expression::Literal {
+                    right: Box::new(Expression::Literal {
                         value: serde_json::json!(0_i64),
                         data_type: DataType::Int,
-                    },
+                    }),
                 },
                 description: "tenant isolation".to_owned(),
             }),
@@ -404,15 +404,15 @@ fn joining_against_a_denied_table_is_rejected() {
             join_type: JoinType::Inner,
             right_table: FromClause::table("secrets".to_owned(), Some("s".to_owned())),
             on: Predicate::Comparison {
-                left: Expression::ColumnRef {
+                left: Box::new(Expression::ColumnRef {
                     table: Some("users".to_owned()),
                     column: "id".to_owned(),
-                },
+                }),
                 op: ComparisonOperator::Eq,
-                right: Expression::ColumnRef {
+                right: Box::new(Expression::ColumnRef {
                     table: Some("s".to_owned()),
                     column: "id".to_owned(),
-                },
+                }),
             },
         }]),
         ctes: None,
@@ -453,15 +453,15 @@ fn selecting_from_a_denied_table_via_join_alias_is_rejected() {
             join_type: JoinType::Inner,
             right_table: FromClause::table("secrets".to_owned(), Some("s".to_owned())),
             on: Predicate::Comparison {
-                left: Expression::ColumnRef {
+                left: Box::new(Expression::ColumnRef {
                     table: Some("users".to_owned()),
                     column: "id".to_owned(),
-                },
+                }),
                 op: ComparisonOperator::Eq,
-                right: Expression::ColumnRef {
+                right: Box::new(Expression::ColumnRef {
                     table: Some("s".to_owned()),
                     column: "id".to_owned(),
-                },
+                }),
             },
         }]),
         ctes: None,
@@ -502,15 +502,15 @@ fn selecting_a_denied_column_via_join_alias_is_rejected() {
             join_type: JoinType::Inner,
             right_table: FromClause::table("secrets".to_owned(), Some("s".to_owned())),
             on: Predicate::Comparison {
-                left: Expression::ColumnRef {
+                left: Box::new(Expression::ColumnRef {
                     table: Some("u".to_owned()),
                     column: "id".to_owned(),
-                },
+                }),
                 op: ComparisonOperator::Eq,
-                right: Expression::ColumnRef {
+                right: Box::new(Expression::ColumnRef {
                     table: Some("s".to_owned()),
                     column: "id".to_owned(),
-                },
+                }),
             },
         }]),
         ctes: None,
@@ -554,15 +554,15 @@ fn globally_denied_column_referenced_via_join_is_rejected() {
             join_type: JoinType::Inner,
             right_table: FromClause::table("secrets".to_owned(), Some("s".to_owned())),
             on: Predicate::Comparison {
-                left: Expression::ColumnRef {
+                left: Box::new(Expression::ColumnRef {
                     table: Some("users".to_owned()),
                     column: "id".to_owned(),
-                },
+                }),
                 op: ComparisonOperator::Eq,
-                right: Expression::ColumnRef {
+                right: Box::new(Expression::ColumnRef {
                     table: Some("s".to_owned()),
                     column: "id".to_owned(),
-                },
+                }),
             },
         }]),
         ctes: None,
@@ -626,15 +626,15 @@ fn row_filter_combines_multiple_conditions_with_and() {
     let mut policy = policy_with_restricted_users();
     policy.row_filters.push(RowFilter {
         condition: Predicate::Comparison {
-            left: Expression::ColumnRef {
+            left: Box::new(Expression::ColumnRef {
                 table: Some("users".to_owned()),
                 column: "id".to_owned(),
-            },
+            }),
             op: ComparisonOperator::Lt,
-            right: Expression::Literal {
+            right: Box::new(Expression::Literal {
                 value: serde_json::json!(1_000_000_i64),
                 data_type: DataType::Int,
-            },
+            }),
         },
         description: "global id bound".to_owned(),
     });

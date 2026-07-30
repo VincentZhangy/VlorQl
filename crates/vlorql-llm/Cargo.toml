@@ -8,6 +8,9 @@ homepage.workspace = true
 repository.workspace = true
 description = "Multi-provider LLM client for SQL query generation supporting Anthropic, DeepSeek, Zhipu, and local models"
 
+[lints]
+workspace = true
+
 [dependencies]
 vlorql-core = { path = "../vlorql-core", version = "0.5.0" }
 async-trait.workspace = true
@@ -23,6 +26,7 @@ tokio-stream.workspace = true
 futures.workspace = true
 futures-util.workspace = true
 jsonschema = "0.28"
+thiserror.workspace = true
 
 [dev-dependencies]
 mockall.workspace = true

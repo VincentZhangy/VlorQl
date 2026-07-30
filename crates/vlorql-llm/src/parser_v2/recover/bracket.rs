@@ -25,12 +25,19 @@ pub fn find_outermost_json_obj(text: &str) -> Option<&str> {
 /// emit reasoning prose (possibly containing braces) before the plan, or
 /// multiple JSON objects.
 ///
-/// Returns `None` if no substring parses as a JSON object.
+/// When no balanced object looks like a plan but the outermost `{` span
+/// is truncated (no matching close brace), attempts to repair it with
+/// [`repair_truncated_json`] and prefers the repaired result if it then
+/// looks like a plan.
+///
+/// Returns `None` if no substring parses as a JSON object (even after
+/// repair).
 #[must_use]
 pub fn find_best_json_obj(text: &str) -> Option<&str> {
     let mut best: Option<&str> = None;
     let mut best_score = (false, 0usize); // (looks_like_plan, byte_len)
     let mut idx = 0;
+    let mut outermost_start = None;
     while let Some(rel) = text[idx..].find('{') {
         let start = idx + rel;
         if let Some(end) = find_matching_close(&text[start..], '{', '}') {
@@ -43,9 +50,32 @@ pub fn find_best_json_obj(text: &str) -> Option<&str> {
                     best_score = score;
                 }
             }
+        } else if outermost_start.is_none() {
+            // Remember the first `{` that has no matching close — it might
+            // be a truncated plan that repair_truncated_json can fix.
+            outermost_start = Some(start);
         }
         idx = start + 1; // '{' is ASCII → safe byte boundary
     }
+
+    // If no balanced candidate looks like a plan, try to repair the
+    // outermost truncated `{` span.  This handles the case where the
+    // LLM outputs a plan whose final `}` is cut off, leaving inner
+    // sub-objects as the only parseable JSON candidates.
+    if best.is_none_or(|c| {
+        serde_json::from_str::<serde_json::Value>(c)
+            .is_ok_and(|v| v.get("select").is_none() && v.get("from").is_none())
+    }) && let Some(start) = outermost_start
+    {
+        let candidate = &text[start..];
+        let repaired = repair_truncated_json(candidate);
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&repaired)
+            && (v.get("select").is_some() || v.get("from").is_some())
+        {
+            return Some(Box::leak(repaired.into_owned().into_boxed_str()));
+        }
+    }
+
     best
 }
 

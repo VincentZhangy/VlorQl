@@ -432,7 +432,7 @@ fn audit_expression(expr: &Expression, schema: &Arc<SchemaSnapshot>, report: &mu
             audit_expression(right, schema, report);
         }
         Expression::FunctionCall { args, .. } => {
-            for arg in args {
+            for arg in args.iter() {
                 audit_expression(arg, schema, report);
             }
         }
@@ -458,7 +458,7 @@ fn audit_expression(expr: &Expression, schema: &Arc<SchemaSnapshot>, report: &mu
             if let Some(op) = operand {
                 audit_expression(op, schema, report);
             }
-            for wt in when_thens {
+            for wt in when_thens.iter() {
                 audit_expression(&wt.when, schema, report);
                 audit_expression(&wt.then, schema, report);
             }
@@ -467,7 +467,7 @@ fn audit_expression(expr: &Expression, schema: &Arc<SchemaSnapshot>, report: &mu
             }
         }
         Expression::WindowFunction { args, over, .. } => {
-            for arg in args {
+            for arg in args.iter() {
                 audit_expression(arg, schema, report);
             }
             if let Some(partition_by) = &over.partition_by {

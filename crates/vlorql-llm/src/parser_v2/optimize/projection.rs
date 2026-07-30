@@ -9,7 +9,7 @@
 use std::collections::HashSet;
 use vlorql_core::schema::{Projection, QueryPlan};
 
-/// Run all projection optimization rules on a [`QueryPlan`].
+/// Run all projection optimization rules on a [`QueryPlan`](vlorql_core::schema::QueryPlan).
 ///
 /// Returns `true` if any optimization was applied.
 #[must_use]

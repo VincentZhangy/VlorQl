@@ -333,6 +333,9 @@ impl ValidationPipeline {
     /// checks are *not* re-run because the optimiser never introduces
     /// new tables, columns, or expressions that those stages would reject.
     ///
+    /// The CPU-intensive validation and policy check stages are offloaded
+    /// to a blocking thread via [`tokio::task::spawn_blocking`].
+    ///
     /// # Errors
     ///
     /// Returns [`ValidationErrors`] when any stage (including the
@@ -341,7 +344,19 @@ impl ValidationPipeline {
         &self,
         plan: &QueryPlan,
     ) -> Result<OptimizedPlan, ValidationErrors> {
-        let validated = self.validate(plan)?;
+        // Offload CPU-intensive validation to blocking thread.
+        let this = self.clone();
+        let plan_clone = plan.clone();
+        let validated = tokio::task::spawn_blocking(move || this.validate(&plan_clone))
+            .await
+            .map_err(|join_err| {
+                ValidationErrors::new(vec![VlorQLError::config(
+                    crate::errors::ConfigErrorKind::InternalError {
+                        reason: format!("validate spawn_blocking join failed: {join_err}"),
+                    },
+                    serde_json::json!({"operation": "validate_and_optimize"}),
+                )])
+            })??;
 
         let Some(ref optimizer) = self.optimizer else {
             return Ok(OptimizedPlan::from(validated));
@@ -357,7 +372,19 @@ impl ValidationPipeline {
         // Re-validate policy on the optimised plan — the rewrite rules
         // are conservative, but a reorder could, in theory, expose a
         // column that was previously pruned.
-        if let Err(stage_errors) = self.policy.validate(&optimized_plan, &self.schema) {
+        let this = self.clone();
+        let opt_clone = optimized_plan.clone();
+        if let Err(stage_errors) = tokio::task::spawn_blocking(move || this.policy.validate(&opt_clone, &this.schema))
+            .await
+            .map_err(|join_err| {
+                ValidationErrors::new(vec![VlorQLError::config(
+                    crate::errors::ConfigErrorKind::InternalError {
+                        reason: format!("policy validate spawn_blocking join failed: {join_err}"),
+                    },
+                    serde_json::json!({"operation": "validate_and_optimize"}),
+                )])
+            })?
+        {
             return Err(ValidationErrors(stage_errors));
         }
 

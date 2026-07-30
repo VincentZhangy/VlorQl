@@ -71,15 +71,15 @@ struct DialectCase {
 fn plan_with_where() -> QueryPlan {
     let mut plan = plan_with_limit_offset();
     plan.r#where = Some(Predicate::Comparison {
-        left: Expression::ColumnRef {
+        left: Box::new(Expression::ColumnRef {
             table: Some("users".to_owned()),
             column: "id".to_owned(),
-        },
+        }),
         op: ComparisonOperator::Gt,
-        right: Expression::Literal {
+        right: Box::new(Expression::Literal {
             value: json!(10),
             data_type: DataType::Int,
-        },
+        }),
     });
     plan
 }

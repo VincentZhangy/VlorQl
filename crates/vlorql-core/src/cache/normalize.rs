@@ -12,7 +12,7 @@ use serde_json::Value;
 ///
 /// The normalisation rules are:
 ///
-/// 1. Serialise the [`QueryPlan`](crate::schema::QueryPlan) to a [`serde_json::Value`] (field
+/// [`QueryPlan`](crate::schema::QueryPlan)(crate::schema::QueryPlan) to a [`serde_json::Value`] (field
 ///    order follows the struct definition — `serde_json` uses `BTreeMap`
 ///    internally for `Value::Object`, so keys are already sorted).
 /// 2. Recursively sort the keys of every JSON object (defensive —
@@ -48,14 +48,16 @@ use serde_json::Value;
 pub fn normalize_plan(plan: &ValidatedPlan) -> String {
     // Serialize to a serde_json::Value first.  serde_json internally
     // uses BTreeMap for objects, so keys are already sorted.
+    // INVARIANT: ValidatedPlan / QueryPlan derive Serialize, so to_value cannot fail.
     let value = serde_json::to_value(plan.as_plan())
-        .expect("ValidatedPlan should always serialize to JSON");
+        .expect("invariant: ValidatedPlan should always serialize to JSON");
 
     // Defensively sort keys recursively.
     let sorted = sort_value(value);
 
     // Compact serialisation — no whitespace.
-    serde_json::to_string(&sorted).expect("sorted JSON should serialize")
+    // INVARIANT: serde_json::Value -> String serialization is infallible.
+    serde_json::to_string(&sorted).expect("invariant: sorted JSON should serialize")
 }
 
 /// Maximum nesting depth for key sorting. Beyond this, `sort_value` returns

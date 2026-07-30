@@ -30,6 +30,7 @@ pub mod order;
 pub mod pipeline;
 pub mod query;
 pub mod select;
+pub mod set_op;
 pub mod table;
 pub mod value;
 pub mod where_;

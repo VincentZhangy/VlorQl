@@ -416,7 +416,7 @@ fn expressions_equal(a: &Expression, b: &Expression) -> bool {
             na == nb
                 && da == db
                 && aa.len() == ab.len()
-                && aa.iter().zip(ab).all(|(a, b)| expressions_equal(a, b))
+                && aa.iter().zip(ab.iter()).all(|(a, b)| expressions_equal(a, b))
         }
         (
             Expression::BinaryOp {
@@ -469,9 +469,9 @@ mod tests {
     fn and_true_right() {
         let mut pred = Predicate::And {
             left: Box::new(Predicate::Comparison {
-                left: col("age"),
+                left: Box::new(col("age")),
                 op: ComparisonOperator::Gt,
-                right: lit_int(18),
+                right: Box::new(lit_int(18)),
             }),
             right: Box::new(true_pred()),
         };
@@ -484,9 +484,9 @@ mod tests {
         let mut pred = Predicate::And {
             left: Box::new(true_pred()),
             right: Box::new(Predicate::Comparison {
-                left: col("age"),
+                left: Box::new(col("age")),
                 op: ComparisonOperator::Gt,
-                right: lit_int(18),
+                right: Box::new(lit_int(18)),
             }),
         };
         assert!(simplify(&mut pred));
@@ -499,9 +499,9 @@ mod tests {
     fn and_false_right() {
         let mut pred = Predicate::And {
             left: Box::new(Predicate::Comparison {
-                left: col("age"),
+                left: Box::new(col("age")),
                 op: ComparisonOperator::Gt,
-                right: lit_int(18),
+                right: Box::new(lit_int(18)),
             }),
             right: Box::new(false_pred()),
         };
@@ -515,9 +515,9 @@ mod tests {
     fn or_false_right() {
         let mut pred = Predicate::Or {
             left: Box::new(Predicate::Comparison {
-                left: col("age"),
+                left: Box::new(col("age")),
                 op: ComparisonOperator::Gt,
-                right: lit_int(18),
+                right: Box::new(lit_int(18)),
             }),
             right: Box::new(false_pred()),
         };
@@ -530,9 +530,9 @@ mod tests {
         let mut pred = Predicate::Or {
             left: Box::new(false_pred()),
             right: Box::new(Predicate::Comparison {
-                left: col("age"),
+                left: Box::new(col("age")),
                 op: ComparisonOperator::Gt,
-                right: lit_int(18),
+                right: Box::new(lit_int(18)),
             }),
         };
         assert!(simplify(&mut pred));
@@ -545,9 +545,9 @@ mod tests {
     fn or_true_right() {
         let mut pred = Predicate::Or {
             left: Box::new(Predicate::Comparison {
-                left: col("age"),
+                left: Box::new(col("age")),
                 op: ComparisonOperator::Gt,
-                right: lit_int(18),
+                right: Box::new(lit_int(18)),
             }),
             right: Box::new(true_pred()),
         };
@@ -562,9 +562,9 @@ mod tests {
         let mut pred = Predicate::Not {
             child: Box::new(Predicate::Not {
                 child: Box::new(Predicate::Comparison {
-                    left: col("age"),
+                    left: Box::new(col("age")),
                     op: ComparisonOperator::Gt,
-                    right: lit_int(18),
+                    right: Box::new(lit_int(18)),
                 }),
             }),
         };
@@ -577,9 +577,9 @@ mod tests {
     #[test]
     fn fold_eq_true() {
         let mut pred = Predicate::Comparison {
-            left: lit_int(1),
+            left: Box::new(lit_int(1)),
             op: ComparisonOperator::Eq,
-            right: lit_int(1),
+            right: Box::new(lit_int(1)),
         };
         assert!(simplify(&mut pred));
         assert!(is_true_predicate(&pred));
@@ -588,9 +588,9 @@ mod tests {
     #[test]
     fn fold_eq_false() {
         let mut pred = Predicate::Comparison {
-            left: lit_int(1),
+            left: Box::new(lit_int(1)),
             op: ComparisonOperator::Eq,
-            right: lit_int(2),
+            right: Box::new(lit_int(2)),
         };
         assert!(simplify(&mut pred));
         assert!(is_false_predicate(&pred));
@@ -599,9 +599,9 @@ mod tests {
     #[test]
     fn fold_gt_true() {
         let mut pred = Predicate::Comparison {
-            left: lit_int(2),
+            left: Box::new(lit_int(2)),
             op: ComparisonOperator::Gt,
-            right: lit_int(1),
+            right: Box::new(lit_int(1)),
         };
         assert!(simplify(&mut pred));
         assert!(is_true_predicate(&pred));
@@ -612,9 +612,9 @@ mod tests {
     #[test]
     fn column_eq_self() {
         let mut pred = Predicate::Comparison {
-            left: col("id"),
+            left: Box::new(col("id")),
             op: ComparisonOperator::Eq,
-            right: col("id"),
+            right: Box::new(col("id")),
         };
         assert!(simplify(&mut pred));
         assert!(is_true_predicate(&pred));
@@ -623,9 +623,9 @@ mod tests {
     #[test]
     fn column_ne_self() {
         let mut pred = Predicate::Comparison {
-            left: col("id"),
+            left: Box::new(col("id")),
             op: ComparisonOperator::Neq,
-            right: col("id"),
+            right: Box::new(col("id")),
         };
         assert!(simplify(&mut pred));
         assert!(is_false_predicate(&pred));
@@ -636,9 +636,9 @@ mod tests {
     #[test]
     fn duplicate_and() {
         let cmp = Predicate::Comparison {
-            left: col("age"),
+            left: Box::new(col("age")),
             op: ComparisonOperator::Gt,
-            right: lit_int(18),
+            right: Box::new(lit_int(18)),
         };
         let mut pred = Predicate::And {
             left: Box::new(cmp.clone()),
@@ -651,9 +651,9 @@ mod tests {
     #[test]
     fn duplicate_or() {
         let cmp = Predicate::Comparison {
-            left: col("age"),
+            left: Box::new(col("age")),
             op: ComparisonOperator::Gt,
-            right: lit_int(18),
+            right: Box::new(lit_int(18)),
         };
         let mut pred = Predicate::Or {
             left: Box::new(cmp.clone()),
@@ -671,20 +671,20 @@ mod tests {
         let mut pred = Predicate::Or {
             left: Box::new(Predicate::And {
                 left: Box::new(Predicate::Comparison {
-                    left: col("age"),
+                    left: Box::new(col("age")),
                     op: ComparisonOperator::Gt,
-                    right: lit_int(18),
+                    right: Box::new(lit_int(18)),
                 }),
                 right: Box::new(true_pred()),
             }),
             right: Box::new(Predicate::And {
                 left: Box::new(Predicate::Comparison {
-                    left: col("status"),
+                    left: Box::new(col("status")),
                     op: ComparisonOperator::Eq,
-                    right: Expression::Literal {
+                    right: Box::new(Expression::Literal {
                         value: json!("active"),
                         data_type: DataType::String,
-                    },
+                    }),
                 }),
                 right: Box::new(false_pred()),
             }),
@@ -699,9 +699,9 @@ mod tests {
     #[test]
     fn no_simplification_needed() {
         let mut pred = Predicate::Comparison {
-            left: col("age"),
+            left: Box::new(col("age")),
             op: ComparisonOperator::Gt,
-            right: lit_int(18),
+            right: Box::new(lit_int(18)),
         };
         assert!(!simplify(&mut pred));
     }

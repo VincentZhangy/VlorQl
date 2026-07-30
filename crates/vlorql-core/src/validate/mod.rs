@@ -91,12 +91,12 @@ mod tests {
             join_type: JoinType::Inner,
             right_table: FromClause::table("missing_table".to_owned(), None),
             on: Predicate::Comparison {
-                left: Expression::ColumnRef {
+                left: Box::new(Expression::ColumnRef {
                     table: Some("users".to_owned()),
                     column: "id".to_owned(),
-                },
+                }),
                 op: ComparisonOperator::Eq,
-                right: literal(json!(1), DataType::Int),
+                right: Box::new(literal(json!(1), DataType::Int)),
             },
         }]);
 
@@ -131,12 +131,12 @@ mod tests {
             alias: Some("invalid_sum".to_owned()),
         });
         plan.r#where = Some(Predicate::Comparison {
-            left: Expression::ColumnRef {
+            left: Box::new(Expression::ColumnRef {
                 table: Some("users".to_owned()),
                 column: "name".to_owned(),
-            },
+            }),
             op: ComparisonOperator::Gt,
-            right: literal(json!(42), DataType::Int),
+            right: Box::new(literal(json!(42), DataType::Int)),
         });
 
         let errors = OperandValidator::validate(&plan, &schema())
@@ -157,7 +157,7 @@ mod tests {
         plan.select.push(Projection::Expr {
             expression: Expression::FunctionCall {
                 name: "danger".to_owned(),
-                args: Vec::new(),
+                args: Box::new(Vec::new()),
                 distinct: true,
             },
             alias: None,
@@ -166,10 +166,10 @@ mod tests {
             join_type: JoinType::Inner,
             right_table: FromClause::table("users".to_owned(), Some("other".to_owned())),
             on: Predicate::IsNull {
-                expr: Expression::ColumnRef {
+                expr: Box::new(Expression::ColumnRef {
                     table: Some("other".to_owned()),
                     column: "id".to_owned(),
-                },
+                }),
             },
         }]);
         plan.ctes = Some(vec![CommonTableExpression {
@@ -206,32 +206,32 @@ mod tests {
         plan.select.push(Projection::Expr {
             expression: Expression::FunctionCall {
                 name: "danger".to_owned(),
-                args: Vec::new(),
+                args: Box::new(Vec::new()),
                 distinct: false,
             },
             alias: None,
         });
         plan.r#where = Some(Predicate::Comparison {
-            left: Expression::ColumnRef {
+            left: Box::new(Expression::ColumnRef {
                 table: Some("users".to_owned()),
                 column: "name".to_owned(),
-            },
+            }),
             op: ComparisonOperator::Eq,
-            right: literal(json!(99), DataType::Int),
+            right: Box::new(literal(json!(99), DataType::Int)),
         });
         plan.joins = Some(vec![JoinClause {
             join_type: JoinType::Inner,
             right_table: FromClause::table("users".to_owned(), Some("other".to_owned())),
             on: Predicate::Comparison {
-                left: Expression::ColumnRef {
+                left: Box::new(Expression::ColumnRef {
                     table: Some("users".to_owned()),
                     column: "id".to_owned(),
-                },
+                }),
                 op: ComparisonOperator::Eq,
-                right: Expression::ColumnRef {
+                right: Box::new(Expression::ColumnRef {
                     table: Some("other".to_owned()),
                     column: "id".to_owned(),
-                },
+                }),
             },
         }]);
         plan.ctes = Some(vec![CommonTableExpression {
@@ -315,15 +315,15 @@ mod tests {
             }],
             from: FromClause::table("users".to_owned(), None),
             r#where: Some(Predicate::Comparison {
-                left: Expression::ColumnRef {
+                left: Box::new(Expression::ColumnRef {
                     table: Some("users".to_owned()),
                     column: "id".to_owned(),
-                },
+                }),
                 op: ComparisonOperator::Eq,
-                right: Expression::Literal {
+                right: Box::new(Expression::Literal {
                     value: serde_json::Value::String("not-a-number".to_owned()),
                     data_type: DataType::Int,
-                },
+                }),
             }),
             group_by: None,
             having: None,
@@ -348,10 +348,10 @@ mod tests {
 
         // A LIKE expression must operate on a string-typed column.
         plan.r#where = Some(Predicate::Like {
-            expr: Expression::ColumnRef {
+            expr: Box::new(Expression::ColumnRef {
                 table: Some("users".to_owned()),
                 column: "id".to_owned(),
-            },
+            }),
             pattern: "%oops%".to_owned(),
         });
         let errors = OperandValidator::validate(&plan, &snapshot)
@@ -397,20 +397,20 @@ mod tests {
                 join_type: JoinType::Inner,
                 right_table: FromClause::table("users".to_owned(), Some("u2".to_owned())),
                 on: Predicate::IsNull {
-                    expr: Expression::ColumnRef {
+                    expr: Box::new(Expression::ColumnRef {
                         table: Some("u2".to_owned()),
                         column: "id".to_owned(),
-                    },
+                    }),
                 },
             },
             JoinClause {
                 join_type: JoinType::Inner,
                 right_table: FromClause::table("users".to_owned(), Some("u3".to_owned())),
                 on: Predicate::IsNull {
-                    expr: Expression::ColumnRef {
+                    expr: Box::new(Expression::ColumnRef {
                         table: Some("u3".to_owned()),
                         column: "id".to_owned(),
-                    },
+                    }),
                 },
             },
         ]);
@@ -476,15 +476,15 @@ mod tests {
             join_type: JoinType::Inner,
             right_table: FromClause::table("missing_table".to_owned(), None),
             on: Predicate::Comparison {
-                left: Expression::ColumnRef {
+                left: Box::new(Expression::ColumnRef {
                     table: Some("users".to_owned()),
                     column: "id".to_owned(),
-                },
+                }),
                 op: ComparisonOperator::Eq,
-                right: Expression::ColumnRef {
+                right: Box::new(Expression::ColumnRef {
                     table: Some("missing_table".to_owned()),
                     column: "id".to_owned(),
-                },
+                }),
             },
         }]);
         let pipeline = ValidationPipeline::new(

@@ -41,15 +41,15 @@ pub fn build_join_clause(val: &Value) -> Result<JoinClause, BuildError> {
     } else if join_type == vlorql_core::schema::JoinType::Cross {
         // Cross joins don't need ON — provide a dummy TRUE predicate.
         Predicate::Comparison {
-            left: vlorql_core::schema::Expression::Literal {
+            left: Box::new(vlorql_core::schema::Expression::Literal {
                 value: serde_json::Value::Bool(true),
                 data_type: vlorql_core::schema::DataType::Boolean,
-            },
+            }),
             op: vlorql_core::schema::ComparisonOperator::Eq,
-            right: vlorql_core::schema::Expression::Literal {
+            right: Box::new(vlorql_core::schema::Expression::Literal {
                 value: serde_json::Value::Bool(true),
                 data_type: vlorql_core::schema::DataType::Boolean,
-            },
+            }),
         }
     } else {
         return Err(BuildError::new("on", "missing `on` field on join"));

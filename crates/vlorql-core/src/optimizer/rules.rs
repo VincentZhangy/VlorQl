@@ -11,7 +11,7 @@ use crate::errors::VlorQLError;
 use crate::schema::QueryPlan;
 use std::fmt;
 
-/// A logical rewrite rule over a [`QueryPlan`].
+/// [`QueryPlan`](crate::schema::QueryPlan).
 ///
 /// Implementations must preserve query semantics: the rewritten plan
 /// must return the same rows as the input for every database state. A

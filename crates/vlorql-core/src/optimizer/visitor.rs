@@ -92,7 +92,7 @@ pub fn default_fold_expression<F: ExpressionFold + ?Sized>(
             distinct,
         } => Expression::FunctionCall {
             name: name.clone(),
-            args: args.iter().map(|a| folder.fold_expression(a)).collect(),
+            args: Box::new(args.iter().map(|a| folder.fold_expression(a)).collect()),
             distinct: *distinct,
         },
         Expression::SubQuery { query } => Expression::SubQuery {
@@ -109,9 +109,9 @@ pub fn default_fold_predicate<F: ExpressionFold + ?Sized>(
 ) -> Predicate {
     match pred {
         Predicate::Comparison { left, op, right } => Predicate::Comparison {
-            left: folder.fold_expression(left),
+            left: Box::new(folder.fold_expression(left)),
             op: *op,
-            right: folder.fold_expression(right),
+            right: Box::new(folder.fold_expression(right)),
         },
         Predicate::And { left, right } => Predicate::And {
             left: Box::new(folder.fold_predicate(left)),
@@ -125,12 +125,12 @@ pub fn default_fold_predicate<F: ExpressionFold + ?Sized>(
             child: Box::new(folder.fold_predicate(child)),
         },
         Predicate::Between { expr, low, high } => Predicate::Between {
-            expr: folder.fold_expression(expr),
-            low: folder.fold_expression(low),
-            high: folder.fold_expression(high),
+            expr: Box::new(folder.fold_expression(expr)),
+            low: Box::new(folder.fold_expression(low)),
+            high: Box::new(folder.fold_expression(high)),
         },
         Predicate::In { expr, target } => Predicate::In {
-            expr: folder.fold_expression(expr),
+            expr: Box::new(folder.fold_expression(expr)),
             target: match target {
                 InTarget::Values(values) => {
                     InTarget::Values(values.iter().map(|v| folder.fold_expression(v)).collect())
@@ -142,11 +142,11 @@ pub fn default_fold_predicate<F: ExpressionFold + ?Sized>(
             query: query.clone(),
         },
         Predicate::Like { expr, pattern } => Predicate::Like {
-            expr: folder.fold_expression(expr),
+            expr: Box::new(folder.fold_expression(expr)),
             pattern: pattern.clone(),
         },
         Predicate::IsNull { expr } => Predicate::IsNull {
-            expr: folder.fold_expression(expr),
+            expr: Box::new(folder.fold_expression(expr)),
         },
         Predicate::True => Predicate::True,
         Predicate::False => Predicate::False,
@@ -294,7 +294,7 @@ pub fn default_visit_expression<F: ExpressionVisit + ?Sized>(
             visitor.visit_expression(right, ctx);
         }
         Expression::FunctionCall { args, .. } => {
-            for arg in args {
+            for arg in args.iter() {
                 visitor.visit_expression(arg, ctx);
             }
         }
@@ -307,7 +307,7 @@ pub fn default_visit_expression<F: ExpressionVisit + ?Sized>(
             if let Some(op) = operand {
                 visitor.visit_expression(op, ctx);
             }
-            for wt in when_thens {
+            for wt in when_thens.iter() {
                 visitor.visit_expression(&wt.when, ctx);
                 visitor.visit_expression(&wt.then, ctx);
             }
@@ -317,7 +317,7 @@ pub fn default_visit_expression<F: ExpressionVisit + ?Sized>(
         }
         Expression::ColumnRef { .. } | Expression::Literal { .. } | Expression::Star => {}
         Expression::WindowFunction { args, over, .. } => {
-            for arg in args {
+            for arg in args.iter() {
                 visitor.visit_expression(arg, ctx);
             }
             if let Some(partition_by) = &over.partition_by {

@@ -41,15 +41,15 @@ async fn validation_aggregates_multiple_schema_errors() {
         join_type: vlorql_core::schema::JoinType::Inner,
         right_table: FromClause::table("missing_table".to_owned(), None),
         on: Predicate::Comparison {
-            left: Expression::ColumnRef {
+            left: Box::new(Expression::ColumnRef {
                 table: Some("users".to_owned()),
                 column: "id".to_owned(),
-            },
+            }),
             op: ComparisonOperator::Eq,
-            right: Expression::ColumnRef {
+            right: Box::new(Expression::ColumnRef {
                 table: Some("missing_table".to_owned()),
                 column: "id".to_owned(),
-            },
+            }),
         },
     }]);
 
@@ -101,27 +101,27 @@ async fn validation_aggregates_multiple_schema_errors() {
 async fn validation_aggregates_multiple_type_mismatches() {
     // First mismatch: `name > 1` (string > int).
     let string_gt_int = Predicate::Comparison {
-        left: Expression::ColumnRef {
+        left: Box::new(Expression::ColumnRef {
             table: Some("users".to_owned()),
             column: "name".to_owned(),
-        },
+        }),
         op: ComparisonOperator::Gt,
-        right: Expression::Literal {
+        right: Box::new(Expression::Literal {
             value: json!(1),
             data_type: DataType::Int,
-        },
+        }),
     };
     // Second mismatch: `id LIKE 'x'` (int LIKE string).
     let int_like_string = Predicate::Comparison {
-        left: Expression::ColumnRef {
+        left: Box::new(Expression::ColumnRef {
             table: Some("users".to_owned()),
             column: "id".to_owned(),
-        },
+        }),
         op: ComparisonOperator::Like,
-        right: Expression::Literal {
+        right: Box::new(Expression::Literal {
             value: json!("x"),
             data_type: DataType::String,
-        },
+        }),
     };
     let mut plan = base_plan();
     plan.r#where = Some(Predicate::And {
@@ -352,15 +352,15 @@ async fn retry_loop_exhausts_on_persistent_retryable_error() {
 fn plan_with_invalid_where() -> QueryPlan {
     let mut plan = base_plan();
     plan.r#where = Some(Predicate::Comparison {
-        left: Expression::ColumnRef {
+        left: Box::new(Expression::ColumnRef {
             table: Some("users".to_owned()),
             column: "name".to_owned(),
-        },
+        }),
         op: ComparisonOperator::Gt,
-        right: Expression::Literal {
+        right: Box::new(Expression::Literal {
             value: json!(1),
             data_type: DataType::Int,
-        },
+        }),
     });
     plan
 }

@@ -59,7 +59,7 @@ pub enum Expression {
         /// preserved).
         name: String,
         /// Arguments passed positionally to the function.
-        args: Vec<Expression>,
+        args: Box<Vec<Expression>>,
         /// When `true`, the call is rendered as `DISTINCT` (subject
         /// to the dialect profile's `allow_distinct` setting).
         distinct: bool,
@@ -86,7 +86,7 @@ pub enum Expression {
         /// Optional base expression for `CASE expr WHEN ... THEN ...` shorthand.
         operand: Option<Box<Expression>>,
         /// The list of `WHEN`/`THEN` pairs.
-        when_thens: Vec<WhenThen>,
+        when_thens: Box<Vec<WhenThen>>,
         /// Optional `ELSE` result expression.
         else_result: Option<Box<Expression>>,
     },
@@ -97,11 +97,11 @@ pub enum Expression {
         /// Function name (e.g. `"row_number"`, `"lag"`, `"sum"`).
         name: String,
         /// Arguments passed positionally to the function.
-        args: Vec<Expression>,
+        args: Box<Vec<Expression>>,
         /// When `true`, the call is rendered as `DISTINCT`.
         distinct: bool,
         /// The window specification (PARTITION BY, ORDER BY, frame).
-        over: WindowSpec,
+        over: Box<WindowSpec>,
     },
 }
 
@@ -195,15 +195,15 @@ pub enum InTarget {
 /// use vlorql_core::schema::{Predicate, Expression, ComparisonOperator, DataType};
 ///
 /// let pred = Predicate::Comparison {
-///     left: Expression::ColumnRef {
+///     left: Box::new(Expression::ColumnRef {
 ///         table: Some("users".to_owned()),
 ///         column: "age".to_owned(),
-///     },
+///     }),
 ///     op: ComparisonOperator::Gte,
-///     right: Expression::Literal {
+///     right: Box::new(Expression::Literal {
 ///         value: serde_json::json!(18),
 ///         data_type: DataType::Int,
-///     },
+///     }),
 /// };
 /// assert!(matches!(pred, Predicate::Comparison { .. }));
 /// ```
@@ -213,11 +213,11 @@ pub enum Predicate {
     /// A comparison between two expressions.
     Comparison {
         /// Left-hand operand.
-        left: Expression,
+        left: Box<Expression>,
         /// The comparison operator.
         op: ComparisonOperator,
         /// Right-hand operand.
-        right: Expression,
+        right: Box<Expression>,
     },
     /// The conjunction of two predicates.
     And {
@@ -241,30 +241,30 @@ pub enum Predicate {
     /// A value constrained to an inclusive range.
     Between {
         /// The value being tested.
-        expr: Expression,
+        expr: Box<Expression>,
         /// Inclusive lower bound.
-        low: Expression,
+        low: Box<Expression>,
         /// Inclusive upper bound.
-        high: Expression,
+        high: Box<Expression>,
     },
     /// A value constrained to a list of expressions or a subquery.
     In {
         /// The value being tested.
-        expr: Expression,
+        expr: Box<Expression>,
         /// Allowed values or a subquery.
         target: InTarget,
     },
     /// A string pattern match.
     Like {
         /// The value being tested.
-        expr: Expression,
+        expr: Box<Expression>,
         /// Pattern string (using `LIKE`/`ILIKE` wildcards).
         pattern: String,
     },
     /// A null check.
     IsNull {
         /// The value being tested.
-        expr: Expression,
+        expr: Box<Expression>,
     },
     /// Tests whether a subquery returns any rows.
     Exists {

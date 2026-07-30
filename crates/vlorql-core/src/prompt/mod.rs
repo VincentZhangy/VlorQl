@@ -103,15 +103,15 @@ mod tests {
     fn row_filter() -> RowFilter {
         RowFilter {
             condition: Predicate::Comparison {
-                left: Expression::ColumnRef {
+                left: Box::new(Expression::ColumnRef {
                     table: Some("users".to_owned()),
                     column: "organization_id".to_owned(),
-                },
+                }),
                 op: ComparisonOperator::Eq,
-                right: Expression::Literal {
+                right: Box::new(Expression::Literal {
                     value: json!("current-organization"),
                     data_type: DataType::Uuid,
-                },
+                }),
             },
             description: "Restrict users to the current organization".to_owned(),
         }
@@ -322,15 +322,15 @@ mod extra_tests {
                         denied_columns: vec!["password_hash".to_owned()],
                         row_filter: Some(RowFilter {
                             condition: Predicate::Comparison {
-                                left: Expression::ColumnRef {
+                                left: Box::new(Expression::ColumnRef {
                                     table: Some("users".to_owned()),
                                     column: "id".to_owned(),
-                                },
+                                }),
                                 op: ComparisonOperator::Eq,
-                                right: Expression::Literal {
+                                right: Box::new(Expression::Literal {
                                     value: json!("current-organization"),
                                     data_type: DataType::Uuid,
-                                },
+                                }),
                             },
                             description: "Restrict users to the current organization".to_owned(),
                         }),

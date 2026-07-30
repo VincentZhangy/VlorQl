@@ -8,6 +8,9 @@ homepage.workspace = true
 repository.workspace = true
 description = "A high-performance SQL query optimizer with constant folding, predicate pushdown, column pruning, and cost-based join reordering"
 
+[lints]
+workspace = true
+
 [features]
 default = []
 vector-search = ["qdrant-client", "reqwest"]
@@ -35,6 +38,7 @@ opentelemetry.workspace = true
 opentelemetry_sdk.workspace = true
 opentelemetry-otlp.workspace = true
 tracing-opentelemetry.workspace = true
+static_assertions = "1.1"
 
 [dev-dependencies]
 mockall.workspace = true

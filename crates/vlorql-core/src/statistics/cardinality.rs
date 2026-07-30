@@ -392,9 +392,9 @@ mod tests {
 
     fn eq(left: Expression, right: Expression) -> Predicate {
         Predicate::Comparison {
-            left,
+            left: Box::new(left),
             op: ComparisonOperator::Eq,
-            right,
+            right: Box::new(right),
         }
     }
 
@@ -482,9 +482,9 @@ mod tests {
         let estimator = estimator();
         // id in [2501, 5000] over a [1, 10000] range ~ 25%.
         let pred = Predicate::Between {
-            expr: column("users", "id"),
-            low: literal(json!(2501), DataType::Int),
-            high: literal(json!(5000), DataType::Int),
+            expr: Box::new(column("users", "id")),
+            low: Box::new(literal(json!(2501), DataType::Int)),
+            high: Box::new(literal(json!(5000), DataType::Int)),
         };
         let selectivity = estimator
             .estimate_predicate_cardinality("users", &pred)
@@ -498,11 +498,11 @@ mod tests {
     async fn like_and_is_null_use_documented_values() {
         let estimator = estimator();
         let like = Predicate::Like {
-            expr: column("users", "status"),
+            expr: Box::new(column("users", "status")),
             pattern: "a%".to_owned(),
         };
         let is_null = Predicate::IsNull {
-            expr: column("users", "status"),
+            expr: Box::new(column("users", "status")),
         };
         assert!(
             (estimator
@@ -542,15 +542,15 @@ mod tests {
     async fn join_without_qualifiers_falls_back_to_default() {
         let estimator = estimator();
         let pred = Predicate::Comparison {
-            left: Expression::ColumnRef {
+            left: Box::new(Expression::ColumnRef {
                 table: None,
                 column: "id".to_owned(),
-            },
+            }),
             op: ComparisonOperator::Eq,
-            right: Expression::ColumnRef {
+            right: Box::new(Expression::ColumnRef {
                 table: None,
                 column: "user_id".to_owned(),
-            },
+            }),
         };
         let cardinality = estimator
             .estimate_join_cardinality(100, 100, &pred)

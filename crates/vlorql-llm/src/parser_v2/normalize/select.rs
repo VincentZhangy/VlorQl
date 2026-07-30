@@ -198,9 +198,16 @@ pub fn normalize_group_by_strings(val: &mut serde_json::Value) -> bool {
 /// 3. Remove invalid items
 /// 4. Inject default select when missing
 /// 5. Normalize group_by strings
+/// 6. Remove Star projections when GROUP BY is present
+/// 7. Remove aggregate function calls from GROUP BY
 #[must_use]
+/// 8. Unwrap `items` wrapper from select.
 pub fn normalize(val: &mut serde_json::Value) -> bool {
     let mut changed = false;
+
+    // 0. Unwrap `{"select": {"items": [...]}}` — LLM sometimes wraps
+    //     the select list in an `items` field.
+    changed |= unwrap_select_items(val);
 
     // 1. Normalize string projection items.
     changed |= normalize_projection_items(val);
@@ -217,6 +224,150 @@ pub fn normalize(val: &mut serde_json::Value) -> bool {
     // 5. Normalize group_by strings.
     changed |= normalize_group_by_strings(val);
 
+    // 6. Remove Star projections when GROUP BY is present.
+    changed |= remove_star_with_group_by(val);
+
+    // 7. Remove aggregate function calls from GROUP BY.
+    changed |= remove_aggregates_from_group_by(val);
+
+    changed
+}
+
+/// Unwrap `{"select": {"items": [...]}}` or `{"select": {"projections": [...]}}`
+/// to `{"select": [...]}`.  The LLM sometimes wraps the select list in a
+/// wrapper object instead of emitting a bare array.
+#[must_use]
+fn unwrap_select_items(val: &mut serde_json::Value) -> bool {
+    let Some(obj) = val.as_object_mut() else {
+        return false;
+    };
+    let select_val = match obj.get("select") {
+        Some(v) if v.is_object() => v,
+        _ => return false,
+    };
+    let Some(select_obj) = select_val.as_object() else {
+        return false;
+    };
+    // Try `items` or `projections` as the actual array.
+    let items = select_obj
+        .get("items")
+        .or_else(|| select_obj.get("projections"))
+        .and_then(|v| v.as_array())
+        .cloned();
+    if let Some(arr) = items {
+        obj.insert("select".to_owned(), serde_json::Value::Array(arr));
+        return true;
+    }
+    false
+}
+
+/// Remove aggregate function call items from the `group_by` array.
+///
+/// The LLM frequently puts aggregate functions (`string_agg`, `sum`,
+/// `count`, `avg`, etc.) in the `group_by` list, but SQL only allows
+/// column references (or non-aggregate expressions) in `GROUP BY`.
+/// These misplaced aggregates are silently removed so the validator
+/// doesn't reject the plan.
+#[must_use]
+fn remove_aggregates_from_group_by(val: &mut serde_json::Value) -> bool {
+    let Some(obj) = val.as_object_mut() else {
+        return false;
+    };
+    let Some(arr) = obj.get_mut("group_by").and_then(|v| v.as_array_mut()) else {
+        return false;
+    };
+    // Collect items to remove (function calls / aggregate shorthands)
+    // before mutating, so we can add them to `select` afterwards.
+    let before = arr.len();
+    let mut removed: Vec<serde_json::Value> = Vec::new();
+    arr.retain(|item| {
+        let type_ = item.get("type").and_then(|t| t.as_str()).unwrap_or("");
+        // Direct function_call match.
+        if type_ == "function_call" {
+            removed.push(item.clone());
+            return false;
+        }
+        // `expr` wrapper containing a function_call.
+        if type_ == "expr"
+            && let Some(inner) = item.get("expression")
+            && inner.get("type").and_then(|t| t.as_str()) == Some("function_call")
+        {
+            removed.push(inner.clone());
+            return false;
+        }
+        // Also remove items that look like aggregate shorthands:
+        // {"type": "sum", "args": [...]} (non-canonical aggregate form)
+        if !type_.is_empty() && type_ != "column_ref" && type_ != "literal"
+            && item.get("args").is_some()
+        {
+            removed.push(item.clone());
+            return false;
+        }
+        true
+    });
+    let changed = arr.len() != before;
+    // If group_by is now empty, remove the field entirely.
+    if arr.is_empty() {
+        obj.remove("group_by");
+    }
+
+    // Add removed aggregates to `select` if they aren't already there.
+    if !removed.is_empty()
+        && let Some(select_arr) = obj.get_mut("select").and_then(|v| v.as_array_mut())
+    {
+        for agg in &removed {
+            // Check if an equivalent item already exists in select.
+            let already_present = select_arr.iter().any(|s| s == agg);
+            if !already_present {
+                select_arr.push(agg.clone());
+            }
+        }
+    }
+
+    changed
+}
+
+/// Remove `Star` projections from `select` when the plan has a `group_by`.
+///
+/// `SELECT * ... GROUP BY col` is invalid SQL in most dialects — the `*`
+/// cannot be resolved against grouped columns.  When the LLM emits both,
+/// we remove the `Star` items so the builder can produce a valid query.
+/// Individual column references and aggregate expressions are kept.
+///
+/// Returns `true` if any `Star` was removed.
+#[must_use]
+fn remove_star_with_group_by(val: &mut serde_json::Value) -> bool {
+    let Some(obj) = val.as_object_mut() else {
+        return false;
+    };
+    // Check for GROUP BY at plan level OR nested inside `where`.
+    let has_group_by = obj
+        .get("group_by")
+        .and_then(|v| v.as_array())
+        .is_some_and(|arr| !arr.is_empty())
+        // Also check inside `where` — `select::normalize` runs before
+        // `where_::normalize`, so `group_by` may not yet be extracted.
+        || obj.get("where")
+            .and_then(|w| w.as_object())
+            .and_then(|w| w.get("group_by"))
+            .and_then(|v| v.as_array())
+            .is_some_and(|arr| !arr.is_empty());
+    if !has_group_by {
+        return false;
+    }
+    let Some(select_arr) = obj.get_mut("select").and_then(|v| v.as_array_mut()) else {
+        return false;
+    };
+    let before = select_arr.len();
+    select_arr.retain(|item| {
+        item.get("type").and_then(|t| t.as_str()) != Some("star")
+    });
+    let changed = select_arr.len() != before;
+    // If removing Star left the select list empty, inject a default
+    // column_ref so the builder doesn't fail.
+    if select_arr.is_empty() {
+        select_arr.push(serde_json::json!({"type": "column_ref", "column": "id"}));
+    }
     changed
 }
 
@@ -346,5 +497,60 @@ mod tests {
     fn no_change_for_canonical() {
         let mut val = json!({"select": [{"type": "star"}], "from": {"table": "users"}});
         assert!(!normalize(&mut val));
+    }
+
+    #[test]
+    fn remove_star_when_group_by_present() {
+        // Regression: `SELECT orders.*, users.id, users.name, SUM(total) ... GROUP BY users.id`
+        // is invalid SQL.  The Star must be removed when GROUP BY exists.
+        let mut val = json!({
+            "select": [
+                {"type": "star", "table": "orders"},
+                {"type": "column_ref", "table": "users", "column": "id"},
+                {"type": "column_ref", "table": "users", "column": "name"}
+            ],
+            "from": {"type": "table", "table": "users"},
+            "group_by": [{"type": "column_ref", "table": "users", "column": "id"}]
+        });
+        assert!(normalize(&mut val));
+        let select = val.get("select").unwrap().as_array().unwrap();
+        // Star must be removed; individual columns must remain.
+        for item in select.iter() {
+            let type_ = item.get("type").and_then(|t| t.as_str()).unwrap_or("");
+            assert_ne!(type_, "star", "Star must be removed when GROUP BY is present");
+        }
+        assert!(!select.is_empty(), "select must not be empty after star removal");
+    }
+
+    #[test]
+    fn star_not_removed_when_no_group_by() {
+        // Sanity: SELECT * without GROUP BY must be left intact.
+        let mut val = json!({
+            "select": [{"type": "star"}],
+            "from": {"type": "table", "table": "users"}
+        });
+        assert!(!normalize(&mut val));
+        assert_eq!(
+            val.pointer("/select/0/type").and_then(|t| t.as_str()),
+            Some("star")
+        );
+    }
+
+    #[test]
+    fn star_removed_leaves_fallback_column_when_empty() {
+        // When Star is the only projection and GROUP BY is present,
+        // the removed Star must be replaced with a default column_ref.
+        let mut val = json!({
+            "select": [{"type": "star"}],
+            "from": {"type": "table", "table": "users"},
+            "group_by": [{"type": "column_ref", "column": "status"}]
+        });
+        assert!(normalize(&mut val));
+        let select = val.get("select").unwrap().as_array().unwrap();
+        assert_eq!(select.len(), 1);
+        assert_eq!(
+            select[0].get("type").and_then(|t| t.as_str()),
+            Some("column_ref")
+        );
     }
 }

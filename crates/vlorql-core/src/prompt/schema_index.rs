@@ -182,7 +182,7 @@ async fn embed_text(text: &str) -> Result<Vec<f32>, VlorQLError> {
 #[cfg(feature = "vector-search")]
 async fn embed_text_at_url(text: &str, url: &str) -> Result<Vec<f32>, VlorQLError> {
     {
-        let cache = EMBEDDING_CACHE.lock().unwrap();
+        let cache = EMBEDDING_CACHE.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(cached) = cache.get(text) {
             return Ok(cached.clone());
         }
@@ -231,7 +231,7 @@ async fn embed_text_at_url(text: &str, url: &str) -> Result<Vec<f32>, VlorQLErro
     let vector = parse_embedding_response(body)?;
 
     {
-        let mut cache = EMBEDDING_CACHE.lock().unwrap();
+        let mut cache = EMBEDDING_CACHE.lock().unwrap_or_else(|e| e.into_inner());
         cache.insert(text.to_owned(), vector.clone());
     }
 

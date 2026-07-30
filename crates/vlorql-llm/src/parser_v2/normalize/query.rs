@@ -6,7 +6,8 @@
 
 /// Fields that are valid on a QueryPlan (used for stripping and lifting).
 const PLAN_FIELDS: &[&str] = &[
-    "select", "from", "where", "group_by", "having", "order_by", "limit", "offset", "joins", "ctes",
+    "select", "from", "where", "group_by", "having", "order_by", "limit", "offset", "joins",
+    "ctes", "distinct", "distinct_on", "set_operation",
 ];
 
 /// Fields that belong at the QueryPlan top level but the LLM sometimes
@@ -196,7 +197,7 @@ fn sanitize_null_array_entries(val: &mut serde_json::Value) -> bool {
                 arr.retain(|v| {
                     v.as_object()
                         .and_then(|o| o.get("type").and_then(|t| t.as_str()))
-                        .map_or(true, |t| t != "order" && !AGG_NAMES.contains(&t) && !EXPR_TYPES.contains(&t))
+                        .is_none_or(|t| t != "order" && !AGG_NAMES.contains(&t) && !EXPR_TYPES.contains(&t))
                 });
                 if arr.len() != before {
                     changed = true;
@@ -209,7 +210,7 @@ fn sanitize_null_array_entries(val: &mut serde_json::Value) -> bool {
                 arr.retain(|v| {
                     v.as_object()
                         .and_then(|o| o.get("name").and_then(|n| n.as_str()))
-                        .map_or(true, |name| !AGG_NAMES.contains(&name))
+                        .is_none_or(|name| !AGG_NAMES.contains(&name))
                 });
                 if arr.len() != before {
                     changed = true;
@@ -226,15 +227,13 @@ fn sanitize_null_array_entries(val: &mut serde_json::Value) -> bool {
         ];
         if *field == "having" || *field == "where" {
             let field_key = *field;
-            if let Some(val) = obj.get_mut(field_key) {
-                if let Some(o) = val.as_object() {
-                    if let Some(type_str) = o.get("type").and_then(|t| t.as_str()) {
-                        if !VALID_PRED_TYPES.contains(&type_str) {
-                            obj.remove(field_key);
-                            changed = true;
-                        }
-                    }
-                }
+            if let Some(val) = obj.get_mut(field_key)
+                && let Some(o) = val.as_object()
+                && let Some(type_str) = o.get("type").and_then(|t| t.as_str())
+                && !VALID_PRED_TYPES.contains(&type_str)
+            {
+                obj.remove(field_key);
+                changed = true;
             }
         }
     }
@@ -273,11 +272,11 @@ fn sanitize_strings_impl(val: &mut serde_json::Value, changed: &mut bool) {
                     .replace("None", "null")
                     .replace("True", "true")
                     .replace("False", "false");
-                if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&fixed) {
-                    if parsed.is_object() || parsed.is_array() {
-                        *val = parsed;
-                        *changed = true;
-                    }
+                if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&fixed)
+                    && (parsed.is_object() || parsed.is_array())
+                {
+                    *val = parsed;
+                    *changed = true;
                 }
             }
         }

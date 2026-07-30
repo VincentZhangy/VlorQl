@@ -78,6 +78,15 @@ impl DataType {
 /// `Eq` / `Neq` / `Gt` / `Lt` / `Gte` / `Lte` / `Like` / `ILike` are
 /// all valid in a `WHERE` clause; the arithmetic and boolean variants
 /// are mostly used in projections and join predicates.
+///
+/// # Examples
+///
+/// ```
+/// use vlorql_core::schema::BinaryOperator;
+///
+/// let op = BinaryOperator::Add;
+/// assert_ne!(op, BinaryOperator::Sub);
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum BinaryOperator {
@@ -118,6 +127,15 @@ pub enum BinaryOperator {
 /// `In` and `Between` are not rendered by the SQL compiler directly;
 /// they must be used inside the corresponding [`Predicate`](crate::schema::Predicate)
 /// variants (`In`, `Between`) instead.
+///
+/// # Examples
+///
+/// ```
+/// use vlorql_core::schema::ComparisonOperator;
+///
+/// let ops = [ComparisonOperator::Eq, ComparisonOperator::Gt, ComparisonOperator::Lt];
+/// assert!(ops.contains(&ComparisonOperator::Eq));
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ComparisonOperator {

@@ -25,7 +25,7 @@ fn has_aggregate(expr: &Expression) -> bool {
             {
                 return true;
             }
-            for wt in when_thens {
+            for wt in when_thens.iter() {
                 if has_aggregate(&wt.when) || has_aggregate(&wt.then) {
                     return true;
                 }
@@ -132,7 +132,7 @@ pub fn fix_group_by(plan: &mut QueryPlan) -> bool {
     }
 
     {
-        let group_by = plan.group_by.as_mut().unwrap();
+        let group_by = plan.group_by.as_mut().expect("invariant: group_by was just initialized");
         for col in required {
             if !group_by.contains(&col) {
                 group_by.push(col);
@@ -215,10 +215,10 @@ mod tests {
     fn make_sum_total() -> Expression {
         Expression::FunctionCall {
             name: "sum".to_owned(),
-            args: vec![Expression::ColumnRef {
+            args: Box::new(vec![Expression::ColumnRef {
                 table: Some("orders".to_owned()),
                 column: "total".to_owned(),
-            }],
+            }]),
             distinct: false,
         }
     }

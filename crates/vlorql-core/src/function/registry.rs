@@ -18,7 +18,7 @@ fn registry() -> &'static RwLock<HashMap<String, FunctionDef>> {
         // Auto-load built-in functions on first access so callers do
         // not have to call `init_registry` explicitly.
         {
-            let mut guard = rw.write().expect("function registry lock poisoned");
+            let mut guard = rw.write().unwrap_or_else(|e| e.into_inner());
             let builtin = super::builtin::builtin_functions();
             for def in builtin {
                 for name in &def.names {
@@ -35,7 +35,7 @@ fn registry() -> &'static RwLock<HashMap<String, FunctionDef>> {
 /// Should be called once during program startup (e.g. from
 /// `vlorql_core::init_function_registry()`).
 pub fn init_registry(builtin: Vec<FunctionDef>) {
-    let mut guard = registry().write().expect("function registry lock poisoned");
+    let mut guard = registry().write().unwrap_or_else(|e| e.into_inner());
     for def in builtin {
         for name in &def.names {
             guard.insert(name.to_string(), def.clone());
@@ -47,7 +47,7 @@ pub fn init_registry(builtin: Vec<FunctionDef>) {
 ///
 /// Returns an error if any name is already registered.
 pub fn register_function(def: FunctionDef) -> Result<(), String> {
-    let mut guard = registry().write().expect("function registry lock poisoned");
+    let mut guard = registry().write().unwrap_or_else(|e| e.into_inner());
     for name in &def.names {
         if guard.contains_key(name.as_ref()) {
             return Err(format!("Function '{}' is already registered", name));
@@ -63,7 +63,7 @@ pub fn register_function(def: FunctionDef) -> Result<(), String> {
 ///
 /// Returns a cloned `FunctionDef` so the caller does not hold a read lock.
 pub fn lookup_function(name: &str) -> Option<FunctionDef> {
-    let guard = registry().read().expect("function registry lock poisoned");
+    let guard = registry().read().unwrap_or_else(|e| e.into_inner());
     // Exact match first (fast path).
     if let Some(def) = guard.get(name) {
         return Some(def.clone());

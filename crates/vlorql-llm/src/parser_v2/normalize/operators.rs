@@ -38,6 +38,8 @@ const COMPARISON_OPS: &[(&str, &str)] = &[
     ("lte", "lte"),
     ("less_than_or_equal", "lte"),
     ("less_than_or_equals", "lte"),
+    ("$like", "like"),
+    ("$ilike", "ilike"),
 ];
 
 /// Binary operator aliases: non-standard → canonical.

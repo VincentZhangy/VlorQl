@@ -176,14 +176,14 @@ mod tests {
     fn dedup_sum_sum() {
         let mut expr = Expression::FunctionCall {
             name: "sum".to_owned(),
-            args: vec![Expression::FunctionCall {
+            args: Box::new(vec![Expression::FunctionCall {
                 name: "sum".to_owned(),
-                args: vec![Expression::ColumnRef {
+                args: Box::new(vec![Expression::ColumnRef {
                     table: Some("orders".to_owned()),
                     column: "total".to_owned(),
-                }],
+                }]),
                 distinct: false,
-            }],
+            }]),
             distinct: false,
         };
         assert!(dedup_expr(&mut expr));
@@ -204,11 +204,11 @@ mod tests {
     fn dedup_count_count() {
         let mut expr = Expression::FunctionCall {
             name: "count".to_owned(),
-            args: vec![Expression::FunctionCall {
+            args: Box::new(vec![Expression::FunctionCall {
                 name: "count".to_owned(),
-                args: vec![Expression::Star],
+                args: Box::new(vec![Expression::Star]),
                 distinct: false,
-            }],
+            }]),
             distinct: false,
         };
         assert!(dedup_expr(&mut expr));
@@ -219,14 +219,14 @@ mod tests {
     fn no_change_different_functions() {
         let mut expr = Expression::FunctionCall {
             name: "sum".to_owned(),
-            args: vec![Expression::FunctionCall {
+            args: Box::new(vec![Expression::FunctionCall {
                 name: "count".to_owned(),
-                args: vec![Expression::ColumnRef {
+                args: Box::new(vec![Expression::ColumnRef {
                     table: None,
                     column: "id".to_owned(),
-                }],
+                }]),
                 distinct: false,
-            }],
+            }]),
             distinct: false,
         };
         // SUM(COUNT(id)) — different functions, no change.
@@ -237,10 +237,10 @@ mod tests {
     fn no_change_single_aggregate() {
         let mut expr = Expression::FunctionCall {
             name: "sum".to_owned(),
-            args: vec![Expression::ColumnRef {
+            args: Box::new(vec![Expression::ColumnRef {
                 table: Some("orders".to_owned()),
                 column: "total".to_owned(),
-            }],
+            }]),
             distinct: false,
         };
         assert!(!dedup_expr(&mut expr));
@@ -249,27 +249,27 @@ mod tests {
     #[test]
     fn dedup_in_having() {
         let mut having = Predicate::Comparison {
-            left: Expression::FunctionCall {
+            left: Box::new(Expression::FunctionCall {
                 name: "sum".to_owned(),
-                args: vec![Expression::FunctionCall {
+                args: Box::new(vec![Expression::FunctionCall {
                     name: "sum".to_owned(),
-                    args: vec![Expression::ColumnRef {
+                    args: Box::new(vec![Expression::ColumnRef {
                         table: Some("orders".to_owned()),
                         column: "total".to_owned(),
-                    }],
+                    }]),
                     distinct: false,
-                }],
+                }]),
                 distinct: false,
-            },
+            }),
             op: crate::schema::ComparisonOperator::Gt,
-            right: Expression::Literal {
+            right: Box::new(Expression::Literal {
                 value: serde_json::json!(150),
                 data_type: crate::schema::DataType::Float,
-            },
+            }),
         };
         assert!(dedup_pred(&mut having));
         if let Predicate::Comparison { ref left, .. } = having {
-            match left {
+            match left.as_ref() {
                 Expression::ColumnRef {
                     table: Some(t),
                     column: c,

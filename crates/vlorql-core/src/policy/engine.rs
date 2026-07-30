@@ -223,7 +223,7 @@ impl PolicyEngine {
                 self.validate_plan_inner(query, schema, errors, Some(outer_scope));
             }
             Expression::FunctionCall { args, .. } => {
-                for argument in args {
+                for argument in args.iter() {
                     self.validate_subqueries_in_expression(argument, schema, errors, outer_scope);
                 }
             }

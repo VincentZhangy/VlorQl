@@ -1,11 +1,14 @@
-//! QueryPlan builder: canonical JSON → [`QueryPlan`].
+//! QueryPlan builder: canonical JSON → [`QueryPlan`](vlorql_core::schema::QueryPlan).
 //!
 //! Orchestrates all sub-builders to construct a complete `QueryPlan`
 //! from canonical JSON.  This layer does **no** repair — it assumes
 //! the input has already been normalized.
 
 use serde_json::Value;
-use vlorql_core::schema::{CommonTableExpression, OrderByTerm, Predicate, QueryPlan};
+use vlorql_core::schema::{
+    CommonTableExpression, OrderByTerm, Predicate, QueryPlan, SetOperation,
+    SetOperationClause,
+};
 
 use super::expr_builder::{
     BuildError, build_expression, build_predicate, req_arr, req_obj, req_str,
@@ -14,7 +17,7 @@ use super::join_builder::build_join_clause;
 use super::select_builder::build_projections;
 use super::table_builder::build_from_clause;
 
-/// Build a [`QueryPlan`] from a canonical JSON value.
+/// Build a [`QueryPlan`](vlorql_core::schema::QueryPlan) from a canonical JSON value.
 ///
 /// The input must be a JSON object with the standard QueryPlan fields.
 /// All fields must already be in canonical form (normalized by the
@@ -64,7 +67,7 @@ fn build_array_field<T>(
         .transpose()
 }
 
-/// Build a [`QueryPlan`] from a canonical JSON object map.
+/// Build a [`QueryPlan`](vlorql_core::schema::QueryPlan) from a canonical JSON object map.
 pub fn build_plan_from_obj(obj: &serde_json::Map<String, Value>) -> Result<QueryPlan, BuildError> {
     let _path = "";
 
@@ -94,10 +97,34 @@ pub fn build_plan_from_obj(obj: &serde_json::Map<String, Value>) -> Result<Query
     let joins = build_array_field(obj, "joins", build_join_clause)?;
     let ctes = build_array_field(obj, "ctes", build_cte)?;
 
+    // SELECT DISTINCT / DISTINCT ON
+    let distinct = obj
+        .get("distinct")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let distinct_on = match obj.get("distinct_on") {
+        Some(v) if !v.is_null() => {
+            let arr = req_arr(v, "distinct_on")?;
+            let exprs: Result<Vec<_>, _> = arr
+                .iter()
+                .enumerate()
+                .map(|(i, item)| build_expression(item).map_err(|e| e.at(&format!("distinct_on[{i}]"))))
+                .collect();
+            Some(exprs?)
+        }
+        _ => None,
+    };
+
+    // Set operation (UNION / INTERSECT / EXCEPT) combining this query with another.
+    let set_operation = match obj.get("set_operation") {
+        Some(v) if !v.is_null() => Some(build_set_operation(v)?),
+        _ => None,
+    };
+
     Ok(QueryPlan {
         select,
-        distinct: false,
-        distinct_on: None,
+        distinct,
+        distinct_on,
         from,
         r#where,
         group_by,
@@ -107,8 +134,43 @@ pub fn build_plan_from_obj(obj: &serde_json::Map<String, Value>) -> Result<Query
         offset,
         joins,
         ctes,
-        set_operation: None,
+        set_operation,
     })
+}
+
+/// Build a [`SetOperationClause`] from a canonical JSON object.
+///
+/// Expected shape:
+/// ```json
+/// {"operation": "union_all", "right": {...}}
+/// ```
+///
+/// Operation aliases are resolved by [`parse_set_operation`].
+fn build_set_operation(val: &Value) -> Result<SetOperationClause, BuildError> {
+    let obj = req_obj(val, "set_operation")?;
+    let op_str = req_str(obj, "operation", "operation")?;
+    let operation = parse_set_operation(op_str)?;
+    let right_val = obj
+        .get("right")
+        .ok_or_else(|| BuildError::new("right", "missing `right` field on set_operation"))?;
+    let right_obj = req_obj(right_val, "right")?;
+    let right = Box::new(build_plan_from_obj(right_obj)?);
+    Ok(SetOperationClause { operation, right })
+}
+
+/// Parse a set operation string, accepting common LLM spellings.
+fn parse_set_operation(s: &str) -> Result<SetOperation, BuildError> {
+    use SetOperation::*;
+    match s {
+        "union_all" | "union all" | "unionall" => Ok(UnionAll),
+        "union" => Ok(Union),
+        "intersect" => Ok(Intersect),
+        "except" => Ok(Except),
+        _ => Err(BuildError::new(
+            "operation",
+            format!("unknown set operation `{s}`"),
+        )),
+    }
 }
 
 /// Build an [`OrderByTerm`] from a canonical JSON object.
@@ -130,6 +192,10 @@ fn build_order_by_term(val: &Value) -> Result<OrderByTerm, BuildError> {
 fn build_cte(val: &Value) -> Result<CommonTableExpression, BuildError> {
     let obj = req_obj(val, "cte")?;
     let name = req_str(obj, "name", "name")?.to_owned();
+    let recursive = obj
+        .get("recursive")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
     let query_obj = req_obj(
         obj.get("query")
             .ok_or_else(|| BuildError::new("query", "missing `query` field on CTE"))?,
@@ -139,17 +205,17 @@ fn build_cte(val: &Value) -> Result<CommonTableExpression, BuildError> {
     Ok(CommonTableExpression {
         name,
         query,
-        recursive: false,
+        recursive,
     })
 }
 
-/// Build a [`QueryPlan`] from a canonical JSON string.
+/// Build a [`QueryPlan`](vlorql_core::schema::QueryPlan) from a canonical JSON string.
 pub fn from_canonical_str(canonical: &str) -> Result<QueryPlan, serde_json::Error> {
     let value: Value = serde_json::from_str(canonical)?;
     build_plan(&value).map_err(Into::into)
 }
 
-/// Build a [`QueryPlan`] from a canonical [`Value`].
+/// Build a [`QueryPlan`](vlorql_core::schema::QueryPlan) from a canonical [`Value`].
 pub fn from_canonical_value(canonical: &Value) -> Result<QueryPlan, serde_json::Error> {
     build_plan(canonical).map_err(Into::into)
 }
@@ -158,6 +224,7 @@ pub fn from_canonical_value(canonical: &Value) -> Result<QueryPlan, serde_json::
 mod tests {
     use super::*;
     use serde_json::json;
+    use vlorql_core::schema::FromClause;
 
     #[test]
     fn build_plan_minimal() {
@@ -281,5 +348,104 @@ mod tests {
         });
         let plan = build_plan(&val).unwrap();
         assert_eq!(plan.ctes.unwrap().len(), 1);
+    }
+
+    #[test]
+    fn build_plan_distinct_true() {
+        let val = json!({"select": [{"type": "column_ref", "column": "status"}], "from": {"table": "users"}, "distinct": true});
+        let plan = build_plan(&val).unwrap();
+        assert!(plan.distinct, "distinct=true must propagate to QueryPlan");
+    }
+
+    #[test]
+    fn build_plan_distinct_defaults_false() {
+        let val = json!({"select": [{"type": "star"}], "from": {"table": "users"}});
+        let plan = build_plan(&val).unwrap();
+        assert!(!plan.distinct, "missing distinct must default to false");
+    }
+
+    #[test]
+    fn build_plan_distinct_on_pg() {
+        let val = json!({
+            "select": [{"type": "column_ref", "column": "id"}],
+            "from": {"table": "users"},
+            "distinct": true,
+            "distinct_on": [{"type": "column_ref", "column": "name"}]
+        });
+        let plan = build_plan(&val).unwrap();
+        assert!(plan.distinct);
+        let on = plan.distinct_on.expect("distinct_on must be read");
+        assert_eq!(on.len(), 1);
+    }
+
+    #[test]
+    fn build_plan_union_all() {
+        let val = json!({
+            "select": [{"type": "column_ref", "column": "id"}],
+            "from": {"table": "users"},
+            "set_operation": {
+                "operation": "union_all",
+                "right": {"select": [{"type": "column_ref", "column": "id"}], "from": {"table": "archived_users"}}
+            }
+        });
+        let plan = build_plan(&val).unwrap();
+        let set_op = plan.set_operation.expect("set_operation must be read");
+        assert!(matches!(set_op.operation, SetOperation::UnionAll));
+        assert_eq!(set_op.right.from.table_name().unwrap(), "archived_users");
+    }
+
+    #[test]
+    fn build_plan_union_alias() {
+        // "union" (without _all) → SetOperation::Union
+        let val = json!({
+            "select": [{"type": "star"}],
+            "from": {"table": "a"},
+            "set_operation": {"operation": "union", "right": {"select": [{"type": "star"}], "from": {"table": "b"}}}
+        });
+        let plan = build_plan(&val).unwrap();
+        let set_op = plan.set_operation.unwrap();
+        assert!(matches!(set_op.operation, SetOperation::Union));
+    }
+
+    #[test]
+    fn build_plan_unknown_set_operation_fails() {
+        let val = json!({
+            "select": [{"type": "star"}],
+            "from": {"table": "a"},
+            "set_operation": {"operation": "merge", "right": {"select": [{"type": "star"}], "from": {"table": "b"}}}
+        });
+        let result = build_plan(&val);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("set operation"));
+    }
+
+    #[test]
+    fn build_plan_recursive_cte() {
+        let val = json!({
+            "select": [{"type": "star"}],
+            "from": {"table": "ancestors"},
+            "ctes": [{
+                "name": "ancestors",
+                "recursive": true,
+                "query": {"select": [{"type": "star"}], "from": {"table": "tree"}}
+            }]
+        });
+        let plan = build_plan(&val).unwrap();
+        let ctes = plan.ctes.expect("ctes must be read");
+        assert_eq!(ctes.len(), 1);
+        assert!(ctes[0].recursive, "recursive=true must propagate to CTE");
+    }
+
+    #[test]
+    fn build_plan_from_subquery() {
+        let val = json!({
+            "select": [{"type": "star"}],
+            "from": {"type": "subquery", "query": {"select": [{"type": "column_ref", "column": "id"}], "from": {"table": "users"}}, "alias": "u"}
+        });
+        let plan = build_plan(&val).unwrap();
+        match plan.from {
+            FromClause::Subquery { alias, .. } => assert_eq!(alias.as_deref(), Some("u")),
+            other => panic!("expected Subquery, got {other:?}"),
+        }
     }
 }

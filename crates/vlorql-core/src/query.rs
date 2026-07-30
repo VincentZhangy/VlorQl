@@ -145,7 +145,7 @@ pub(crate) fn collect_expression_references(
             column: column.clone(),
         }),
         Expression::FunctionCall { args, .. } => {
-            for argument in args {
+            for argument in args.iter() {
                 collect_expression_references(argument, references);
             }
         }
@@ -163,7 +163,7 @@ pub(crate) fn collect_expression_references(
             if let Some(op) = operand {
                 collect_expression_references(op, references);
             }
-            for wt in when_thens {
+            for wt in when_thens.iter() {
                 collect_expression_references(&wt.when, references);
                 collect_expression_references(&wt.then, references);
             }
@@ -172,7 +172,7 @@ pub(crate) fn collect_expression_references(
             }
         }
         Expression::WindowFunction { args, over, .. } => {
-            for argument in args {
+            for argument in args.iter() {
                 collect_expression_references(argument, references);
             }
             if let Some(partition_by) = &over.partition_by {

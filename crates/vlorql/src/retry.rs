@@ -78,15 +78,15 @@ fn build_hint(error: &VlorQLError) -> String {
             if let Some(errors) = error.details().get("errors").and_then(|v| v.as_array()) {
                 for e in errors {
                     // ColumnNotFound inside MultipleErrors
-                    if let Some(col) = e.get("column").and_then(|v| v.as_str()) {
-                        if let Some(table) = e.get("table").and_then(|v| v.as_str()) {
-                            let available = e.get("available_columns")
-                                .and_then(|v| v.as_array())
-                                .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>().join("`, `"))
-                                .unwrap_or_default();
-                            if !available.is_empty() {
-                                hints.push(format!("Column `{table}.{col}` does NOT exist. Available: `{available}`"));
-                            }
+                    if let Some(col) = e.get("column").and_then(|v| v.as_str())
+                        && let Some(table) = e.get("table").and_then(|v| v.as_str())
+                    {
+                        let available = e.get("available_columns")
+                            .and_then(|v| v.as_array())
+                            .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>().join("`, `"))
+                            .unwrap_or_default();
+                        if !available.is_empty() {
+                            hints.push(format!("Column `{table}.{col}` does NOT exist. Available: `{available}`"));
                         }
                     }
                     // SELECT * with GROUP BY

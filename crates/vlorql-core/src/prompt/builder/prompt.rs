@@ -1,142 +1,20 @@
-//! Compact system prompt construction with DDL schema and minimal dialect constraints.
-
-use crate::cache::{PromptCache, PromptCacheKey, hash_policy};
-use crate::policy::{PolicyConfig, TablePolicy};
-use crate::prompt::PromptSkill;
-use crate::schema::{
-    ColumnSchema, DialectProfile, JoinType, SchemaSnapshot, SqlDialect, TableSchema,
-};
-use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
-use std::hash::{Hash, Hasher};
-use std::sync::Arc;
+use std::hash::Hasher;
+
+use crate::cache::{PromptCache, PromptCacheKey};
+use crate::prompt::PromptSkill;
+use crate::schema::{JoinType, SqlDialect};
 use xxhash_rust::xxh3::Xxh3;
 
-/// Builds strict LLM instructions from a shared schema, dialect, and policy.
-///
-/// # Examples
-///
-/// ```
-/// use vlorql_core::prompt::PromptBuilder;
-/// use vlorql_core::schema::{SchemaSnapshot, DialectProfile, SqlDialect, TableSchema, ColumnSchema, DataType, SchemaMetadata};
-/// use vlorql_core::policy::PolicyConfig;
-/// use std::sync::Arc;
-///
-/// let schema = Arc::new(SchemaSnapshot::new(
-///     vec![TableSchema {
-///         name: "users".to_owned(),
-///         columns: vec![ColumnSchema {
-///             name: "id".to_owned(), data_type: DataType::Int,
-///             nullable: false, description: None,
-///             is_primary_key: true, foreign_key: None,
-///         }],
-///         description: None, primary_key: Some(vec!["id".to_owned()]),
-///     }],
-///     SchemaMetadata::default(),
-/// ));
-/// let builder = PromptBuilder::new(
-///     schema,
-///     DialectProfile::default(),
-///     PolicyConfig::default(),
-/// );
-/// let prompt = tokio::runtime::Runtime::new()
-///     .expect("create runtime")
-///     .block_on(builder.build_system_prompt("Show me users"));
-/// assert!(prompt.contains("users"));
-/// assert!(prompt.contains("query plan"));
-/// ```
-#[derive(Debug, Clone)]
-pub struct PromptBuilder {
-    schema: Arc<SchemaSnapshot>,
-    dialect: DialectProfile,
-    policy: PolicyConfig,
-    /// Pre-computed hash of the policy configuration, used in cache keys.
-    policy_hash: u64,
-    include_examples: bool,
-    /// Optional prompt skill that injects custom instructions, schema
-    /// simplification, and few-shot examples.
-    skill: Option<PromptSkill>,
-    /// Reverse foreign-key index: maps foreign_table → list of local tables
-    /// that reference it. Built once in [`Self::new`] to avoid O(n²) traversal
-    /// in [`Self::expand_foreign_key_neighbors`].
-    reverse_fk_index: HashMap<String, Vec<String>>,
-    /// Enables vector-based schema retrieval via Qdrant (default: false).
-    vector_search: bool,
-    /// Optional schema indexer for semantic table/column search.
-    #[cfg(feature = "vector-search")]
-    schema_indexer: Option<Arc<crate::prompt::schema_index::SchemaIndexer>>,
-}
+use super::PromptBuilder;
 
 impl PromptBuilder {
-    /// Creates a prompt builder that includes one compact example by default.
-    pub fn new(schema: Arc<SchemaSnapshot>, dialect: DialectProfile, policy: PolicyConfig) -> Self {
-        let reverse_fk_index = build_reverse_fk_index(&schema);
-        Self {
-            schema,
-            dialect,
-            policy_hash: hash_policy(&policy),
-            policy,
-            include_examples: true,
-            skill: None,
-            reverse_fk_index,
-            vector_search: false,
-            #[cfg(feature = "vector-search")]
-            schema_indexer: None,
-        }
-    }
-
-    /// Attach a prompt skill to inject custom instructions and examples.
-    #[must_use]
-    pub fn with_skill(mut self, skill: PromptSkill) -> Self {
-        self.skill = Some(skill);
-        self
-    }
-
-    /// Enables or disables the optional example section.
-    #[must_use]
-    pub fn with_examples(mut self, include_examples: bool) -> Self {
-        self.include_examples = include_examples;
-        self
-    }
-
-    /// Enables or disables vector-based schema retrieval via Qdrant.
-    #[must_use]
-    pub fn with_vector_search(mut self, enabled: bool) -> Self {
-        self.vector_search = enabled;
-        self
-    }
-
-    /// Attaches a pre-built [`SchemaIndexer`] for semantic table/column search.
-    ///
-    /// Only available when the `vector-search` cargo feature is enabled.
-    #[must_use]
-    #[cfg(feature = "vector-search")]
-    pub fn with_schema_indexer(
-        mut self,
-        indexer: Arc<crate::prompt::schema_index::SchemaIndexer>,
-    ) -> Self {
-        self.schema_indexer = Some(indexer);
-        self
-    }
-
     /// Builds the complete system prompt for one user question.
-    ///
-    /// The question is used only for schema retrieval and is deliberately not copied
-    /// into the system prompt, preventing user text from becoming system instructions.
-    ///
-    /// This method is async because schema retrieval may issue vector-search
-    /// queries against Qdrant when the `vector-search` feature is enabled.
     pub async fn build_system_prompt(&self, user_question: &str) -> String {
         let relevant_tables = self.filter_relevant_tables(user_question).await;
         self.build_system_prompt_for_tables(&relevant_tables)
     }
 
-    /// Builds the system prompt using an explicitly provided table list.
-    ///
-    /// This is the inner implementation shared by [`Self::build_system_prompt`]
-    /// and [`Self::build_system_prompt_with_cache`] so that the table set
-    /// can be computed once and reused for both cache-key generation and
-    /// prompt construction.
     fn build_system_prompt_for_tables(&self, relevant_tables: &[String]) -> String {
         let mut prompt = String::new();
 
@@ -154,7 +32,6 @@ impl PromptBuilder {
         self.push_output_schema(&mut prompt);
         self.push_type_guidance(&mut prompt);
         if self.include_examples {
-            // Use skill examples if available, fall back to built-in.
             if let Some(ref skill) = self.skill {
                 if !skill.examples.is_empty() {
                     self.push_skill_examples(&mut prompt, skill);
@@ -170,12 +47,6 @@ impl PromptBuilder {
     }
 
     /// Builds the system prompt with cache support.
-    ///
-    /// When a cache is provided and the key is present, the cached prompt
-    /// is returned without re-building.  On a cache miss the prompt is
-    /// generated and inserted into the cache before returning.
-    ///
-    /// This method is async because the cache uses an async backing store.
     pub async fn build_system_prompt_with_cache(
         &self,
         user_question: &str,
@@ -183,175 +54,25 @@ impl PromptBuilder {
     ) -> String {
         let schema_version = self.schema.metadata.version.as_deref().unwrap_or("unknown");
 
-        // Compute the relevant table set first so it can be included
-        // in the cache key — different questions that match different
-        // tables must produce different cache entries.
         let relevant_tables = self.filter_relevant_tables(user_question).await;
 
-        // Hash the relevant table names for the cache key.
         let mut hasher = Xxh3::new();
         for table in &relevant_tables {
-            table.hash(&mut hasher);
+            ::std::hash::Hash::hash(table, &mut hasher);
         }
         let table_hash = hasher.finish();
 
         let key = PromptCacheKey::new(schema_version, &self.dialect, self.policy_hash, table_hash);
 
-        // Try cache hit.
         if let Some(cached) = cache.get(&key).await {
             return cached;
         }
 
-        // Cache miss — generate the prompt (reuse the already-computed table set).
         let prompt = self.build_system_prompt_for_tables(&relevant_tables);
 
-        // Insert into cache.
         cache.insert(key, prompt.clone()).await;
 
         prompt
-    }
-
-    /// Selects relevant tables for a user question.
-    ///
-    /// When the `vector-search` feature is enabled and [`with_vector_search`] has
-    /// been turned on, the builder first queries the [`SchemaIndexer`] for a
-    /// semantic top-k of tables. If that returns a non-empty set the foreign-key
-    /// neighbours are expanded and the result is returned. On any failure —
-    /// feature disabled, vector search off, indexer unavailable, or an empty
-    /// result — the method falls back to the lightweight TF-IDF scorer in
-    /// [`filter_relevant_tables_tfidf`].
-    ///
-    /// A direct match also includes one-hop foreign-key neighbors. If no table
-    /// scores, all tables are returned so that retrieval cannot accidentally
-    /// hide the answer.
-    ///
-    /// [`with_vector_search`]: Self::with_vector_search
-    pub async fn filter_relevant_tables(&self, user_question: &str) -> Vec<String> {
-        if self.schema.tables.is_empty() {
-            return Vec::new();
-        }
-
-        #[cfg(feature = "vector-search")]
-        if self.vector_search {
-            let indexer = self.ensure_indexer();
-            if let Some(ref indexer) = indexer {
-                match indexer.search(user_question, 5).await {
-                    Ok(tables) if !tables.is_empty() => {
-                        let set: HashSet<String> = tables.into_iter().collect();
-                        let expanded = self.expand_foreign_key_neighbors(&set);
-                        let result: Vec<String> = self
-                            .schema
-                            .tables
-                            .iter()
-                            .filter(|t| expanded.contains(&t.name))
-                            .map(|t| t.name.clone())
-                            .collect();
-                        if !result.is_empty() {
-                            return result;
-                        }
-                    }
-                    _ => { /* fall through to TF-IDF */ }
-                }
-            }
-        }
-
-        self.filter_relevant_tables_tfidf(user_question)
-    }
-
-    /// Lightweight TF-IDF fallback for [`filter_relevant_tables`].
-    ///
-    /// Scores every table against the user question using token overlap and
-    /// phrase matching, then expands the matched set by one hop of foreign-key
-    /// neighbours. Returns all tables when nothing scores.
-    fn filter_relevant_tables_tfidf(&self, user_question: &str) -> Vec<String> {
-        if self.schema.tables.is_empty() {
-            return Vec::new();
-        }
-
-        let question_lower = user_question.to_lowercase();
-        let question_tokens: HashSet<String> =
-            meaningful_tokens(user_question).into_iter().collect();
-        if question_tokens.is_empty() {
-            return self.all_table_names();
-        }
-
-        let documents = self
-            .schema
-            .tables
-            .iter()
-            .map(table_document_tokens)
-            .collect::<Vec<_>>();
-        let document_frequency = document_frequency(&documents);
-        let document_count = documents.len() as f64;
-        let mut scores = HashMap::new();
-
-        for (table, document) in self.schema.tables.iter().zip(&documents) {
-            let mut score = tf_idf_overlap(
-                &question_tokens,
-                document,
-                &document_frequency,
-                document_count,
-            );
-
-            if phrase_matches(&question_lower, &question_tokens, &table.name) {
-                score += 100.0;
-            }
-            for column in &table.columns {
-                if phrase_matches(&question_lower, &question_tokens, &column.name) {
-                    score += if is_generic_column_name(&column.name) {
-                        2.0
-                    } else {
-                        20.0
-                    };
-                }
-            }
-
-            if score > 0.0 {
-                scores.insert(table.name.clone(), score);
-            }
-        }
-
-        if scores.is_empty() {
-            return self.all_table_names();
-        }
-
-        let matched = scores.keys().cloned().collect::<HashSet<_>>();
-        let expanded = self.expand_foreign_key_neighbors(&matched);
-        self.schema
-            .tables
-            .iter()
-            .filter(|table| expanded.contains(&table.name))
-            .map(|table| table.name.clone())
-            .collect()
-    }
-
-    /// Returns the configured [`SchemaIndexer`], if any.
-    ///
-    /// Returns `None` when vector search is disabled or no indexer has been
-    /// supplied via [`with_schema_indexer`], signalling the caller to fall
-    /// back to TF-IDF.
-    #[cfg(feature = "vector-search")]
-    fn ensure_indexer(&self) -> Option<Arc<crate::prompt::schema_index::SchemaIndexer>> {
-        if self.vector_search {
-            self.schema_indexer.clone()
-        } else {
-            None
-        }
-    }
-
-    /// Returns the shared schema snapshot used by the builder.
-    pub fn schema(&self) -> &Arc<SchemaSnapshot> {
-        &self.schema
-    }
-
-    /// Returns the dialect constraints used by the builder.
-    pub fn dialect(&self) -> &DialectProfile {
-        &self.dialect
-    }
-
-    /// Returns the policy constraints used by the builder.
-    pub fn policy(&self) -> &PolicyConfig {
-        &self.policy
     }
 
     fn push_schema_description(&self, prompt: &mut String, relevant_tables: &[String]) {
@@ -394,8 +115,6 @@ impl PromptBuilder {
         prompt.push('\n');
 
         // ── Relationships section ────────────────────────────────
-        // List foreign-key relationships explicitly so the LLM knows
-        // which tables can be joined and on which columns.
         let mut rels: Vec<String> = Vec::new();
         for table_name in relevant_tables {
             let Some(table) = self.schema.get_table(table_name) else {
@@ -424,13 +143,6 @@ impl PromptBuilder {
             prompt.push('\n');
         }
         prompt.push_str("Remember: referencing `table.column` in SELECT without joining `table` first is invalid.\n\n");
-    }
-
-    /// Returns true if a feature should be forbidden by the active skill.
-    fn is_forbidden_by_skill(&self, feature: &str) -> bool {
-        self.skill
-            .as_ref()
-            .is_some_and(|s| s.forbid_features.iter().any(|f| f == feature))
     }
 
     fn push_dialect_constraints(&self, prompt: &mut String) {
@@ -494,8 +206,6 @@ impl PromptBuilder {
         );
     }
 
-    /// Planning heuristics that keep plans simple and JSON-safe for small models.
-    /// Injects skill-level instructions as a block of additional guidance.
     fn push_skill_instructions(&self, prompt: &mut String, skill: &PromptSkill) {
         if skill.instructions.is_empty() {
             return;
@@ -507,7 +217,6 @@ impl PromptBuilder {
         prompt.push('\n');
     }
 
-    /// Pushes skill-provided examples (question + plan pairs).
     fn push_skill_examples(&self, prompt: &mut String, skill: &PromptSkill) {
         prompt.push_str("## Examples\n");
         for example in &skill.examples {
@@ -552,13 +261,13 @@ impl PromptBuilder {
              Structure:\n\
              - select: [Projection] (type: column_ref → {table?, column, alias?} | expr → {expression, alias?} | star → {table?})\n\
              - from: {table, alias?}\n\
-             - where: optional Predicate — type and|or: {left: Predicate, right: Predicate}; comparison: {left: Expression, op, right: Expression}; not: {child: Predicate}; between: {expr, low, high: Expression}; is_null: {expr: Expression}; exists: {query: QueryPlan}\n\
+             - where: optional Predicate\n\
              - joins: optional [{join_type, right_table: FromClause, on: Predicate}]\n\
              - group_by: optional [Expression] | having: optional Predicate\n\
              - order_by: optional [{expr: Expression, descending: bool}]\n\
              - limit, offset: optional integer | ctes: optional [{name, query: QueryPlan}]\n\
              \n\
-             CRITICAL: `where`, `left`, `right`, `child` must each be a SINGLE Predicate object (NOT an array). `left` and `right` inside `and`/`or` are single {{...}} objects, never arrays.\n\
+             CRITICAL: `where`, `left`, `right`, `child` must each be a SINGLE Predicate object (NOT an array).\n\
              CRITICAL: `order_by`, `limit`, `offset` go at the top level of the response, never inside `where`.\n\
              CRITICAL: Emit parseable JSON only — never escape object keys, never wrap the whole plan in a string, never invent trailing `}`.\n\
              Use the tagged type variants. Return a data instance — not a schema definition.\n\
@@ -612,8 +321,6 @@ impl PromptBuilder {
             "Q: Orders with total > 150, sorted by total desc\n\
               A: {{\"select\":[{{\"type\":\"column_ref\",\"table\":\"orders\",\"column\":\"id\",\"alias\":null}},{{\"type\":\"column_ref\",\"table\":\"orders\",\"column\":\"total\",\"alias\":null}}],\"from\":{{\"table\":\"orders\",\"alias\":null}},\"where\":{{\"type\":\"comparison\",\"left\":{{\"type\":\"column_ref\",\"column\":\"total\",\"table\":\"orders\"}},\"op\":\"gt\",\"right\":{{\"type\":\"literal\",\"value\":150,\"data_type\":\"float\"}}}},\"order_by\":[{{\"expr\":{{\"type\":\"column_ref\",\"column\":\"total\",\"table\":\"orders\"}},\"descending\":true}}],\"limit\":10}}\n"
         );
-        // Add a JOIN example if there are at least 2 relevant tables
-        // with a foreign-key relationship.
         let has_join_example = relevant_tables.len() >= 2
             && relevant_tables.iter().any(|t1| {
                 self.schema.get_table(t1).is_some_and(|table| {
@@ -630,19 +337,16 @@ impl PromptBuilder {
                 "Q: List users with their order totals\n\
                   A: {{\"select\":[{{\"type\":\"column_ref\",\"table\":\"users\",\"column\":\"name\",\"alias\":null}},{{\"type\":\"column_ref\",\"table\":\"orders\",\"column\":\"total\",\"alias\":null}}],\"from\":{{\"table\":\"users\",\"alias\":null}},\"joins\":[{{\"join_type\":\"inner\",\"right_table\":{{\"table\":\"orders\",\"alias\":null}},\"on\":{{\"type\":\"comparison\",\"left\":{{\"type\":\"column_ref\",\"column\":\"id\",\"table\":\"users\"}},\"op\":\"eq\",\"right\":{{\"type\":\"column_ref\",\"column\":\"user_id\",\"table\":\"orders\"}}}}}}],\"limit\":10}}\n"
             );
-            // Anti-join: preferred pattern for "never / without" questions.
             let _ = writeln!(
                 prompt,
                 "Q: Users who never placed an order\n\
                   A: {{\"select\":[{{\"type\":\"column_ref\",\"table\":\"users\",\"column\":\"id\",\"alias\":null}},{{\"type\":\"column_ref\",\"table\":\"users\",\"column\":\"name\",\"alias\":null}}],\"from\":{{\"table\":\"users\",\"alias\":null}},\"joins\":[{{\"join_type\":\"left\",\"right_table\":{{\"table\":\"orders\",\"alias\":null}},\"on\":{{\"type\":\"comparison\",\"left\":{{\"type\":\"column_ref\",\"column\":\"id\",\"table\":\"users\"}},\"op\":\"eq\",\"right\":{{\"type\":\"column_ref\",\"column\":\"user_id\",\"table\":\"orders\"}}}}}}],\"where\":{{\"type\":\"is_null\",\"expr\":{{\"type\":\"column_ref\",\"column\":\"id\",\"table\":\"orders\"}}}},\"limit\":10}}\n"
             );
-            // Minimal NOT EXISTS form (only if LEFT JOIN is unavailable).
             let _ = writeln!(
                 prompt,
                 "Q: Users with no orders (NOT EXISTS form)\n\
                   A: {{\"select\":[{{\"type\":\"column_ref\",\"table\":\"users\",\"column\":\"id\",\"alias\":null}}],\"from\":{{\"table\":\"users\",\"alias\":null}},\"where\":{{\"type\":\"not\",\"child\":{{\"type\":\"exists\",\"query\":{{\"select\":[{{\"type\":\"star\"}}],\"from\":{{\"table\":\"orders\",\"alias\":null}},\"where\":{{\"type\":\"comparison\",\"left\":{{\"type\":\"column_ref\",\"column\":\"user_id\",\"table\":\"orders\"}},\"op\":\"eq\",\"right\":{{\"type\":\"column_ref\",\"column\":\"id\",\"table\":\"users\"}}}}}}}}}},\"limit\":10}}\n"
             );
-            // GROUP BY + aggregate: "each / every / per" questions.
             let _ = writeln!(
                 prompt,
                 "Q: How many items were sold per product?\n\
@@ -656,11 +360,6 @@ impl PromptBuilder {
         );
     }
 
-    /// Pushes a compact reminder about the `type` tag field.
-    ///
-    /// The JSON Schema above already defines every allowed `type` value, so
-    /// this section only adds a reminder and a short example to help models
-    /// that do not strictly enforce the schema (e.g. local Ollama models).
     fn push_type_guidance(&self, prompt: &mut String) {
         prompt.push_str(
             "## JSON Field Reference\n\
@@ -706,7 +405,7 @@ impl PromptBuilder {
              1. NEVER put aggregate names as predicate `\"type\"` — `{\"type\":\"count\",...}` is WRONG, use `{\"type\":\"function_call\",\"name\":\"count\",...}`.\n\
              2. NEVER embed SQL in column names — `{\"column\":\"EXTRACT(MONTH FROM created_at)\"}` is WRONG.\n\
              3. NEVER invent column names — use the EXACT names from the Schema section.\n\
-             4. NEVER use single quotes (`'`) — only double quotes (`\"\") are valid JSON.\n\
+             4. NEVER use single quotes (`'`) — only double quotes (`\"`) are valid JSON.\n\
              5. NEVER output markdown fences, trailing backticks, or raw SQL.\n\
              6. NEVER nest aggregates: `SUM(SUM(x))` → write `SUM(x)` once.\n\
              7. NEVER put `data_type` on anything other than a `literal` object.\n\
@@ -714,189 +413,6 @@ impl PromptBuilder {
              \n",
         );
     }
-
-    fn column_visible(
-        &self,
-        table: &TableSchema,
-        column: &ColumnSchema,
-        policy: Option<&TablePolicy>,
-    ) -> bool {
-        if self.policy.global_denied_columns.iter().any(|denied| {
-            denied == &column.name || denied == &format!("{}.{}", table.name, column.name)
-        }) {
-            return false;
-        }
-        let Some(policy) = policy else {
-            return true;
-        };
-        if !policy.allowed || policy.denied_columns.contains(&column.name) {
-            return false;
-        }
-        match &policy.allowed_columns {
-            Some(allowed) => allowed.contains(&column.name),
-            None => true,
-        }
-    }
-
-    fn expand_foreign_key_neighbors(&self, matched: &HashSet<String>) -> HashSet<String> {
-        let mut expanded = matched.clone();
-        for table_name in matched {
-            // Forward: add FK targets of matched tables.
-            if let Some(table) = self.schema.get_table(table_name) {
-                for column in &table.columns {
-                    if let Some(fk) = &column.foreign_key
-                        && self.schema.get_table(&fk.foreign_table).is_some()
-                    {
-                        expanded.insert(fk.foreign_table.clone());
-                    }
-                }
-            }
-            // Reverse: add tables whose FK points to this matched table.
-            if let Some(referencing_tables) = self.reverse_fk_index.get(table_name) {
-                for ref_table in referencing_tables {
-                    if self.schema.get_table(ref_table).is_some() {
-                        expanded.insert(ref_table.clone());
-                    }
-                }
-            }
-        }
-        expanded
-    }
-
-    fn all_table_names(&self) -> Vec<String> {
-        self.schema
-            .tables
-            .iter()
-            .map(|table| table.name.clone())
-            .collect()
-    }
-}
-
-fn table_document_tokens(table: &TableSchema) -> HashMap<String, usize> {
-    let mut freq: HashMap<String, usize> = HashMap::new();
-    for token in meaningful_tokens(&table.name) {
-        *freq.entry(token).or_insert(0) += 1;
-    }
-    if let Some(description) = &table.description {
-        for token in meaningful_tokens(description) {
-            *freq.entry(token).or_insert(0) += 1;
-        }
-    }
-    for column in &table.columns {
-        for token in meaningful_tokens(&column.name) {
-            *freq.entry(token).or_insert(0) += 1;
-        }
-        if let Some(description) = &column.description {
-            for token in meaningful_tokens(description) {
-                *freq.entry(token).or_insert(0) += 1;
-            }
-        }
-    }
-    freq
-}
-
-fn document_frequency(documents: &[HashMap<String, usize>]) -> HashMap<String, usize> {
-    let mut frequency = HashMap::new();
-    for document in documents {
-        for token in document.keys() {
-            *frequency.entry(token.clone()).or_insert(0) += 1;
-        }
-    }
-    frequency
-}
-
-fn tf_idf_overlap(
-    question_tokens: &HashSet<String>,
-    document: &HashMap<String, usize>,
-    document_frequency: &HashMap<String, usize>,
-    document_count: f64,
-) -> f64 {
-    question_tokens
-        .iter()
-        .filter_map(|token| {
-            let tf = document.get(token).copied()?;
-            let df = document_frequency.get(token).copied().unwrap_or(0) as f64;
-            let idf = ((document_count + 1.0) / (df + 1.0)).ln() + 1.0;
-            Some(tf as f64 * idf)
-        })
-        .sum()
-}
-
-fn meaningful_tokens(text: &str) -> Vec<String> {
-    tokenize(text)
-        .into_iter()
-        .filter(|token| !is_stop_word(token))
-        .collect()
-}
-
-fn tokenize(text: &str) -> Vec<String> {
-    let mut tokens = Vec::new();
-    let mut token = String::new();
-    for character in text.chars().flat_map(char::to_lowercase) {
-        if character.is_alphanumeric() {
-            token.push(character);
-        } else if !token.is_empty() {
-            tokens.push(std::mem::take(&mut token));
-        }
-    }
-    if !token.is_empty() {
-        tokens.push(token);
-    }
-    tokens
-}
-
-fn phrase_matches(
-    question_lower: &str,
-    question_tokens: &HashSet<String>,
-    candidate: &str,
-) -> bool {
-    let candidate_lower = candidate.to_lowercase();
-    if candidate_lower.len() > 2 && question_lower.contains(&candidate_lower) {
-        return true;
-    }
-    let candidate_tokens = meaningful_tokens(candidate);
-    !candidate_tokens.is_empty()
-        && candidate_tokens
-            .iter()
-            .all(|token| question_tokens.contains(token))
-}
-
-fn is_stop_word(token: &str) -> bool {
-    matches!(
-        token,
-        "a" | "an"
-            | "and"
-            | "all"
-            | "by"
-            | "for"
-            | "from"
-            | "get"
-            | "give"
-            | "how"
-            | "in"
-            | "list"
-            | "many"
-            | "of"
-            | "on"
-            | "please"
-            | "show"
-            | "the"
-            | "to"
-            | "what"
-            | "which"
-            | "with"
-    )
-}
-
-fn is_generic_column_name(name: &str) -> bool {
-    matches!(
-        name.to_ascii_lowercase().as_str(),
-        "id" | "name" | "created_at" | "updated_at"
-    )
-}
-
-fn optional_limit(limit: Option<usize>) -> String {
-    limit.map_or_else(|| "no explicit limit".to_owned(), |limit| limit.to_string())
 }
 
 fn sql_dialect_name(dialect: SqlDialect) -> &'static str {
@@ -915,6 +431,10 @@ fn join_type_name(join_type: &JoinType) -> &'static str {
         JoinType::Full => "full",
         JoinType::Cross => "cross",
     }
+}
+
+fn optional_limit(limit: Option<usize>) -> String {
+    limit.map_or_else(|| "no explicit limit".to_owned(), |limit| limit.to_string())
 }
 
 fn compact_output_schema() -> &'static str {
@@ -999,23 +519,4 @@ fn compact_output_schema() -> &'static str {
         }))
         .expect("compact output schema must serialize to JSON")
     })
-}
-
-/// Builds a reverse foreign-key index: maps each `foreign_table` → list of
-/// local tables whose columns have a foreign key pointing to it.
-/// This is used by [`PromptBuilder::expand_foreign_key_neighbors`] to avoid
-/// O(n²) traversal on every query.
-fn build_reverse_fk_index(schema: &SchemaSnapshot) -> HashMap<String, Vec<String>> {
-    let mut index: HashMap<String, Vec<String>> = HashMap::new();
-    for table in &schema.tables {
-        for column in &table.columns {
-            if let Some(fk) = &column.foreign_key {
-                index
-                    .entry(fk.foreign_table.clone())
-                    .or_default()
-                    .push(table.name.clone());
-            }
-        }
-    }
-    index
 }

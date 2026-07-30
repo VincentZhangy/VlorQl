@@ -35,7 +35,8 @@ const DATA_TYPE_ALIASES: &[(&str, &str)] = &[
     ("datetime", "timestamp"),
     ("timestamp with time zone", "timestamp"),
     ("timestamp without time zone", "timestamp"),
-    ("date", "timestamp"),
+    // Date types — Date is a distinct DataType variant; do NOT collapse to timestamp.
+    ("date", "date"),
     // Blob types
     ("bytea", "blob"),
     // Null variants
@@ -67,6 +68,7 @@ pub fn canonical_data_type(dt: &str, value: Option<&Value>) -> Option<&'static s
         "boolean" | "bool" => Some("boolean"),
         "null" => Some("null"),
         "decimal" => Some("decimal"),
+        "date" => Some("date"),
         _ => None,
     }
 }

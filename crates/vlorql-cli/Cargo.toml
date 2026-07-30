@@ -8,6 +8,9 @@ homepage.workspace = true
 repository.workspace = true
 description = "CLI tool for VlorQl SQL query optimization and natural language querying"
 
+[lints]
+workspace = true
+
 [dependencies]
 vlorql = { path = "../vlorql", version = "0.5.0" }
 vlorql-core = { path = "../vlorql-core", version = "0.5.0" }

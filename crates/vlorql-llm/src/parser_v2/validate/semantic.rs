@@ -1,4 +1,4 @@
-//! Semantic validation rules for [`QueryPlan`] AST.
+//! Semantic validation rules for [`QueryPlan`](vlorql_core::schema::QueryPlan) AST.
 //!
 //! Checks that the plan is structurally and semantically valid before
 //! it is passed to the SQL compiler.  This layer does **no** repair —
@@ -31,7 +31,7 @@ fn is_aggregate_expr(expr: &Expression) -> bool {
     }
 }
 
-/// Run all semantic checks on a [`QueryPlan`].
+/// Run all semantic checks on a [`QueryPlan`](vlorql_core::schema::QueryPlan).
 ///
 /// Returns a list of [`ValidationError`]s.  The list is empty when the
 /// plan is valid.
@@ -46,7 +46,10 @@ fn validate_plan(plan: &QueryPlan, errors: &mut Vec<ValidationError>) {
     validate_select(&plan.select, errors);
 
     // 2. Validate FROM
-    validate_from(plan.from.table_name().unwrap(), errors);
+    // Subquery FROM clauses have no table name; skip table-level validation for them.
+    if let Some(table_name) = plan.from.table_name() {
+        validate_from(table_name, errors);
+    }
 
     // 3. Validate WHERE
     if let Some(ref predicate) = plan.r#where {
@@ -146,14 +149,14 @@ fn validate_join(join: &JoinClause, errors: &mut Vec<ValidationError>) {
     // Check that non-cross joins have ON conditions.
     if join.join_type != JoinType::Cross {
         // Check if the ON predicate is a dummy (auto-injected by builder).
-        let is_dummy = matches!(
-            &join.on,
-            Predicate::Comparison {
-                left: Expression::Literal { value, .. },
-                right: Expression::Literal { .. },
-                ..
-            } if value.as_bool() == Some(true)
-        );
+        let is_dummy = if let Predicate::Comparison { left, right, .. } = &join.on {
+            matches!(
+                (left.as_ref(), right.as_ref()),
+                (Expression::Literal { value, .. }, Expression::Literal { .. }) if value.as_bool() == Some(true)
+            )
+        } else {
+            false
+        };
 
         if is_dummy {
             errors.push(ValidationError::new(
@@ -283,7 +286,7 @@ fn validate_expression(expression: &Expression, errors: &mut Vec<ValidationError
                     "FunctionCall has an empty function name",
                 ));
             }
-            for arg in args {
+            for arg in args.iter() {
                 validate_expression(arg, errors);
             }
         }
@@ -305,7 +308,7 @@ fn validate_expression(expression: &Expression, errors: &mut Vec<ValidationError
             if let Some(op) = operand {
                 validate_expression(op, errors);
             }
-            for wt in when_thens {
+            for wt in when_thens.iter() {
                 validate_expression(&wt.when, errors);
                 validate_expression(&wt.then, errors);
             }
@@ -320,7 +323,7 @@ fn validate_expression(expression: &Expression, errors: &mut Vec<ValidationError
                     "WindowFunction has an empty function name",
                 ));
             }
-            for arg in args {
+            for arg in args.iter() {
                 validate_expression(arg, errors);
             }
         }
@@ -409,15 +412,15 @@ mod tests {
             join_type: JoinType::Inner,
             right_table: FromClause::table("orders".to_owned(), None),
             on: Predicate::Comparison {
-                left: Expression::Literal {
+                left: Box::new(Expression::Literal {
                     value: json!(true),
                     data_type: DataType::Boolean,
-                },
+                }),
                 op: ComparisonOperator::Eq,
-                right: Expression::Literal {
+                right: Box::new(Expression::Literal {
                     value: json!(true),
                     data_type: DataType::Boolean,
-                },
+                }),
             },
         }]);
         let errors = validate(&plan);
@@ -435,15 +438,15 @@ mod tests {
             join_type: JoinType::Cross,
             right_table: FromClause::table("orders".to_owned(), None),
             on: Predicate::Comparison {
-                left: Expression::Literal {
+                left: Box::new(Expression::Literal {
                     value: json!(true),
                     data_type: DataType::Boolean,
-                },
+                }),
                 op: ComparisonOperator::Eq,
-                right: Expression::Literal {
+                right: Box::new(Expression::Literal {
                     value: json!(true),
                     data_type: DataType::Boolean,
-                },
+                }),
             },
         }]);
         let errors = validate(&plan);
@@ -458,15 +461,15 @@ mod tests {
     fn detects_empty_column_in_column_ref() {
         let mut plan = valid_plan();
         plan.r#where = Some(Predicate::Comparison {
-            left: Expression::ColumnRef {
+            left: Box::new(Expression::ColumnRef {
                 table: None,
                 column: "".to_owned(),
-            },
+            }),
             op: ComparisonOperator::Eq,
-            right: Expression::Literal {
+            right: Box::new(Expression::Literal {
                 value: json!(1),
                 data_type: DataType::Int,
-            },
+            }),
         });
         let errors = validate(&plan);
         assert!(
@@ -482,7 +485,7 @@ mod tests {
         plan.select = vec![Projection::Expr {
             expression: Expression::FunctionCall {
                 name: "".to_owned(),
-                args: vec![],
+                args: Box::new(vec![]),
                 distinct: false,
             },
             alias: None,
@@ -499,10 +502,10 @@ mod tests {
     fn detects_empty_like_pattern() {
         let mut plan = valid_plan();
         plan.r#where = Some(Predicate::Like {
-            expr: Expression::ColumnRef {
+            expr: Box::new(Expression::ColumnRef {
                 table: None,
                 column: "name".to_owned(),
-            },
+            }),
             pattern: "".to_owned(),
         });
         let errors = validate(&plan);

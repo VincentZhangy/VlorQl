@@ -1,4 +1,4 @@
-//! Validate layer: semantic validation for [`QueryPlan`] AST.
+//! Validate layer: semantic validation for [`QueryPlan`](vlorql_core::schema::QueryPlan) AST.
 //!
 //! This layer validates the QueryPlan produced by the
 //! [builder](crate::parser_v2::builder) layer before it is passed to

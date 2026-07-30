@@ -409,26 +409,26 @@ fn build_demo_plan() -> QueryPlan {
         from: FromClause::table("orders".to_owned(), Some("o".to_owned())),
         r#where: Some(Predicate::And {
             left: Box::new(Predicate::Comparison {
-                left: Expression::ColumnRef {
+                left: Box::new(Expression::ColumnRef {
                     table: Some("orders".to_owned()),
                     column: "status".to_owned(),
-                },
+                }),
                 op: ComparisonOperator::Eq,
-                right: Expression::Literal {
+                right: Box::new(Expression::Literal {
                     value: serde_json::json!("completed"),
                     data_type: DataType::String,
-                },
+                }),
             }),
             right: Box::new(Predicate::Comparison {
-                left: Expression::ColumnRef {
+                left: Box::new(Expression::ColumnRef {
                     table: Some("orders".to_owned()),
                     column: "total".to_owned(),
-                },
+                }),
                 op: ComparisonOperator::Gt,
-                right: Expression::Literal {
+                right: Box::new(Expression::Literal {
                     value: serde_json::json!(150),
                     data_type: DataType::Int,
-                },
+                }),
             }),
         }),
         group_by: None,
@@ -446,15 +446,15 @@ fn build_demo_plan() -> QueryPlan {
             join_type: JoinType::Inner,
             right_table: FromClause::table("users".to_owned(), Some("u".to_owned())),
             on: Predicate::Comparison {
-                left: Expression::ColumnRef {
+                left: Box::new(Expression::ColumnRef {
                     table: Some("orders".to_owned()),
                     column: "user_id".to_owned(),
-                },
+                }),
                 op: ComparisonOperator::Eq,
-                right: Expression::ColumnRef {
+                right: Box::new(Expression::ColumnRef {
                     table: Some("users".to_owned()),
                     column: "id".to_owned(),
-                },
+                }),
             },
         }]),
         ctes: None,
@@ -503,22 +503,22 @@ fn build_in_predicate_plan() -> QueryPlan {
             join_type: JoinType::Inner,
             right_table: FromClause::table("users".to_owned(), Some("u".to_owned())),
             on: Predicate::Comparison {
-                left: Expression::ColumnRef {
+                left: Box::new(Expression::ColumnRef {
                     table: Some("orders".to_owned()),
                     column: "user_id".to_owned(),
-                },
+                }),
                 op: ComparisonOperator::Eq,
-                right: Expression::ColumnRef {
+                right: Box::new(Expression::ColumnRef {
                     table: Some("users".to_owned()),
                     column: "id".to_owned(),
-                },
+                }),
             },
         }]),
         r#where: Some(Predicate::In {
-            expr: Expression::ColumnRef {
+            expr: Box::new(Expression::ColumnRef {
                 table: Some("orders".to_owned()),
                 column: "status".to_owned(),
-            },
+            }),
             target: InTarget::Values(vec![
                 Expression::Literal {
                     value: serde_json::json!("completed"),
@@ -581,22 +581,22 @@ fn build_is_null_plan() -> QueryPlan {
             join_type: JoinType::Left,
             right_table: FromClause::table("order_items".to_owned(), Some("oi".to_owned())),
             on: Predicate::Comparison {
-                left: Expression::ColumnRef {
+                left: Box::new(Expression::ColumnRef {
                     table: Some("products".to_owned()),
                     column: "id".to_owned(),
-                },
+                }),
                 op: ComparisonOperator::Eq,
-                right: Expression::ColumnRef {
+                right: Box::new(Expression::ColumnRef {
                     table: Some("order_items".to_owned()),
                     column: "product_id".to_owned(),
-                },
+                }),
             },
         }]),
         r#where: Some(Predicate::IsNull {
-            expr: Expression::ColumnRef {
+            expr: Box::new(Expression::ColumnRef {
                 table: Some("order_items".to_owned()),
                 column: "id".to_owned(),
-            },
+            }),
         }),
         group_by: None,
         having: None,
@@ -630,10 +630,10 @@ fn build_aggregate_plan() -> QueryPlan {
             Projection::Expr {
                 expression: Expression::FunctionCall {
                     name: "SUM".to_owned(),
-                    args: vec![Expression::ColumnRef {
+                    args: Box::new(vec![Expression::ColumnRef {
                         table: Some("order_items".to_owned()),
                         column: "quantity".to_owned(),
-                    }],
+                    }]),
                     distinct: false,
                 },
                 alias: Some("total_sold".to_owned()),
@@ -644,15 +644,15 @@ fn build_aggregate_plan() -> QueryPlan {
             join_type: JoinType::Inner,
             right_table: FromClause::table("order_items".to_owned(), Some("oi".to_owned())),
             on: Predicate::Comparison {
-                left: Expression::ColumnRef {
+                left: Box::new(Expression::ColumnRef {
                     table: Some("products".to_owned()),
                     column: "id".to_owned(),
-                },
+                }),
                 op: ComparisonOperator::Eq,
-                right: Expression::ColumnRef {
+                right: Box::new(Expression::ColumnRef {
                     table: Some("order_items".to_owned()),
                     column: "product_id".to_owned(),
-                },
+                }),
             },
         }]),
         r#where: None,
@@ -693,10 +693,10 @@ fn build_having_plan() -> QueryPlan {
             Projection::Expr {
                 expression: Expression::FunctionCall {
                     name: "COUNT".to_owned(),
-                    args: vec![Expression::ColumnRef {
+                    args: Box::new(vec![Expression::ColumnRef {
                         table: Some("orders".to_owned()),
                         column: "id".to_owned(),
-                    }],
+                    }]),
                     distinct: false,
                 },
                 alias: Some("order_count".to_owned()),
@@ -708,15 +708,15 @@ fn build_having_plan() -> QueryPlan {
             join_type: JoinType::Inner,
             right_table: FromClause::table("orders".to_owned(), Some("o".to_owned())),
             on: Predicate::Comparison {
-                left: Expression::ColumnRef {
+                left: Box::new(Expression::ColumnRef {
                     table: Some("users".to_owned()),
                     column: "id".to_owned(),
-                },
+                }),
                 op: ComparisonOperator::Eq,
-                right: Expression::ColumnRef {
+                right: Box::new(Expression::ColumnRef {
                     table: Some("orders".to_owned()),
                     column: "user_id".to_owned(),
-                },
+                }),
             },
         }]),
         group_by: Some(vec![
@@ -730,27 +730,27 @@ fn build_having_plan() -> QueryPlan {
             },
         ]),
         having: Some(Predicate::Comparison {
-            left: Expression::FunctionCall {
+            left: Box::new(Expression::FunctionCall {
                 name: "COUNT".to_owned(),
-                args: vec![Expression::ColumnRef {
+                args: Box::new(vec![Expression::ColumnRef {
                     table: Some("orders".to_owned()),
                     column: "id".to_owned(),
-                }],
+                }]),
                 distinct: false,
-            },
+            }),
             op: ComparisonOperator::Gt,
-            right: Expression::Literal {
+            right: Box::new(Expression::Literal {
                 value: serde_json::json!(2),
                 data_type: DataType::Int,
-            },
+            }),
         }),
         order_by: Some(vec![OrderByTerm {
             expr: Expression::FunctionCall {
                 name: "COUNT".to_owned(),
-                args: vec![Expression::ColumnRef {
+                args: Box::new(vec![Expression::ColumnRef {
                     table: Some("orders".to_owned()),
                     column: "id".to_owned(),
-                }],
+                }]),
                 distinct: false,
             },
             descending: true,
@@ -794,18 +794,18 @@ fn build_between_plan() -> QueryPlan {
         ],
         from: FromClause::table("orders".to_owned(), None),
         r#where: Some(Predicate::Between {
-            expr: Expression::ColumnRef {
+            expr: Box::new(Expression::ColumnRef {
                 table: Some("orders".to_owned()),
                 column: "total".to_owned(),
-            },
-            low: Expression::Literal {
+            }),
+            low: Box::new(Expression::Literal {
                 value: serde_json::json!(100),
                 data_type: DataType::Int,
-            },
-            high: Expression::Literal {
+            }),
+            high: Box::new(Expression::Literal {
                 value: serde_json::json!(600),
                 data_type: DataType::Int,
-            },
+            }),
         }),
         order_by: Some(vec![OrderByTerm {
             expr: Expression::ColumnRef {
@@ -855,10 +855,10 @@ fn build_like_plan() -> QueryPlan {
         ],
         from: FromClause::table("users".to_owned(), None),
         r#where: Some(Predicate::Like {
-            expr: Expression::ColumnRef {
+            expr: Box::new(Expression::ColumnRef {
                 table: Some("users".to_owned()),
                 column: "email".to_owned(),
-            },
+            }),
             pattern: "%example.com".to_owned(),
         }),
         joins: None,
@@ -900,10 +900,10 @@ fn build_subquery_in_plan() -> QueryPlan {
         ],
         from: FromClause::table("users".to_owned(), None),
         r#where: Some(Predicate::In {
-            expr: Expression::ColumnRef {
+            expr: Box::new(Expression::ColumnRef {
                 table: Some("users".to_owned()),
                 column: "id".to_owned(),
-            },
+            }),
             target: InTarget::SubQuery(Box::new(QueryPlan {
                 select: vec![Projection::Column {
                     table: Some("orders".to_owned()),
@@ -912,15 +912,15 @@ fn build_subquery_in_plan() -> QueryPlan {
                 }],
                 from: FromClause::table("orders".to_owned(), None),
                 r#where: Some(Predicate::Comparison {
-                    left: Expression::ColumnRef {
+                    left: Box::new(Expression::ColumnRef {
                         table: Some("orders".to_owned()),
                         column: "total".to_owned(),
-                    },
+                    }),
                     op: ComparisonOperator::Gt,
-                    right: Expression::Literal {
+                    right: Box::new(Expression::Literal {
                         value: serde_json::json!(200),
                         data_type: DataType::Int,
-                    },
+                    }),
                 }),
                 group_by: None,
                 having: None,
@@ -978,7 +978,7 @@ fn build_cte_plan() -> QueryPlan {
             Projection::Expr {
                 expression: Expression::FunctionCall {
                     name: "SUM".to_owned(),
-                    args: vec![Expression::BinaryOp {
+                    args: Box::new(vec![Expression::BinaryOp {
                         left: Box::new(Expression::ColumnRef {
                             table: Some("order_items".to_owned()),
                             column: "quantity".to_owned(),
@@ -988,7 +988,7 @@ fn build_cte_plan() -> QueryPlan {
                             table: Some("order_items".to_owned()),
                             column: "unit_price".to_owned(),
                         }),
-                    }],
+                    }]),
                     distinct: false,
                 },
                 alias: Some("revenue".to_owned()),
@@ -1000,15 +1000,15 @@ fn build_cte_plan() -> QueryPlan {
             join_type: JoinType::Inner,
             right_table: FromClause::table("order_items".to_owned(), Some("oi".to_owned())),
             on: Predicate::Comparison {
-                left: Expression::ColumnRef {
+                left: Box::new(Expression::ColumnRef {
                     table: Some("products".to_owned()),
                     column: "id".to_owned(),
-                },
+                }),
                 op: ComparisonOperator::Eq,
-                right: Expression::ColumnRef {
+                right: Box::new(Expression::ColumnRef {
                     table: Some("order_items".to_owned()),
                     column: "product_id".to_owned(),
-                },
+                }),
             },
         }]),
         group_by: Some(vec![
@@ -1134,45 +1134,45 @@ fn build_multi_join_plan() -> QueryPlan {
                 join_type: JoinType::Inner,
                 right_table: FromClause::table("users".to_owned(), Some("u".to_owned())),
                 on: Predicate::Comparison {
-                    left: Expression::ColumnRef {
+                    left: Box::new(Expression::ColumnRef {
                         table: Some("orders".to_owned()),
                         column: "user_id".to_owned(),
-                    },
+                    }),
                     op: ComparisonOperator::Eq,
-                    right: Expression::ColumnRef {
+                    right: Box::new(Expression::ColumnRef {
                         table: Some("users".to_owned()),
                         column: "id".to_owned(),
-                    },
+                    }),
                 },
             },
             JoinClause {
                 join_type: JoinType::Inner,
                 right_table: FromClause::table("order_items".to_owned(), Some("oi".to_owned())),
                 on: Predicate::Comparison {
-                    left: Expression::ColumnRef {
+                    left: Box::new(Expression::ColumnRef {
                         table: Some("orders".to_owned()),
                         column: "id".to_owned(),
-                    },
+                    }),
                     op: ComparisonOperator::Eq,
-                    right: Expression::ColumnRef {
+                    right: Box::new(Expression::ColumnRef {
                         table: Some("order_items".to_owned()),
                         column: "order_id".to_owned(),
-                    },
+                    }),
                 },
             },
             JoinClause {
                 join_type: JoinType::Inner,
                 right_table: FromClause::table("products".to_owned(), Some("p".to_owned())),
                 on: Predicate::Comparison {
-                    left: Expression::ColumnRef {
+                    left: Box::new(Expression::ColumnRef {
                         table: Some("order_items".to_owned()),
                         column: "product_id".to_owned(),
-                    },
+                    }),
                     op: ComparisonOperator::Eq,
-                    right: Expression::ColumnRef {
+                    right: Box::new(Expression::ColumnRef {
                         table: Some("products".to_owned()),
                         column: "id".to_owned(),
-                    },
+                    }),
                 },
             },
         ]),
@@ -1237,15 +1237,15 @@ fn build_not_exists_plan() -> QueryPlan {
                     }],
                     from: FromClause::table("order_items".to_owned(), Some("oi".to_owned())),
                     r#where: Some(Predicate::Comparison {
-                        left: Expression::ColumnRef {
+                        left: Box::new(Expression::ColumnRef {
                             table: Some("order_items".to_owned()),
                             column: "product_id".to_owned(),
-                        },
+                        }),
                         op: ComparisonOperator::Eq,
-                        right: Expression::ColumnRef {
+                        right: Box::new(Expression::ColumnRef {
                             table: Some("products".to_owned()),
                             column: "id".to_owned(),
-                        },
+                        }),
                     }),
                     group_by: None,
                     having: None,
@@ -1312,15 +1312,15 @@ fn build_full_outer_join_plan() -> QueryPlan {
             join_type: JoinType::Full,
             right_table: FromClause::table("orders".to_owned(), Some("o".to_owned())),
             on: Predicate::Comparison {
-                left: Expression::ColumnRef {
+                left: Box::new(Expression::ColumnRef {
                     table: Some("users".to_owned()),
                     column: "id".to_owned(),
-                },
+                }),
                 op: ComparisonOperator::Eq,
-                right: Expression::ColumnRef {
+                right: Box::new(Expression::ColumnRef {
                     table: Some("orders".to_owned()),
                     column: "user_id".to_owned(),
-                },
+                }),
             },
         }]),
         order_by: Some(vec![
@@ -1380,15 +1380,15 @@ fn build_cross_join_plan() -> QueryPlan {
             right_table: FromClause::table("products".to_owned(), Some("p".to_owned())),
             // CROSS JOIN 不需要 ON 条件
             on: Predicate::Comparison {
-                left: Expression::Literal {
+                left: Box::new(Expression::Literal {
                     value: serde_json::json!(true),
                     data_type: DataType::Boolean,
-                },
+                }),
                 op: ComparisonOperator::Eq,
-                right: Expression::Literal {
+                right: Box::new(Expression::Literal {
                     value: serde_json::json!(true),
                     data_type: DataType::Boolean,
-                },
+                }),
             },
         }]),
         order_by: Some(vec![
@@ -1453,15 +1453,15 @@ fn build_self_join_plan() -> QueryPlan {
             join_type: JoinType::Left,
             right_table: FromClause::table("employees".to_owned(), Some("m".to_owned())),
             on: Predicate::Comparison {
-                left: Expression::ColumnRef {
+                left: Box::new(Expression::ColumnRef {
                     table: Some("e".to_owned()),
                     column: "manager_id".to_owned(),
-                },
+                }),
                 op: ComparisonOperator::Eq,
-                right: Expression::ColumnRef {
+                right: Box::new(Expression::ColumnRef {
                     table: Some("m".to_owned()),
                     column: "id".to_owned(),
-                },
+                }),
             },
         }]),
         order_by: Some(vec![OrderByTerm {
@@ -1497,7 +1497,7 @@ fn build_self_join_plan() -> QueryPlan {
 fn build_date_trunc_plan() -> QueryPlan {
     let month_expr = Expression::FunctionCall {
         name: "DATE_TRUNC".to_owned(),
-        args: vec![
+        args: Box::new(vec![
             Expression::Literal {
                 value: serde_json::json!("month"),
                 data_type: DataType::String,
@@ -1506,7 +1506,7 @@ fn build_date_trunc_plan() -> QueryPlan {
                 table: Some("orders".to_owned()),
                 column: "created_at".to_owned(),
             },
-        ],
+        ]),
         distinct: false,
     };
     QueryPlan {
@@ -1518,7 +1518,7 @@ fn build_date_trunc_plan() -> QueryPlan {
             Projection::Expr {
                 expression: Expression::FunctionCall {
                     name: "COUNT".to_owned(),
-                    args: vec![Expression::Star],
+                    args: Box::new(vec![Expression::Star]),
                     distinct: false,
                 },
                 alias: Some("order_count".to_owned()),
@@ -1526,10 +1526,10 @@ fn build_date_trunc_plan() -> QueryPlan {
             Projection::Expr {
                 expression: Expression::FunctionCall {
                     name: "SUM".to_owned(),
-                    args: vec![Expression::ColumnRef {
+                    args: Box::new(vec![Expression::ColumnRef {
                         table: Some("orders".to_owned()),
                         column: "total".to_owned(),
-                    }],
+                    }]),
                     distinct: false,
                 },
                 alias: Some("total_amount".to_owned()),
@@ -1577,7 +1577,7 @@ fn build_string_agg_plan() -> QueryPlan {
             Projection::Expr {
                 expression: Expression::FunctionCall {
                     name: "STRING_AGG".to_owned(),
-                    args: vec![
+                    args: Box::new(vec![
                         Expression::ColumnRef {
                             table: Some("products".to_owned()),
                             column: "name".to_owned(),
@@ -1586,7 +1586,7 @@ fn build_string_agg_plan() -> QueryPlan {
                             value: serde_json::json!(", "),
                             data_type: DataType::String,
                         },
-                    ],
+                    ]),
                     distinct: false,
                 },
                 alias: Some("products".to_owned()),
@@ -1594,10 +1594,10 @@ fn build_string_agg_plan() -> QueryPlan {
             Projection::Expr {
                 expression: Expression::FunctionCall {
                     name: "SUM".to_owned(),
-                    args: vec![Expression::ColumnRef {
+                    args: Box::new(vec![Expression::ColumnRef {
                         table: Some("order_items".to_owned()),
                         column: "quantity".to_owned(),
-                    }],
+                    }]),
                     distinct: false,
                 },
                 alias: Some("total_items".to_owned()),
@@ -1609,30 +1609,30 @@ fn build_string_agg_plan() -> QueryPlan {
                 join_type: JoinType::Inner,
                 right_table: FromClause::table("order_items".to_owned(), Some("oi".to_owned())),
                 on: Predicate::Comparison {
-                    left: Expression::ColumnRef {
+                    left: Box::new(Expression::ColumnRef {
                         table: Some("orders".to_owned()),
                         column: "id".to_owned(),
-                    },
+                    }),
                     op: ComparisonOperator::Eq,
-                    right: Expression::ColumnRef {
+                    right: Box::new(Expression::ColumnRef {
                         table: Some("order_items".to_owned()),
                         column: "order_id".to_owned(),
-                    },
+                    }),
                 },
             },
             JoinClause {
                 join_type: JoinType::Inner,
                 right_table: FromClause::table("products".to_owned(), Some("p".to_owned())),
                 on: Predicate::Comparison {
-                    left: Expression::ColumnRef {
+                    left: Box::new(Expression::ColumnRef {
                         table: Some("order_items".to_owned()),
                         column: "product_id".to_owned(),
-                    },
+                    }),
                     op: ComparisonOperator::Eq,
-                    right: Expression::ColumnRef {
+                    right: Box::new(Expression::ColumnRef {
                         table: Some("products".to_owned()),
                         column: "id".to_owned(),
-                    },
+                    }),
                 },
             },
         ]),
@@ -1682,10 +1682,10 @@ fn build_distinct_count_plan() -> QueryPlan {
             Projection::Expr {
                 expression: Expression::FunctionCall {
                     name: "COUNT".to_owned(),
-                    args: vec![Expression::ColumnRef {
+                    args: Box::new(vec![Expression::ColumnRef {
                         table: Some("orders".to_owned()),
                         column: "user_id".to_owned(),
-                    }],
+                    }]),
                     distinct: true,
                 },
                 alias: Some("distinct_customers".to_owned()),
@@ -1693,10 +1693,10 @@ fn build_distinct_count_plan() -> QueryPlan {
             Projection::Expr {
                 expression: Expression::FunctionCall {
                     name: "SUM".to_owned(),
-                    args: vec![Expression::ColumnRef {
+                    args: Box::new(vec![Expression::ColumnRef {
                         table: Some("order_items".to_owned()),
                         column: "quantity".to_owned(),
-                    }],
+                    }]),
                     distinct: false,
                 },
                 alias: Some("total_sold".to_owned()),
@@ -1708,30 +1708,30 @@ fn build_distinct_count_plan() -> QueryPlan {
                 join_type: JoinType::Inner,
                 right_table: FromClause::table("order_items".to_owned(), Some("oi".to_owned())),
                 on: Predicate::Comparison {
-                    left: Expression::ColumnRef {
+                    left: Box::new(Expression::ColumnRef {
                         table: Some("products".to_owned()),
                         column: "id".to_owned(),
-                    },
+                    }),
                     op: ComparisonOperator::Eq,
-                    right: Expression::ColumnRef {
+                    right: Box::new(Expression::ColumnRef {
                         table: Some("order_items".to_owned()),
                         column: "product_id".to_owned(),
-                    },
+                    }),
                 },
             },
             JoinClause {
                 join_type: JoinType::Inner,
                 right_table: FromClause::table("orders".to_owned(), Some("o".to_owned())),
                 on: Predicate::Comparison {
-                    left: Expression::ColumnRef {
+                    left: Box::new(Expression::ColumnRef {
                         table: Some("order_items".to_owned()),
                         column: "order_id".to_owned(),
-                    },
+                    }),
                     op: ComparisonOperator::Eq,
-                    right: Expression::ColumnRef {
+                    right: Box::new(Expression::ColumnRef {
                         table: Some("orders".to_owned()),
                         column: "id".to_owned(),
-                    },
+                    }),
                 },
             },
         ]),
@@ -1742,10 +1742,10 @@ fn build_distinct_count_plan() -> QueryPlan {
         order_by: Some(vec![OrderByTerm {
             expr: Expression::FunctionCall {
                 name: "COUNT".to_owned(),
-                args: vec![Expression::ColumnRef {
+                args: Box::new(vec![Expression::ColumnRef {
                     table: Some("orders".to_owned()),
                     column: "user_id".to_owned(),
-                }],
+                }]),
                 distinct: true,
             },
             descending: true,
@@ -1793,27 +1793,27 @@ fn build_complex_not_plan() -> QueryPlan {
         r#where: Some(Predicate::And {
             left: Box::new(Predicate::Not {
                 child: Box::new(Predicate::Comparison {
-                    left: Expression::ColumnRef {
+                    left: Box::new(Expression::ColumnRef {
                         table: Some("orders".to_owned()),
                         column: "status".to_owned(),
-                    },
+                    }),
                     op: ComparisonOperator::Eq,
-                    right: Expression::Literal {
+                    right: Box::new(Expression::Literal {
                         value: serde_json::json!("completed"),
                         data_type: DataType::String,
-                    },
+                    }),
                 }),
             }),
             right: Box::new(Predicate::Comparison {
-                left: Expression::ColumnRef {
+                left: Box::new(Expression::ColumnRef {
                     table: Some("orders".to_owned()),
                     column: "total".to_owned(),
-                },
+                }),
                 op: ComparisonOperator::Gt,
-                right: Expression::Literal {
+                right: Box::new(Expression::Literal {
                     value: serde_json::json!(100),
                     data_type: DataType::Int,
-                },
+                }),
             }),
         }),
         order_by: Some(vec![OrderByTerm {
@@ -1852,7 +1852,7 @@ fn build_case_when_plan() -> QueryPlan {
             Projection::Expr {
                 expression: Expression::Case {
                     operand: None,
-                    when_thens: vec![
+                    when_thens: Box::new(vec![
                         WhenThen {
                             when: Expression::BinaryOp {
                                 left: Box::new(Expression::ColumnRef {
@@ -1887,7 +1887,7 @@ fn build_case_when_plan() -> QueryPlan {
                                 data_type: DataType::String,
                             },
                         },
-                    ],
+                    ]),
                     else_result: Some(Box::new(Expression::Literal {
                         value: serde_json::json!("低"),
                         data_type: DataType::String,
@@ -1951,15 +1951,15 @@ fn build_select_distinct_plan() -> QueryPlan {
                 }],
                 from: FromClause::table("orders".to_owned(), None),
                 r#where: Some(Predicate::Comparison {
-                    left: Expression::ColumnRef {
+                    left: Box::new(Expression::ColumnRef {
                         table: Some("orders".to_owned()),
                         column: "user_id".to_owned(),
-                    },
+                    }),
                     op: ComparisonOperator::Eq,
-                    right: Expression::ColumnRef {
+                    right: Box::new(Expression::ColumnRef {
                         table: Some("users".to_owned()),
                         column: "id".to_owned(),
-                    },
+                    }),
                 }),
                 group_by: None,
                 having: None,
@@ -2002,10 +2002,10 @@ fn build_window_function_plan() -> QueryPlan {
             Projection::Expr {
                 expression: Expression::FunctionCall {
                     name: "SUM".to_owned(),
-                    args: vec![Expression::ColumnRef {
+                    args: Box::new(vec![Expression::ColumnRef {
                         table: Some("order_items".to_owned()),
                         column: "quantity".to_owned(),
-                    }],
+                    }]),
                     distinct: false,
                 },
                 alias: Some("total_sold".to_owned()),
@@ -2013,23 +2013,23 @@ fn build_window_function_plan() -> QueryPlan {
             Projection::Expr {
                 expression: Expression::WindowFunction {
                     name: "ROW_NUMBER".to_owned(),
-                    args: vec![],
+                    args: Box::new(vec![]),
                     distinct: false,
-                    over: WindowSpec {
+                    over: Box::new(WindowSpec {
                         partition_by: None,
                         order_by: Some(vec![OrderByTerm {
                             expr: Expression::FunctionCall {
                                 name: "SUM".to_owned(),
-                                args: vec![Expression::ColumnRef {
+                                args: Box::new(vec![Expression::ColumnRef {
                                     table: Some("order_items".to_owned()),
                                     column: "quantity".to_owned(),
-                                }],
+                                }]),
                                 distinct: false,
                             },
                             descending: true,
                         }]),
                         frame: None,
-                    },
+                    }),
                 },
                 alias: Some("rank".to_owned()),
             },
@@ -2039,15 +2039,15 @@ fn build_window_function_plan() -> QueryPlan {
             join_type: JoinType::Left,
             right_table: FromClause::table("order_items".to_owned(), Some("oi".to_owned())),
             on: Predicate::Comparison {
-                left: Expression::ColumnRef {
+                left: Box::new(Expression::ColumnRef {
                     table: Some("products".to_owned()),
                     column: "id".to_owned(),
-                },
+                }),
                 op: ComparisonOperator::Eq,
-                right: Expression::ColumnRef {
+                right: Box::new(Expression::ColumnRef {
                     table: Some("order_items".to_owned()),
                     column: "product_id".to_owned(),
-                },
+                }),
             },
         }]),
         group_by: Some(vec![
@@ -2094,15 +2094,15 @@ fn build_union_all_plan() -> QueryPlan {
         ],
         from: FromClause::table("orders".to_owned(), None),
         r#where: Some(Predicate::Comparison {
-            left: Expression::ColumnRef {
+            left: Box::new(Expression::ColumnRef {
                 table: Some("orders".to_owned()),
                 column: "total".to_owned(),
-            },
+            }),
             op: ComparisonOperator::Lte,
-            right: Expression::Literal {
+            right: Box::new(Expression::Literal {
                 value: serde_json::json!(100),
                 data_type: DataType::Float,
-            },
+            }),
         }),
         group_by: None,
         having: None,
@@ -2137,15 +2137,15 @@ fn build_union_all_plan() -> QueryPlan {
         ],
         from: FromClause::table("orders".to_owned(), None),
         r#where: Some(Predicate::Comparison {
-            left: Expression::ColumnRef {
+            left: Box::new(Expression::ColumnRef {
                 table: Some("orders".to_owned()),
                 column: "total".to_owned(),
-            },
+            }),
             op: ComparisonOperator::Gt,
-            right: Expression::Literal {
+            right: Box::new(Expression::Literal {
                 value: serde_json::json!(100),
                 data_type: DataType::Float,
-            },
+            }),
         }),
         distinct: false,
         distinct_on: None,
@@ -2192,10 +2192,10 @@ fn build_recursive_cte_plan() -> QueryPlan {
         ],
         from: FromClause::table("employees".to_owned(), None),
         r#where: Some(Predicate::IsNull {
-            expr: Expression::ColumnRef {
+            expr: Box::new(Expression::ColumnRef {
                 table: Some("employees".to_owned()),
                 column: "manager_id".to_owned(),
-            },
+            }),
         }),
         group_by: None,
         having: None,
@@ -2245,15 +2245,15 @@ fn build_recursive_cte_plan() -> QueryPlan {
                     join_type: JoinType::Inner,
                     right_table: FromClause::table("org_tree".to_owned(), None),
                     on: Predicate::Comparison {
-                        left: Expression::ColumnRef {
+                        left: Box::new(Expression::ColumnRef {
                             table: Some("emp".to_owned()),
                             column: "manager_id".to_owned(),
-                        },
+                        }),
                         op: ComparisonOperator::Eq,
-                        right: Expression::ColumnRef {
+                        right: Box::new(Expression::ColumnRef {
                             table: Some("org_tree".to_owned()),
                             column: "id".to_owned(),
-                        },
+                        }),
                     },
                 }]),
                 r#where: None,

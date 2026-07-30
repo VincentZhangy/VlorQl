@@ -28,6 +28,8 @@ jobs:
             ~/.cargo/git
             target
           key: ${{ runner.os }}-fmt-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-fmt-
       - name: Check formatting
         run: cargo fmt --all -- --check
 
@@ -49,6 +51,8 @@ jobs:
             ~/.cargo/git
             target
           key: ${{ runner.os }}-clippy-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-clippy-
       - name: Build workspace
         run: cargo build --workspace --all-targets
       - name: Run clippy
@@ -70,6 +74,8 @@ jobs:
             ~/.cargo/git
             target
           key: ${{ runner.os }}-test-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-test-
       - name: Build examples
         run: cargo check -p vlorql --examples
       - name: Run tests
@@ -91,6 +97,8 @@ jobs:
             ~/.cargo/git
             target
           key: ${{ runner.os }}-docs-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-docs-
       - name: Build documentation
         run: cargo doc --workspace --no-deps
 
@@ -114,5 +122,30 @@ jobs:
             ~/.cargo/git
             ~/.cargo/advisory-dbs
           key: ${{ runner.os }}-deny-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-deny-
       - name: Run cargo-deny
         run: cargo deny check
+
+  miri:
+    name: Miri (UB detection)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out sources
+        uses: actions/checkout@v4
+      - name: Install Rust toolchain (nightly + miri)
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: miri
+      - name: Cache cargo registry and target
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-miri-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-miri-
+      - name: Run cargo miri test
+        run: cargo miri test --workspace --no-fail-fast

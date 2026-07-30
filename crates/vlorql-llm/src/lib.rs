@@ -55,7 +55,7 @@ pub use parser_v2::pipeline::{
 };
 pub use parser_v2::recover::{detect_template_leak, extract_json_content};
 
-/// Parse LLM response text into a [`QueryPlan`] using the V2 pipeline.
+/// Parse LLM response text into a [`QueryPlan`](vlorql_core::schema::QueryPlan) using the V2 pipeline.
 ///
 /// This is the recommended internal helper for all `LlmClient` implementations.
 /// It runs the full V2 pipeline (recover → normalize → build → fix → validate → optimize)
