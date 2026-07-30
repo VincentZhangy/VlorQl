@@ -153,4 +153,6 @@ jobs:
       - name: Run cargo miri test (core only)
         env:
           MIRIFLAGS: -Zmiri-permissive-provenance
-        run: cargo miri test -p vlorql-core --lib --no-fail-fast
+        # cache_evicts_under_lru_weight_limit triggers a crossbeam-epoch Stacked
+        # Borrows false positive inside moka (upstream dependency).
+        run: cargo miri test -p vlorql-core --lib --no-fail-fast -- --skip cache_evicts_under_lru_weight_limit
