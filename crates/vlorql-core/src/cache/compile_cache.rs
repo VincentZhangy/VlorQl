@@ -410,6 +410,7 @@ mod tests {
     }
 
     /// Cache respects the max_size weigher (small size for testing).
+    #[cfg(not(miri))]
     #[tokio::test]
     async fn cache_evicts_under_lru_weight_limit() {
         // Use a very small max_size so entries are evicted quickly.
