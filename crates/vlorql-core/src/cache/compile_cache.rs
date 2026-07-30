@@ -17,7 +17,8 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::sync::Mutex;
+use std::sync::Mutex;
+use std::sync::PoisonError;
 
 /// A cache for [`CompiledQuery`] values keyed by plan hash + dialect.
 ///
@@ -142,7 +143,7 @@ impl CompileCache {
         self.inner
             .insert(key.clone(), Arc::new(query.clone()))
             .await;
-        self.entries.lock().await.insert(key, query);
+        self.entries.lock().unwrap_or_else(PoisonError::into_inner).insert(key, query);
     }
 
     /// Removes the cache entry for `plan` under `profile`.
@@ -154,13 +155,13 @@ impl CompileCache {
     pub async fn invalidate_plan(&self, plan: &ValidatedPlan, profile: &DialectProfile) {
         let key = CompileCacheKey::new(plan, profile);
         self.inner.invalidate(&key).await;
-        self.entries.lock().await.remove(&key);
+        self.entries.lock().unwrap_or_else(PoisonError::into_inner).remove(&key);
     }
 
     /// Removes all entries from the cache.
-    pub async fn clear(&self) {
+    pub fn clear(&self) {
         self.inner.invalidate_all();
-        self.entries.lock().await.clear();
+        self.entries.lock().unwrap_or_else(PoisonError::into_inner).clear();
     }
 
     /// Returns the number of entries currently in the cache.
@@ -195,7 +196,7 @@ impl CompileCache {
             return Ok(());
         };
         let bytes = {
-            let entries = self.entries.lock().await;
+            let entries = self.entries.lock().unwrap_or_else(PoisonError::into_inner);
             bincode::serialize(&*entries).map_err(|e| {
                 VlorQLError::config(
                     ConfigErrorKind::ConfigFileError {
@@ -257,7 +258,7 @@ impl CompileCache {
             cache
                 .entries
                 .lock()
-                .await
+                .unwrap_or_else(|e| e.into_inner())
                 .insert(key.clone(), query.clone());
         }
         cache
@@ -474,7 +475,7 @@ mod tests {
         cache.insert(&plan, &profile, compiled).await;
         assert!(cache.get(&plan, &profile).await.is_some());
 
-        cache.clear().await;
+        cache.clear();
         assert!(
             cache.get(&plan, &profile).await.is_none(),
             "entry should be removed after clear"

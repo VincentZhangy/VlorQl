@@ -622,12 +622,12 @@ impl VlorQl {
     }
 
     /// Clears all three caches (schema, compile, prompt).
-    pub async fn clear_all_caches(&self) {
+    pub fn clear_all_caches(&self) {
         if let Some(cache) = &self.schema_cache {
             cache.clear();
         }
         if let Some(cache) = &self.compile_cache {
-            cache.clear().await;
+            cache.clear();
         }
         if let Some(cache) = &self.prompt_cache {
             cache.clear();
