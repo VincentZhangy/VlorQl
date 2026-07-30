@@ -604,9 +604,9 @@ mod tests {
         let compiled = make_compiled(SqlDialect::Postgres);
 
         cache.insert(&plan, &profile, compiled).await;
-        assert_eq!(cache.entries.lock().unwrap().len(), 1);
+        assert_eq!(cache.entries.lock().await.len(), 1);
 
         cache.invalidate_plan(&plan, &profile).await;
-        assert_eq!(cache.entries.lock().unwrap().len(), 0);
+        assert_eq!(cache.entries.lock().await.len(), 0);
     }
 }

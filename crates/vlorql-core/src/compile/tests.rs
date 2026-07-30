@@ -409,7 +409,7 @@ fn query_builder_postgres_placeholders_renumber_per_invocation() {
     });
     let validated = validated(plan);
     let config = DialectConfig::default_postgres();
-    let mut builder = QueryBuilder::new(&validated, &config);
+    let mut builder = QueryBuilder::new(&validated, &config).unwrap();
     let _ = builder.render_expression(&column_ref("users", "id"));
     let _ = builder.render_expression(&column_ref("users", "name"));
     let sql = builder
