@@ -6,11 +6,11 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use thiserror::Error;
 
+use super::ErrorResponse;
 use super::kinds::{
     AuditErrorKind, CompilationErrorKind, ConfigErrorKind, LlmErrorKind, PolicyErrorKind,
     SchemaErrorKind, ValidationErrorKind,
 };
-use super::ErrorResponse;
 
 /// A structured error from the VlorQl core.
 ///
@@ -94,37 +94,58 @@ pub enum VlorQLError {
 impl VlorQLError {
     /// Creates a validation error from any serializable details value.
     pub fn validation<T: Serialize>(kind: ValidationErrorKind, details: T) -> Self {
-        Self::Validation { kind, details: details_to_value(details) }
+        Self::Validation {
+            kind,
+            details: details_to_value(details),
+        }
     }
 
     /// Creates an audit error from any serializable details value.
     pub fn audit<T: Serialize>(kind: AuditErrorKind, details: T) -> Self {
-        Self::Audit { kind, details: details_to_value(details) }
+        Self::Audit {
+            kind,
+            details: details_to_value(details),
+        }
     }
 
     /// Creates a policy error from any serializable details value.
     pub fn policy<T: Serialize>(kind: PolicyErrorKind, details: T) -> Self {
-        Self::Policy { kind, details: details_to_value(details) }
+        Self::Policy {
+            kind,
+            details: details_to_value(details),
+        }
     }
 
     /// Creates a compilation error from any serializable details value.
     pub fn compilation<T: Serialize>(kind: CompilationErrorKind, details: T) -> Self {
-        Self::Compilation { kind, details: details_to_value(details) }
+        Self::Compilation {
+            kind,
+            details: details_to_value(details),
+        }
     }
 
     /// Creates a schema error from any serializable details value.
     pub fn schema<T: Serialize>(kind: SchemaErrorKind, details: T) -> Self {
-        Self::Schema { kind, details: details_to_value(details) }
+        Self::Schema {
+            kind,
+            details: details_to_value(details),
+        }
     }
 
     /// Creates an LLM error from any serializable details value.
     pub fn llm<T: Serialize>(kind: LlmErrorKind, details: T) -> Self {
-        Self::Llm { kind, details: details_to_value(details) }
+        Self::Llm {
+            kind,
+            details: details_to_value(details),
+        }
     }
 
     /// Creates a configuration error from any serializable details value.
     pub fn config<T: Serialize>(kind: ConfigErrorKind, details: T) -> Self {
-        Self::Config { kind, details: details_to_value(details) }
+        Self::Config {
+            kind,
+            details: details_to_value(details),
+        }
     }
 
     /// Returns a stable code for this error category and kind.

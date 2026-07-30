@@ -223,5 +223,3 @@ fn is_generic_column_name(name: &str) -> bool {
         "id" | "name" | "created_at" | "updated_at"
     )
 }
-
-

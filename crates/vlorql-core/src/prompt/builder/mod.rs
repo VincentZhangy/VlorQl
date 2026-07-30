@@ -3,9 +3,7 @@
 use crate::cache::hash_policy;
 use crate::policy::{PolicyConfig, TablePolicy};
 use crate::prompt::PromptSkill;
-use crate::schema::{
-    ColumnSchema, DialectProfile, SchemaSnapshot, TableSchema,
-};
+use crate::schema::{ColumnSchema, DialectProfile, SchemaSnapshot, TableSchema};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
@@ -132,7 +130,10 @@ impl PromptBuilder {
         }
     }
 
-    pub(crate) fn expand_foreign_key_neighbors(&self, matched: &HashSet<String>) -> HashSet<String> {
+    pub(crate) fn expand_foreign_key_neighbors(
+        &self,
+        matched: &HashSet<String>,
+    ) -> HashSet<String> {
         let mut expanded = matched.clone();
         for table_name in matched {
             if let Some(table) = self.schema.get_table(table_name) {

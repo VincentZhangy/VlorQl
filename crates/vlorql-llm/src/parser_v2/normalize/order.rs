@@ -180,10 +180,7 @@ fn build_alias_map_from_select(obj: &serde_json::Map<String, Value>) -> Vec<(Str
 /// expression with the SELECT's inner expression so the validator can resolve
 /// the referenced column or function.
 #[allow(clippy::ptr_arg)]
-fn resolve_order_by_aliases(
-    order_by: &mut Vec<Value>,
-    alias_map: &[(String, Value)],
-) -> bool {
+fn resolve_order_by_aliases(order_by: &mut Vec<Value>, alias_map: &[(String, Value)]) -> bool {
     if alias_map.is_empty() {
         return false;
     }

@@ -365,17 +365,17 @@ mod extra_tests {
     fn apply_row_filters_returns_none_for_unrelated_table() {
         let config = PolicyConfig {
             row_filters: vec![RowFilter {
-            condition: Predicate::Comparison {
-                left: Box::new(Expression::ColumnRef {
-                    table: Some("other".to_owned()),
-                    column: "id".to_owned(),
-                }),
-                op: ComparisonOperator::Eq,
-                right: Box::new(Expression::Literal {
-                    value: serde_json::json!(1),
-                    data_type: DataType::Int,
-                }),
-            },
+                condition: Predicate::Comparison {
+                    left: Box::new(Expression::ColumnRef {
+                        table: Some("other".to_owned()),
+                        column: "id".to_owned(),
+                    }),
+                    op: ComparisonOperator::Eq,
+                    right: Box::new(Expression::Literal {
+                        value: serde_json::json!(1),
+                        data_type: DataType::Int,
+                    }),
+                },
                 description: "other-table filter".to_owned(),
             }],
             ..PolicyConfig::default()

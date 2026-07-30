@@ -1,5 +1,5 @@
-use serde_json::Value;
 use super::BuildError;
+use serde_json::Value;
 use vlorql_core::schema::{BinaryOperator, ComparisonOperator, DataType, JoinType};
 
 // ── Field extraction helpers ──────────────────────────────────────

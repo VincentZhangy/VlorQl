@@ -216,9 +216,7 @@ impl LlmClient for SequenceClient {
         let (plan, _usage) = self.generate_plan(&question, &system_prompt, None).await?;
         let serialized = serde_json::to_string(&plan).unwrap_or_default();
         let stream = Box::new(futures::stream::iter(vec![Ok(serialized)]))
-            as Box<
-                dyn futures::stream::Stream<Item = Result<String, VlorQLError>> + Send + Unpin,
-            >;
+            as Box<dyn futures::stream::Stream<Item = Result<String, VlorQLError>> + Send + Unpin>;
         let usage = Arc::new(tokio::sync::Mutex::new(Some(TokenUsage::default())));
         Ok(StreamResult { stream, usage })
     }

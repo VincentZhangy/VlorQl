@@ -1,8 +1,8 @@
 use super::*;
 use crate::schema::{
-    BinaryOperator, CommonTableExpression, ComparisonOperator, DataType, Expression,
-    FromClause, InTarget, JoinClause, JoinType, OrderByTerm, Predicate, Projection, QueryPlan,
-    SetOperation, SetOperationClause, SqlDialect, WindowSpec,
+    BinaryOperator, CommonTableExpression, ComparisonOperator, DataType, Expression, FromClause,
+    InTarget, JoinClause, JoinType, OrderByTerm, Predicate, Projection, QueryPlan, SetOperation,
+    SetOperationClause, SqlDialect, WindowSpec,
 };
 use crate::validate::ValidatedPlan;
 use serde_json::json;

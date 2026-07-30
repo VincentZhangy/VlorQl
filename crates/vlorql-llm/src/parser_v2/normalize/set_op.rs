@@ -36,12 +36,15 @@ pub fn canonical_op(raw: &str) -> Option<&'static str> {
     // Normalize: lowercase + collapse runs of whitespace / underscores.
     let folded: String = raw
         .chars()
-        .map(|c| if c == '_' || c.is_whitespace() { ' ' } else { c.to_ascii_lowercase() })
+        .map(|c| {
+            if c == '_' || c.is_whitespace() {
+                ' '
+            } else {
+                c.to_ascii_lowercase()
+            }
+        })
         .collect();
-    let collapsed: String = folded
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ");
+    let collapsed: String = folded.split_whitespace().collect::<Vec<_>>().join(" ");
     match collapsed.as_str() {
         "union all" | "unionall" => Some(OP_UNION_ALL),
         "union" => Some(OP_UNION),
@@ -65,9 +68,13 @@ pub fn normalize(val: &mut Value) -> bool {
     //    `set_operation`. LLMs often write `{"union_all": {...}}` instead of
     //    the nested `set_operation` form.
     for op_key in [
-        "union_all", "unionall", "union",
-        "intersect", "intersection",
-        "except", "minus",
+        "union_all",
+        "unionall",
+        "union",
+        "intersect",
+        "intersection",
+        "except",
+        "minus",
     ] {
         if let Some(operand) = obj.remove(op_key) {
             let op = canonical_op(op_key).unwrap_or(OP_UNION_ALL);
@@ -123,7 +130,11 @@ fn normalize_set_operation(set_op_val: &mut Value) -> bool {
             .unwrap_or("union_all");
         let op = canonical_op(op_str).unwrap_or(OP_UNION_ALL);
         // The `right` is the next element, if any.
-        let right = if !arr.is_empty() { arr.remove(0) } else { Value::Null };
+        let right = if !arr.is_empty() {
+            arr.remove(0)
+        } else {
+            Value::Null
+        };
         let mut new_obj = serde_json::Map::new();
         new_obj.insert("operation".to_owned(), Value::String(op.to_owned()));
         new_obj.insert("right".to_owned(), right);

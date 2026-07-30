@@ -132,7 +132,9 @@ fn array_to_object(val: &mut serde_json::Value) -> bool {
                 if from_obj.is_none() {
                     from_obj = Some(elem.clone());
                 }
-            } else if e.contains_key("join_type") || e.get("type").and_then(|t| t.as_str()) == Some("join") {
+            } else if e.contains_key("join_type")
+                || e.get("type").and_then(|t| t.as_str()) == Some("join")
+            {
                 // This is a join specification — promote to joins list
                 let join_entry = serde_json::json!({
                     "join_type": e.get("join_type").or(e.get("type")).and_then(|v| v.as_str()).unwrap_or("inner"),
@@ -148,7 +150,11 @@ fn array_to_object(val: &mut serde_json::Value) -> bool {
         obj.insert("from".to_owned(), from);
         if !joins.is_empty() {
             // Merge existing joins with extracted joins
-            let existing = obj.get("joins").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+            let existing = obj
+                .get("joins")
+                .and_then(|v| v.as_array())
+                .cloned()
+                .unwrap_or_default();
             let merged = [existing, joins].concat();
             obj.insert("joins".to_owned(), Value::Array(merged));
         }
@@ -197,7 +203,8 @@ mod tests {
 
     #[test]
     fn no_change_for_canonical() {
-        let mut val = json!({"select": [{"type": "star"}], "from": {"type": "table", "table": "users"}});
+        let mut val =
+            json!({"select": [{"type": "star"}], "from": {"type": "table", "table": "users"}});
         assert!(!normalize(&mut val));
     }
 }

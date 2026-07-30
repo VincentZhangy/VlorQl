@@ -253,7 +253,8 @@ fn wrap_bare_function_call(val: &mut serde_json::Value) -> bool {
     };
     for field in ["having", "where"] {
         if let Some(target) = obj.get_mut(field)
-            && target.as_object()
+            && target
+                .as_object()
                 .and_then(|o| o.get("type").and_then(|t| t.as_str()))
                 == Some("function_call")
         {

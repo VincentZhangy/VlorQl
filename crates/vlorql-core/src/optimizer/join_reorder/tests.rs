@@ -20,7 +20,11 @@ fn col(table: &str, column: &str) -> Expression {
 }
 
 fn cmp(left: Expression, op: ComparisonOperator, right: Expression) -> Predicate {
-    Predicate::Comparison { left: Box::new(left), op, right: Box::new(right) }
+    Predicate::Comparison {
+        left: Box::new(left),
+        op,
+        right: Box::new(right),
+    }
 }
 
 fn eq(left: Expression, right: Expression) -> Predicate {

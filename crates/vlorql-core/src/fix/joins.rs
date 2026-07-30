@@ -289,7 +289,11 @@ pub(crate) fn drop_hallucinated_joins(plan: &mut QueryPlan, schema: &SchemaSnaps
     let before = joins.len();
     joins.retain(|join| {
         schema
-            .get_table(join.right_table.table_name().expect("invariant: JOIN right table must have a table name"))
+            .get_table(
+                join.right_table
+                    .table_name()
+                    .expect("invariant: JOIN right table must have a table name"),
+            )
             .is_some()
     });
     let removed = joins.len() != before;
@@ -359,7 +363,10 @@ pub fn fix_missing_joins(plan: &mut QueryPlan, schema: &SchemaSnapshot) -> bool 
                 if plan.joins.is_none() {
                     plan.joins = Some(Vec::new());
                 }
-                plan.joins.as_mut().expect("invariant: joins was just initialized").push(join);
+                plan.joins
+                    .as_mut()
+                    .expect("invariant: joins was just initialized")
+                    .push(join);
                 scope.insert(table.clone());
                 found_any = true;
                 changed = true;

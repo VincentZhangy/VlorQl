@@ -667,9 +667,8 @@ fn parse_completion_payload(body: &str, backend: LocalBackend) -> Result<QueryPl
             .ok_or_else(|| {
                 VlorQLError::llm(
                     LlmErrorKind::ParseError {
-                        details:
-                            "vLLM response did not contain choices[0].message.content"
-                                .to_owned(),
+                        details: "vLLM response did not contain choices[0].message.content"
+                            .to_owned(),
                     },
                     json!({"source": "local_response", "backend": backend.label()}),
                 )

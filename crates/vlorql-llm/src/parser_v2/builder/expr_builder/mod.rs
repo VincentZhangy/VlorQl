@@ -57,16 +57,16 @@ impl From<BuildError> for serde_json::Error {
     }
 }
 
-/// Field extraction helpers and operator/type parsers.
-pub mod helpers;
 /// Expression and Predicate builders.
 pub mod builders;
+/// Field extraction helpers and operator/type parsers.
+pub mod helpers;
 
-pub use helpers::{
-    req_str, opt_str, req_obj, req_arr, type_name,
-    parse_comparison_op, parse_binary_op, parse_join_type, parse_data_type,
-};
 pub use builders::{build_expression, build_predicate};
+pub use helpers::{
+    opt_str, parse_binary_op, parse_comparison_op, parse_data_type, parse_join_type, req_arr,
+    req_obj, req_str, type_name,
+};
 
 #[cfg(test)]
 mod tests;

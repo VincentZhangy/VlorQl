@@ -411,10 +411,32 @@ fn singularize(s: &str) -> &str {
     // Known singular words that end in 's' — stripping would corrupt them.
     // Kept lowercase; checked case-insensitively.
     const SINGULAR_S_WORDS: &[&str] = &[
-        "series", "species", "status", "address", "addresses", "campus",
-        "analysis", "diagnosis", "basis", "crisis", "thesis", "radius",
-        "genus", "corpus", "income", "release", "license", "expense",
-        "database", "index", "matrix", "axis", "gas", "bus", "is", "this",
+        "series",
+        "species",
+        "status",
+        "address",
+        "addresses",
+        "campus",
+        "analysis",
+        "diagnosis",
+        "basis",
+        "crisis",
+        "thesis",
+        "radius",
+        "genus",
+        "corpus",
+        "income",
+        "release",
+        "license",
+        "expense",
+        "database",
+        "index",
+        "matrix",
+        "axis",
+        "gas",
+        "bus",
+        "is",
+        "this",
         "items", // common false positive — `_items` is itself plural marker
     ];
 
@@ -649,7 +671,10 @@ mod tests {
             .and_then(|r| r.get("column"))
             .and_then(|c| c.as_str())
             .unwrap_or("(missing)");
-        assert_eq!(right_col, "status_id", "status is singular; must not become statu_id");
+        assert_eq!(
+            right_col, "status_id",
+            "status is singular; must not become statu_id"
+        );
     }
 
     #[test]
@@ -667,7 +692,10 @@ mod tests {
             .and_then(|r| r.get("column"))
             .and_then(|c| c.as_str())
             .unwrap_or("(missing)");
-        assert_eq!(right_col, "Address_id", "Address is singular; trailing s must not be stripped");
+        assert_eq!(
+            right_col, "Address_id",
+            "Address is singular; trailing s must not be stripped"
+        );
     }
 
     #[test]
@@ -685,6 +713,9 @@ mod tests {
             .and_then(|r| r.get("column"))
             .and_then(|c| c.as_str())
             .unwrap_or("(missing)");
-        assert_eq!(right_col, "order_id", "orders → order_id (regular plural still singularized)");
+        assert_eq!(
+            right_col, "order_id",
+            "orders → order_id (regular plural still singularized)"
+        );
     }
 }

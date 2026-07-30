@@ -416,7 +416,10 @@ fn expressions_equal(a: &Expression, b: &Expression) -> bool {
             na == nb
                 && da == db
                 && aa.len() == ab.len()
-                && aa.iter().zip(ab.iter()).all(|(a, b)| expressions_equal(a, b))
+                && aa
+                    .iter()
+                    .zip(ab.iter())
+                    .all(|(a, b)| expressions_equal(a, b))
         }
         (
             Expression::BinaryOp {

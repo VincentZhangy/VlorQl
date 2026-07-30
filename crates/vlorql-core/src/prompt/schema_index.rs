@@ -39,24 +39,31 @@ impl SchemaIndexer {
     }
 
     /// Build/rebuild the vector index from an existing SchemaSnapshot.
-    pub async fn index_schema(&self, schema: &crate::schema::SchemaSnapshot) -> Result<(), VlorQLError> {
-        use qdrant_client::qdrant::{
-            CreateCollectionBuilder, Distance, VectorParamsBuilder,
-            PointStruct, UpsertPointsBuilder,
-        };
+    pub async fn index_schema(
+        &self,
+        schema: &crate::schema::SchemaSnapshot,
+    ) -> Result<(), VlorQLError> {
         use qdrant_client::Payload;
+        use qdrant_client::qdrant::{
+            CreateCollectionBuilder, Distance, PointStruct, UpsertPointsBuilder,
+            VectorParamsBuilder,
+        };
 
         // 1. Ensure collection exists
-        let collections = self.client.list_collections().await
-            .map_err(qdrant_error)?;
-        let exists = collections.collections.iter()
+        let collections = self.client.list_collections().await.map_err(qdrant_error)?;
+        let exists = collections
+            .collections
+            .iter()
             .any(|c| c.name == self.collection_name);
         if !exists {
             let params = VectorParamsBuilder::new(EMBEDDING_DIM, Distance::Cosine);
-            self.client.create_collection(
-                CreateCollectionBuilder::new(self.collection_name.clone())
-                    .vectors_config(params)
-            ).await.map_err(qdrant_error)?;
+            self.client
+                .create_collection(
+                    CreateCollectionBuilder::new(self.collection_name.clone())
+                        .vectors_config(params),
+                )
+                .await
+                .map_err(qdrant_error)?;
         }
 
         // 2. Generate points for each table and column
@@ -69,9 +76,7 @@ impl SchemaIndexer {
             payload.insert("type", "table");
             payload.insert("name", table.name.clone());
             payload.insert("text", text);
-            points.push(
-                PointStruct::new(id, embedding, payload)
-            );
+            points.push(PointStruct::new(id, embedding, payload));
             id += 1;
 
             for column in &table.columns {
@@ -82,18 +87,20 @@ impl SchemaIndexer {
                 payload.insert("table", table.name.clone());
                 payload.insert("column", column.name.clone());
                 payload.insert("text", text);
-                points.push(
-                    PointStruct::new(id, embedding, payload)
-                );
+                points.push(PointStruct::new(id, embedding, payload));
                 id += 1;
             }
         }
 
         // 3. Upload points in batches
         if !points.is_empty() {
-            self.client.upsert_points(
-                UpsertPointsBuilder::new(self.collection_name.clone(), points)
-            ).await.map_err(qdrant_error)?;
+            self.client
+                .upsert_points(UpsertPointsBuilder::new(
+                    self.collection_name.clone(),
+                    points,
+                ))
+                .await
+                .map_err(qdrant_error)?;
         }
 
         Ok(())
@@ -104,12 +111,16 @@ impl SchemaIndexer {
         use qdrant_client::qdrant::QueryPointsBuilder;
 
         let query_vector = embed_text(question).await?;
-        let result = self.client.query(
-            QueryPointsBuilder::new(self.collection_name.clone())
-                .query(query_vector)
-                .limit(top_k)
-                .with_payload(true)
-        ).await.map_err(qdrant_error)?;
+        let result = self
+            .client
+            .query(
+                QueryPointsBuilder::new(self.collection_name.clone())
+                    .query(query_vector)
+                    .limit(top_k)
+                    .with_payload(true),
+            )
+            .await
+            .map_err(qdrant_error)?;
 
         let mut tables: Vec<String> = Vec::new();
         for point in result.result {
@@ -129,31 +140,46 @@ impl SchemaIndexer {
 
     /// Check Qdrant connection health.
     pub async fn health_check(&self) -> Result<(), VlorQLError> {
-        self.client.health_check().await
-            .map_err(qdrant_error)?;
+        self.client.health_check().await.map_err(qdrant_error)?;
         Ok(())
     }
 }
 
 /// Generate a text description for a table (used for embedding).
 pub fn table_to_text(schema: &crate::schema::TableSchema) -> String {
-    let cols: Vec<String> = schema.columns.iter()
+    let cols: Vec<String> = schema
+        .columns
+        .iter()
         .map(|c| format!("{} {}", c.name, c.data_type.type_name()))
         .collect();
-    let desc = schema.description.as_ref()
+    let desc = schema
+        .description
+        .as_ref()
         .map(|d| format!(" — {d}"))
         .unwrap_or_default();
-    format!("Table: {}{}\nColumns: {}", schema.name, desc, cols.join(", "))
+    format!(
+        "Table: {}{}\nColumns: {}",
+        schema.name,
+        desc,
+        cols.join(", ")
+    )
 }
 
 /// Generate a text description for a column (used for embedding).
 pub fn column_to_text(table: &str, column: &crate::schema::ColumnSchema) -> String {
-    let desc = column.description.as_ref()
+    let desc = column
+        .description
+        .as_ref()
         .map(|d| format!(" — {d}"))
         .unwrap_or_default();
-    format!("Column: {}.{} {}{}", table, column.name, column.data_type.type_name(), desc)
+    format!(
+        "Column: {}.{} {}{}",
+        table,
+        column.name,
+        column.data_type.type_name(),
+        desc
+    )
 }
-
 
 /// OpenAI embedding dimension for text-embedding-3-small.
 #[cfg(feature = "vector-search")]

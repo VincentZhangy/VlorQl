@@ -462,8 +462,7 @@ fn validate_binary_operation(
             if !are_numeric(left, right) {
                 errors.push(type_mismatch_error(
                     "compatible numeric operands",
-                    format!("{} and {}", left.type_name(), right.type_name()
-),
+                    format!("{} and {}", left.type_name(), right.type_name()),
                     format!("binary operator {operator:?}"),
                     json!({"left": left, "right": right, "operator": operator}),
                 ));
@@ -474,8 +473,7 @@ fn validate_binary_operation(
             if left != DataType::Boolean || right != DataType::Boolean {
                 errors.push(type_mismatch_error(
                     "boolean operands",
-                    format!("{} and {}", left.type_name(), right.type_name()
-),
+                    format!("{} and {}", left.type_name(), right.type_name()),
                     format!("binary operator {operator:?}"),
                     json!({"left": left, "right": right, "operator": operator}),
                 ));
@@ -500,8 +498,7 @@ fn validate_binary_operation(
             if !is_string_compatible(left) || !is_string_compatible(right) {
                 errors.push(type_mismatch_error(
                     "string operands",
-                    format!("{} and {}", left.type_name(), right.type_name()
-),
+                    format!("{} and {}", left.type_name(), right.type_name()),
                     format!("binary operator {operator:?}"),
                     json!({"left": left, "right": right, "operator": operator}),
                 ));
@@ -522,8 +519,7 @@ fn validate_comparison(
             if !is_string_compatible(left) || !is_string_compatible(right) {
                 errors.push(type_mismatch_error(
                     "string operands",
-                    format!("{} and {}", left.type_name(), right.type_name()
-),
+                    format!("{} and {}", left.type_name(), right.type_name()),
                     format!("comparison {operator:?}"),
                     json!({"left": left, "right": right, "operator": operator}),
                 ));
@@ -556,8 +552,7 @@ fn require_numeric(expression: &str, actual: DataType, errors: &mut Vec<VlorQLEr
     if !is_numeric(actual) && actual != DataType::Null {
         errors.push(type_mismatch_error(
             "numeric",
-            actual.type_name()
-,
+            actual.type_name(),
             expression,
             json!({"actual": actual}),
         ));
@@ -568,8 +563,7 @@ fn require_string(expression: &str, actual: DataType, errors: &mut Vec<VlorQLErr
     if !is_string_compatible(actual) {
         errors.push(type_mismatch_error(
             "string",
-            actual.type_name()
-,
+            actual.type_name(),
             expression,
             json!({"actual": actual}),
         ));

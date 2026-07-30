@@ -446,7 +446,12 @@ impl JoinReorderer {
             }
             None => {
                 self.cost
-                    .estimate_scan(plan.from.table_name().expect("FROM must have a table name in join reorder"), None)
+                    .estimate_scan(
+                        plan.from
+                            .table_name()
+                            .expect("FROM must have a table name in join reorder"),
+                        None,
+                    )
                     .await
             }
         }
@@ -464,12 +469,23 @@ impl JoinReorderer {
             base_card.push(
                 self.cost
                     .cardinality()
-                    .estimate_table_cardinality(relation.from.table_name().expect("relation must have a table name in join reorder"))
+                    .estimate_table_cardinality(
+                        relation
+                            .from
+                            .table_name()
+                            .expect("relation must have a table name in join reorder"),
+                    )
                     .await?,
             );
             scan_cost.push(
                 self.cost
-                    .estimate_scan(relation.from.table_name().expect("relation must have a table name in join reorder"), None)
+                    .estimate_scan(
+                        relation
+                            .from
+                            .table_name()
+                            .expect("relation must have a table name in join reorder"),
+                        None,
+                    )
                     .await?,
             );
         }

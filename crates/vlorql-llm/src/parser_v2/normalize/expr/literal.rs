@@ -156,13 +156,11 @@ pub(super) fn repair_expression_value(val: &mut Value) -> bool {
                         // But use the inner function_call's name for the actual aggregate.
                     }
                     let args_arr = fc_obj.get("args")?;
-                    Some(Value::Array(
-                        if let Some(arr) = args_arr.as_array() {
-                            arr.clone()
-                        } else {
-                            vec![args_arr.clone()]
-                        },
-                    ))
+                    Some(Value::Array(if let Some(arr) = args_arr.as_array() {
+                        arr.clone()
+                    } else {
+                        vec![args_arr.clone()]
+                    }))
                 })
                 .or_else(|| {
                     let expr_val = obj.remove("expr").unwrap_or(Value::Null);
@@ -198,8 +196,7 @@ pub(super) fn repair_expression_value(val: &mut Value) -> bool {
         // `"order_count"`, `"total_sales"`, `"product_sum"` — these are
         // computed aggregates, not real columns.  Convert to function_call
         // so the validator can process them correctly.
-        if let Some(col_name) = obj.get("column").and_then(|v| v.as_str())
-        {
+        if let Some(col_name) = obj.get("column").and_then(|v| v.as_str()) {
             let lower = col_name.to_ascii_lowercase();
             // Common aggregate-derived suffix patterns.
             let agg_fn = if lower.ends_with("_count") {

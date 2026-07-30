@@ -74,7 +74,9 @@ async fn check_prompt_size() {
     ));
 
     let builder = PromptBuilder::new(schema, DialectProfile::default(), PolicyConfig::default());
-    let prompt = builder.build_system_prompt("Show users and their organizations").await;
+    let prompt = builder
+        .build_system_prompt("Show users and their organizations")
+        .await;
     println!("Prompt size: {} chars", prompt.chars().count());
     println!("Prompt size: {} bytes", prompt.len());
     assert!(prompt.chars().count() < 12_000);

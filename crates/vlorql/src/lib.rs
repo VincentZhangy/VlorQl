@@ -21,9 +21,9 @@ pub(crate) mod retry;
 
 use futures::stream::Stream;
 use serde_json::json;
+use std::sync::Arc;
 #[cfg(feature = "vector-search")]
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::Instrument;
@@ -259,7 +259,11 @@ impl VlorQl {
 
             #[cfg(feature = "vector-search")]
             if let Some(ref indexer) = self.schema_indexer {
-                if self.schema_indexed.compare_exchange(false, true, Ordering::Relaxed, Ordering::Relaxed).is_ok() {
+                if self
+                    .schema_indexed
+                    .compare_exchange(false, true, Ordering::Relaxed, Ordering::Relaxed)
+                    .is_ok()
+                {
                     indexer.index_schema(&schema).await.ok();
                 }
             }
@@ -483,7 +487,11 @@ impl VlorQl {
 
         #[cfg(feature = "vector-search")]
         if let Some(ref indexer) = self.schema_indexer {
-            if self.schema_indexed.compare_exchange(false, true, Ordering::Relaxed, Ordering::Relaxed).is_ok() {
+            if self
+                .schema_indexed
+                .compare_exchange(false, true, Ordering::Relaxed, Ordering::Relaxed)
+                .is_ok()
+            {
                 indexer.index_schema(&schema).await.ok();
             }
         }

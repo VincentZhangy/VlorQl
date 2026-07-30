@@ -1,9 +1,9 @@
 use crate::{DEFAULT_MAX_RETRIES, VlorQl};
 use serde_json::json;
 use std::path::PathBuf;
+use std::sync::Arc;
 #[cfg(feature = "vector-search")]
 use std::sync::atomic::AtomicBool;
-use std::sync::Arc;
 use vlorql_core::cache::{CompileCache, LlmResponseCache, PromptCache, SchemaCache};
 use vlorql_core::compile::{RewriteEngine, SqlCompiler, get_compiler};
 use vlorql_core::errors::{ConfigErrorKind, VlorQLError};
@@ -332,7 +332,10 @@ impl VlorQlBuilder {
     /// Supplies a SchemaIndexer for semantic schema retrieval via Qdrant.
     #[cfg(feature = "vector-search")]
     #[must_use]
-    pub fn with_schema_indexer(mut self, indexer: Arc<vlorql_core::prompt::schema_index::SchemaIndexer>) -> Self {
+    pub fn with_schema_indexer(
+        mut self,
+        indexer: Arc<vlorql_core::prompt::schema_index::SchemaIndexer>,
+    ) -> Self {
         self.schema_indexer = Some(indexer);
         self
     }

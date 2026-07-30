@@ -374,16 +374,19 @@ impl ValidationPipeline {
         // column that was previously pruned.
         let this = self.clone();
         let opt_clone = optimized_plan.clone();
-        if let Err(stage_errors) = tokio::task::spawn_blocking(move || this.policy.validate(&opt_clone, &this.schema))
-            .await
-            .map_err(|join_err| {
-                ValidationErrors::new(vec![VlorQLError::config(
-                    crate::errors::ConfigErrorKind::InternalError {
-                        reason: format!("policy validate spawn_blocking join failed: {join_err}"),
-                    },
-                    serde_json::json!({"operation": "validate_and_optimize"}),
-                )])
-            })?
+        if let Err(stage_errors) =
+            tokio::task::spawn_blocking(move || this.policy.validate(&opt_clone, &this.schema))
+                .await
+                .map_err(|join_err| {
+                    ValidationErrors::new(vec![VlorQLError::config(
+                        crate::errors::ConfigErrorKind::InternalError {
+                            reason: format!(
+                                "policy validate spawn_blocking join failed: {join_err}"
+                            ),
+                        },
+                        serde_json::json!({"operation": "validate_and_optimize"}),
+                    )])
+                })?
         {
             return Err(ValidationErrors(stage_errors));
         }

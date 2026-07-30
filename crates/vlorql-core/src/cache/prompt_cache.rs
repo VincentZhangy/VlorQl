@@ -56,8 +56,10 @@ impl PromptCacheKey {
 /// JSON and hashing the bytes with xxh3.
 pub(crate) fn hash_policy(policy: &PolicyConfig) -> u64 {
     // INVARIANT: PolicyConfig derives Serialize, so to_value / to_string cannot fail.
-    let json = serde_json::to_value(policy).expect("invariant: PolicyConfig should serialize to JSON");
-    let canonical = serde_json::to_string(&json).expect("invariant: JSON value should serialize to string");
+    let json =
+        serde_json::to_value(policy).expect("invariant: PolicyConfig should serialize to JSON");
+    let canonical =
+        serde_json::to_string(&json).expect("invariant: JSON value should serialize to string");
     let mut hasher = Xxh3::new();
     canonical.hash(&mut hasher);
     hasher.finish()

@@ -264,7 +264,10 @@ mod tests {
     fn parse_distinct_propagates() {
         let raw = r#"{"select": [{"type": "column_ref", "column": "status"}], "from": {"table": "users"}, "distinct": true}"#;
         let plan = parse_query_plan(raw, None).unwrap();
-        assert!(plan.distinct, "distinct=true must propagate through the full pipeline");
+        assert!(
+            plan.distinct,
+            "distinct=true must propagate through the full pipeline"
+        );
     }
 
     #[test]
@@ -272,7 +275,10 @@ mod tests {
         let raw = r#"{"select": [{"type": "column_ref", "column": "id"}], "from": {"table": "users"}, "set_operation": {"operation": "union_all", "right": {"select": [{"type": "column_ref", "column": "id"}], "from": {"table": "archived_users"}}}}"#;
         let plan = parse_query_plan(raw, None).unwrap();
         let set_op = plan.set_operation.expect("set_operation must propagate");
-        assert!(matches!(set_op.operation, vlorql_core::schema::SetOperation::UnionAll));
+        assert!(matches!(
+            set_op.operation,
+            vlorql_core::schema::SetOperation::UnionAll
+        ));
         assert_eq!(set_op.right.from.table_name().unwrap(), "archived_users");
     }
 
@@ -282,7 +288,10 @@ mod tests {
         let plan = parse_query_plan(raw, None).unwrap();
         let ctes = plan.ctes.expect("ctes must propagate");
         assert_eq!(ctes.len(), 1);
-        assert!(ctes[0].recursive, "recursive=true must propagate through the full pipeline");
+        assert!(
+            ctes[0].recursive,
+            "recursive=true must propagate through the full pipeline"
+        );
     }
 
     #[test]
@@ -302,8 +311,13 @@ mod tests {
         // LLM writes `{"union_all": {...}}` instead of nested set_operation.
         let raw = r#"{"select": [{"type": "column_ref", "column": "id"}], "from": {"table": "users"}, "union_all": {"select": [{"type": "column_ref", "column": "id"}], "from": {"table": "archived_users"}}}"#;
         let plan = parse_query_plan(raw, None).unwrap();
-        let set_op = plan.set_operation.expect("union_all must lift to set_operation");
-        assert!(matches!(set_op.operation, vlorql_core::schema::SetOperation::UnionAll));
+        let set_op = plan
+            .set_operation
+            .expect("union_all must lift to set_operation");
+        assert!(matches!(
+            set_op.operation,
+            vlorql_core::schema::SetOperation::UnionAll
+        ));
         assert_eq!(set_op.right.from.table_name().unwrap(), "archived_users");
     }
 
@@ -313,7 +327,10 @@ mod tests {
         let raw = r#"{"select": [{"type": "star"}], "from": {"table": "a"}, "set_operation": {"operation": "UNION ALL", "right": {"select": [{"type": "star"}], "from": {"table": "b"}}}}"#;
         let plan = parse_query_plan(raw, None).unwrap();
         let set_op = plan.set_operation.unwrap();
-        assert!(matches!(set_op.operation, vlorql_core::schema::SetOperation::UnionAll));
+        assert!(matches!(
+            set_op.operation,
+            vlorql_core::schema::SetOperation::UnionAll
+        ));
     }
 
     #[test]
@@ -322,7 +339,10 @@ mod tests {
         let raw = r#"{"select": [{"type": "star"}], "from": {"table": "a"}, "set_operation": {"op": "intersect", "right": {"select": [{"type": "star"}], "from": {"table": "b"}}}}"#;
         let plan = parse_query_plan(raw, None).unwrap();
         let set_op = plan.set_operation.unwrap();
-        assert!(matches!(set_op.operation, vlorql_core::schema::SetOperation::Intersect));
+        assert!(matches!(
+            set_op.operation,
+            vlorql_core::schema::SetOperation::Intersect
+        ));
     }
 
     #[test]
@@ -331,6 +351,9 @@ mod tests {
         let raw = r#"{"select": [{"type": "star"}], "from": {"table": "a"}, "minus": {"select": [{"type": "star"}], "from": {"table": "b"}}}"#;
         let plan = parse_query_plan(raw, None).unwrap();
         let set_op = plan.set_operation.unwrap();
-        assert!(matches!(set_op.operation, vlorql_core::schema::SetOperation::Except));
+        assert!(matches!(
+            set_op.operation,
+            vlorql_core::schema::SetOperation::Except
+        ));
     }
 }

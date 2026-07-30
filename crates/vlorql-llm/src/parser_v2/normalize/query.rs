@@ -6,8 +6,19 @@
 
 /// Fields that are valid on a QueryPlan (used for stripping and lifting).
 const PLAN_FIELDS: &[&str] = &[
-    "select", "from", "where", "group_by", "having", "order_by", "limit", "offset", "joins",
-    "ctes", "distinct", "distinct_on", "set_operation",
+    "select",
+    "from",
+    "where",
+    "group_by",
+    "having",
+    "order_by",
+    "limit",
+    "offset",
+    "joins",
+    "ctes",
+    "distinct",
+    "distinct_on",
+    "set_operation",
 ];
 
 /// Fields that belong at the QueryPlan top level but the LLM sometimes
@@ -175,14 +186,33 @@ fn sanitize_null_array_entries(val: &mut serde_json::Value) -> bool {
     let mut changed = false;
     // Aggregate function names that are NOT valid Predicate variants.
     const AGG_NAMES: &[&str] = &[
-        "count", "sum", "avg", "min", "max",
-        "string_agg", "array_agg", "jsonb_agg", "json_agg",
+        "count",
+        "sum",
+        "avg",
+        "min",
+        "max",
+        "string_agg",
+        "array_agg",
+        "jsonb_agg",
+        "json_agg",
     ];
     // Expression types that are NOT valid Predicate variants.
     const EXPR_TYPES: &[&str] = &[
-        "string", "integer", "number", "float", "boolean", "null",
-        "literal", "column_ref", "function_call", "binary_op",
-        "star", "subquery", "case", "window_function", "expr",
+        "string",
+        "integer",
+        "number",
+        "float",
+        "boolean",
+        "null",
+        "literal",
+        "column_ref",
+        "function_call",
+        "binary_op",
+        "star",
+        "subquery",
+        "case",
+        "window_function",
+        "expr",
     ];
     for field in &["order_by", "group_by", "having"] {
         if let Some(arr) = obj.get_mut(*field).and_then(|v| v.as_array_mut()) {
@@ -197,7 +227,9 @@ fn sanitize_null_array_entries(val: &mut serde_json::Value) -> bool {
                 arr.retain(|v| {
                     v.as_object()
                         .and_then(|o| o.get("type").and_then(|t| t.as_str()))
-                        .is_none_or(|t| t != "order" && !AGG_NAMES.contains(&t) && !EXPR_TYPES.contains(&t))
+                        .is_none_or(|t| {
+                            t != "order" && !AGG_NAMES.contains(&t) && !EXPR_TYPES.contains(&t)
+                        })
                 });
                 if arr.len() != before {
                     changed = true;
@@ -222,8 +254,17 @@ fn sanitize_null_array_entries(val: &mut serde_json::Value) -> bool {
         // Uses a whitelist of valid Predicate variants — anything else is
         // an LLM hallucination and should be stripped.
         const VALID_PRED_TYPES: &[&str] = &[
-            "comparison", "and", "or", "not", "between",
-            "in", "like", "is_null", "exists", "true", "false",
+            "comparison",
+            "and",
+            "or",
+            "not",
+            "between",
+            "in",
+            "like",
+            "is_null",
+            "exists",
+            "true",
+            "false",
         ];
         if *field == "having" || *field == "where" {
             let field_key = *field;

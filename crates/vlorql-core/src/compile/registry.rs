@@ -107,8 +107,7 @@ impl SqlCompiler for ConfigCompiler {
     }
 
     fn dialect(&self) -> SqlDialect {
-        super::dialect_config::dialect_from_name(&self.0.name)
-            .unwrap_or(SqlDialect::Postgres)
+        super::dialect_config::dialect_from_name(&self.0.name).unwrap_or(SqlDialect::Postgres)
     }
 }
 

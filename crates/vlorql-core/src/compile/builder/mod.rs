@@ -1,11 +1,9 @@
 //! Dialect-aware parameterized SQL construction.
 
-use super::dialect_config::{dialect_from_name, DialectConfig};
+use super::dialect_config::{DialectConfig, dialect_from_name};
 use super::types::Parameter;
 use crate::errors::{CompilationErrorKind, VlorQLError};
-use crate::schema::{
-    DataType, Expression, FromClause, Predicate, QueryPlan, SqlDialect,
-};
+use crate::schema::{DataType, Expression, FromClause, Predicate, QueryPlan, SqlDialect};
 use crate::validate::ValidatedPlan;
 use serde_json::{Value, json};
 use std::borrow::Cow;

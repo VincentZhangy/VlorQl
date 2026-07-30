@@ -5,8 +5,8 @@
 //! preserve additional context without parsing an error string.
 
 mod kinds;
-mod vlorql_error;
 mod validation;
+mod vlorql_error;
 
 pub use kinds::{
     AuditErrorKind, CompilationErrorKind, ConfigErrorKind, LlmErrorKind, PolicyErrorKind,
@@ -14,11 +14,10 @@ pub use kinds::{
 };
 
 pub use vlorql_error::{
-    CompilationError, ConfigError, LlmError, PolicyError, SchemaError, ValidationError,
-    VlorQLError,
+    CompilationError, ConfigError, LlmError, PolicyError, SchemaError, ValidationError, VlorQLError,
 };
 
-pub use validation::{validate, ValidationErrors};
+pub use validation::{ValidationErrors, validate};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;

@@ -1,10 +1,10 @@
+use super::helpers::{parse_binary_op, parse_comparison_op, parse_data_type, parse_join_type};
 use super::{build_expression, build_predicate};
-use super::helpers::{parse_data_type, parse_comparison_op, parse_binary_op, parse_join_type};
 use serde_json::json;
-use vlorql_core::schema::{Expression, Predicate, InTarget, BinaryOperator, DataType};
 use vlorql_core::schema::ComparisonOperator::*;
 use vlorql_core::schema::DataType::*;
 use vlorql_core::schema::JoinType::*;
+use vlorql_core::schema::{BinaryOperator, DataType, Expression, InTarget, Predicate};
 
 // ── Expression building ───────────────────────────────────────
 

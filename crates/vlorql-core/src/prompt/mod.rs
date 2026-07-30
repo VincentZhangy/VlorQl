@@ -4,9 +4,9 @@
 //! custom instructions, schema simplification, and few-shot examples.
 
 pub mod builder;
-pub mod skill;
 #[cfg(feature = "vector-search")]
 pub mod schema_index;
+pub mod skill;
 
 pub use builder::PromptBuilder;
 pub use skill::{ExamplePair, PromptSkill};
@@ -162,7 +162,9 @@ mod tests {
 
     #[tokio::test]
     async fn relevant_table_match_includes_foreign_key_neighbor() {
-        let relevant = builder().filter_relevant_tables("Show users and their email addresses").await;
+        let relevant = builder()
+            .filter_relevant_tables("Show users and their email addresses")
+            .await;
         assert_eq!(
             relevant,
             vec!["users".to_owned(), "organizations".to_owned()]
@@ -171,20 +173,26 @@ mod tests {
 
     #[tokio::test]
     async fn description_match_selects_relevant_table() {
-        let relevant = builder().filter_relevant_tables("Summarize customer purchases").await;
+        let relevant = builder()
+            .filter_relevant_tables("Summarize customer purchases")
+            .await;
         assert!(relevant.contains(&"orders".to_owned()));
         assert!(!relevant.contains(&"audit_logs".to_owned()));
     }
 
     #[tokio::test]
     async fn no_relevance_match_returns_all_tables() {
-        let relevant = builder().filter_relevant_tables("unrelated terminology xyzzy").await;
+        let relevant = builder()
+            .filter_relevant_tables("unrelated terminology xyzzy")
+            .await;
         assert_eq!(relevant.len(), schema().tables.len());
     }
 
     #[tokio::test]
     async fn system_prompt_contains_all_required_sections_and_strict_schema() {
-        let prompt = builder().build_system_prompt("Show users and their organizations").await;
+        let prompt = builder()
+            .build_system_prompt("Show users and their organizations")
+            .await;
 
         assert!(prompt.contains("# Role"));
         assert!(prompt.contains("## Schema"));
@@ -431,21 +439,26 @@ mod extra_tests {
 
     #[tokio::test]
     async fn vector_search_disabled_falls_back_to_tfidf() {
-        let builder = PromptBuilder::new(
-            non_empty_schema(),
-            non_empty_dialect(),
-            non_empty_policy(),
-        )
-        .with_vector_search(false);
-        let tables = builder.filter_relevant_tables("Show me customer purchases").await;
-        assert!(tables.contains(&"orders".to_owned()),
-            "TF-IDF fallback should find orders table: got {tables:?}");
+        let builder =
+            PromptBuilder::new(non_empty_schema(), non_empty_dialect(), non_empty_policy())
+                .with_vector_search(false);
+        let tables = builder
+            .filter_relevant_tables("Show me customer purchases")
+            .await;
+        assert!(
+            tables.contains(&"orders".to_owned()),
+            "TF-IDF fallback should find orders table: got {tables:?}"
+        );
     }
 
     #[cfg(feature = "vector-search")]
     #[tokio::test]
     async fn vector_search_returns_relevant_tables() {
-        let indexer = match crate::prompt::schema_index::SchemaIndexer::connect("http://localhost:6334").await {
+        let indexer = match crate::prompt::schema_index::SchemaIndexer::connect(
+            "http://localhost:6334",
+        )
+        .await
+        {
             Ok(idx) => {
                 let _ = idx.index_schema(&*non_empty_schema()).await;
                 Arc::new(idx)
@@ -456,17 +469,16 @@ mod extra_tests {
             }
         };
 
-        let tables = PromptBuilder::new(
-            non_empty_schema(),
-            non_empty_dialect(),
-            non_empty_policy(),
-        )
-        .with_vector_search(true)
-        .with_schema_indexer(indexer)
-        .filter_relevant_tables("Show me customer purchases")
-        .await;
+        let tables =
+            PromptBuilder::new(non_empty_schema(), non_empty_dialect(), non_empty_policy())
+                .with_vector_search(true)
+                .with_schema_indexer(indexer)
+                .filter_relevant_tables("Show me customer purchases")
+                .await;
 
-        assert!(tables.contains(&"orders".to_owned()),
-            "vector search should find orders table: got {tables:?}");
+        assert!(
+            tables.contains(&"orders".to_owned()),
+            "vector search should find orders table: got {tables:?}"
+        );
     }
 }

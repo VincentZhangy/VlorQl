@@ -8,7 +8,7 @@ use crate::schema::{
     SqlDialect,
 };
 
-use super::{QueryBuilder, compilation_error, formatting_error, MYSQL_UNLIMITED_LIMIT};
+use super::{MYSQL_UNLIMITED_LIMIT, QueryBuilder, compilation_error, formatting_error};
 
 impl<'a> QueryBuilder<'a> {
     pub(crate) fn build_query(
@@ -360,11 +360,58 @@ fn validate_unquoted_identifier(identifier: &str) -> Result<(), VlorQLError> {
 
 /// Standard SQL reserved keywords.  Sorted alphabetically for binary search.
 static RESERVED_KEYWORDS: &[&str] = &[
-    "ALL", "AND", "AS", "BETWEEN", "BY", "CASE", "CROSS", "DELETE", "DESC", "DISTINCT", "DROP",
-    "ELSE", "END", "ESCAPE", "EXCEPT", "EXISTS", "FALSE", "FROM", "FULL", "GROUP", "HAVING", "IN",
-    "INDEX", "INNER", "INSERT", "INTERSECT", "INTO", "IS", "JOIN", "LEFT", "LIKE", "LIMIT", "NOT",
-    "NULL", "OFFSET", "ON", "OR", "ORDER", "OUTER", "RIGHT", "SELECT", "SET", "TABLE", "THEN",
-    "TRUE", "UNION", "UNIQUE", "UPDATE", "VALUES", "WHEN", "WHERE", "WITH",
+    "ALL",
+    "AND",
+    "AS",
+    "BETWEEN",
+    "BY",
+    "CASE",
+    "CROSS",
+    "DELETE",
+    "DESC",
+    "DISTINCT",
+    "DROP",
+    "ELSE",
+    "END",
+    "ESCAPE",
+    "EXCEPT",
+    "EXISTS",
+    "FALSE",
+    "FROM",
+    "FULL",
+    "GROUP",
+    "HAVING",
+    "IN",
+    "INDEX",
+    "INNER",
+    "INSERT",
+    "INTERSECT",
+    "INTO",
+    "IS",
+    "JOIN",
+    "LEFT",
+    "LIKE",
+    "LIMIT",
+    "NOT",
+    "NULL",
+    "OFFSET",
+    "ON",
+    "OR",
+    "ORDER",
+    "OUTER",
+    "RIGHT",
+    "SELECT",
+    "SET",
+    "TABLE",
+    "THEN",
+    "TRUE",
+    "UNION",
+    "UNIQUE",
+    "UPDATE",
+    "VALUES",
+    "WHEN",
+    "WHERE",
+    "WITH",
 ];
 
 /// Returns `true` when `ident` is a SQL reserved keyword (case-insensitive).

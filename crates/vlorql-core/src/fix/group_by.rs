@@ -132,7 +132,10 @@ pub fn fix_group_by(plan: &mut QueryPlan) -> bool {
     }
 
     {
-        let group_by = plan.group_by.as_mut().expect("invariant: group_by was just initialized");
+        let group_by = plan
+            .group_by
+            .as_mut()
+            .expect("invariant: group_by was just initialized");
         for col in required {
             if !group_by.contains(&col) {
                 group_by.push(col);

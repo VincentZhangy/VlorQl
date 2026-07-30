@@ -46,7 +46,9 @@ pub(super) fn repair_predicate_type(val: &mut Value) -> bool {
             // Only override when the key's value is a non-null object (meaningful
             // content). Null/empty values are garbage fields, not key-as-type.
             if let Some(v) = obj.get(key)
-                && (v.is_null() || v.as_str().is_some() || (v.as_object().is_some_and(|o| o.is_empty())))
+                && (v.is_null()
+                    || v.as_str().is_some()
+                    || (v.as_object().is_some_and(|o| o.is_empty())))
             {
                 continue;
             }
@@ -95,7 +97,8 @@ pub(super) fn repair_predicate_type(val: &mut Value) -> bool {
             if key == "not" || key == "exists" {
                 // If the value already contains `child`, prefer embedding
                 // the extracted key into that child rather than overwriting.
-                if key == "not" && let Some(child_obj) = v.as_object()
+                if key == "not"
+                    && let Some(child_obj) = v.as_object()
                     && child_obj.contains_key("child")
                 {
                     if let Some(child_val) = child_obj.get("child").cloned() {
@@ -231,18 +234,22 @@ fn unwrap_operator_field(obj: &mut serde_json::Map<String, Value>) -> bool {
     };
     // Extract operator name: try string first, then object with "name" field
     let op_name = arr[0].as_str().or_else(|| {
-        arr[0].as_object()
+        arr[0]
+            .as_object()
             .and_then(|o| o.get("name").and_then(|v| v.as_str()))
     });
 
     match op_name {
         Some("between" | "not_between") => {
             // Convert comparison to Between predicate
-            let expr = obj.get("left").cloned()
+            let expr = obj
+                .get("left")
+                .cloned()
                 .or_else(|| obj.get("expr").cloned())
                 .unwrap_or(Value::Null);
             // Try to extract low/high from function_call args
-            let (low, high) = arr[0].as_object()
+            let (low, high) = arr[0]
+                .as_object()
                 .and_then(|o| o.get("args"))
                 .and_then(|a| a.as_array())
                 .map(|a| {
@@ -362,9 +369,9 @@ pub(super) fn normalize_predicate(val: &mut Value) -> bool {
             .and_then(|v| v.as_str())
             .unwrap_or("gt")
             .to_owned();
-        let right = obj.get("right").cloned().unwrap_or_else(|| {
-            serde_json::json!({"type": "literal", "value": 0, "data_type": "int"})
-        });
+        let right = obj.get("right").cloned().unwrap_or_else(
+            || serde_json::json!({"type": "literal", "value": 0, "data_type": "int"}),
+        );
         let comparison = serde_json::json!({
             "type": "comparison",
             "left": inner,
@@ -529,13 +536,17 @@ pub(super) fn normalize_predicate(val: &mut Value) -> bool {
         // "missing `low` field" — the validator will catch nonsense bounds.
         if pred_type == "between" {
             if !obj.contains_key("low") {
-                obj.insert("low".to_owned(),
-                    serde_json::json!({"type": "literal", "value": 0, "data_type": "int"}));
+                obj.insert(
+                    "low".to_owned(),
+                    serde_json::json!({"type": "literal", "value": 0, "data_type": "int"}),
+                );
                 changed = true;
             }
             if !obj.contains_key("high") {
-                obj.insert("high".to_owned(),
-                    serde_json::json!({"type": "literal", "value": null, "data_type": "null"}));
+                obj.insert(
+                    "high".to_owned(),
+                    serde_json::json!({"type": "literal", "value": null, "data_type": "null"}),
+                );
                 changed = true;
             }
         }

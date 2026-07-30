@@ -1,10 +1,10 @@
-use serde_json::Value;
 use super::BuildError;
 use super::helpers::{
-    req_str, opt_str, req_obj, req_arr, type_name,
-    parse_binary_op, parse_comparison_op, parse_data_type,
+    opt_str, parse_binary_op, parse_comparison_op, parse_data_type, req_arr, req_obj, req_str,
+    type_name,
 };
-use vlorql_core::schema::{Expression, Predicate, DataType, InTarget};
+use serde_json::Value;
+use vlorql_core::schema::{DataType, Expression, InTarget, Predicate};
 
 // ── Expression builder ────────────────────────────────────────────
 
@@ -345,7 +345,11 @@ pub fn build_predicate(val: &Value) -> Result<Predicate, BuildError> {
                     .ok_or_else(|| BuildError::new("right", "missing `right` field"))?,
             )
             .map_err(|e| e.at("right"))?;
-            Ok(Predicate::Comparison { left: Box::new(left), op, right: Box::new(right) })
+            Ok(Predicate::Comparison {
+                left: Box::new(left),
+                op,
+                right: Box::new(right),
+            })
         }
         "and" => {
             let left = build_predicate(
@@ -405,7 +409,11 @@ pub fn build_predicate(val: &Value) -> Result<Predicate, BuildError> {
                     .ok_or_else(|| BuildError::new("high", "missing `high` field"))?,
             )
             .map_err(|e| e.at("high"))?;
-            Ok(Predicate::Between { expr: Box::new(expr), low: Box::new(low), high: Box::new(high) })
+            Ok(Predicate::Between {
+                expr: Box::new(expr),
+                low: Box::new(low),
+                high: Box::new(high),
+            })
         }
         "in" => {
             let expr = build_expression(
@@ -435,7 +443,10 @@ pub fn build_predicate(val: &Value) -> Result<Predicate, BuildError> {
                     ),
                 ));
             };
-            Ok(Predicate::In { expr: Box::new(expr), target })
+            Ok(Predicate::In {
+                expr: Box::new(expr),
+                target,
+            })
         }
         "like" => {
             let expr = build_expression(
@@ -444,7 +455,10 @@ pub fn build_predicate(val: &Value) -> Result<Predicate, BuildError> {
             )
             .map_err(|e| e.at("expr"))?;
             let pattern = req_str(obj, "pattern", "")?.to_owned();
-            Ok(Predicate::Like { expr: Box::new(expr), pattern })
+            Ok(Predicate::Like {
+                expr: Box::new(expr),
+                pattern,
+            })
         }
         "is_null" => {
             let expr = build_expression(
@@ -452,7 +466,9 @@ pub fn build_predicate(val: &Value) -> Result<Predicate, BuildError> {
                     .ok_or_else(|| BuildError::new("expr", "missing `expr` field"))?,
             )
             .map_err(|e| e.at("expr"))?;
-            Ok(Predicate::IsNull { expr: Box::new(expr) })
+            Ok(Predicate::IsNull {
+                expr: Box::new(expr),
+            })
         }
         "true" => Ok(Predicate::True),
         "false" => Ok(Predicate::False),

@@ -1,7 +1,7 @@
 use super::*;
 use crate::schema::{
-    BinaryOperator, ColumnSchema, ComparisonOperator, DataType, Expression, ForeignKey,
-    FromClause, Predicate, Projection, SchemaMetadata, SchemaSnapshot, TableSchema,
+    BinaryOperator, ColumnSchema, ComparisonOperator, DataType, Expression, ForeignKey, FromClause,
+    Predicate, Projection, SchemaMetadata, SchemaSnapshot, TableSchema,
 };
 use std::sync::Arc;
 
@@ -32,7 +32,11 @@ fn column_projection(table: Option<&str>, column: &str) -> Projection {
 }
 
 fn compare(left: Expression, op: ComparisonOperator, right: Expression) -> Predicate {
-    Predicate::Comparison { left: Box::new(left), op, right: Box::new(right) }
+    Predicate::Comparison {
+        left: Box::new(left),
+        op,
+        right: Box::new(right),
+    }
 }
 
 fn eq(left: Expression, right: Expression) -> Predicate {

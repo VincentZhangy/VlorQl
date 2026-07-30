@@ -26,9 +26,9 @@ mod predicate;
 // directly.  The test module (`#[cfg(test)] mod tests`) picks them up
 // via `use super::*;`.
 use case::normalize_malformed_case_expression_in_map;
-use predicate::normalize_predicate;
 #[cfg(test)]
 use literal::repair_expression_value;
+use predicate::normalize_predicate;
 #[cfg(test)]
 use predicate::{
     inject_missing_right, repair_predicate_type, simplify_single_child, unwrap_array_sides,
@@ -109,12 +109,11 @@ fn normalize_impl(val: &mut Value) -> bool {
 
             let is_predicate_like = (!pred_type.is_empty() && !EXPR_TYPES.contains(&pred_type))
                 || (map.contains_key("left") && map.contains_key("op"))
-                || (pred_type.is_empty() && (
-                    map.contains_key("not")
-                    || map.contains_key("exists")
-                    || map.contains_key("and")
-                    || map.contains_key("or")
-                ));
+                || (pred_type.is_empty()
+                    && (map.contains_key("not")
+                        || map.contains_key("exists")
+                        || map.contains_key("and")
+                        || map.contains_key("or")));
 
             if is_predicate_like {
                 // Preserve non-predicate fields that may be dropped by
@@ -215,7 +214,9 @@ fn normalize_impl(val: &mut Value) -> bool {
                 && let Some(args) = map.get_mut("args").and_then(|a| a.as_array_mut())
                 && args.len() == 1
             {
-                args.push(serde_json::json!({"type": "literal", "value": ",", "data_type": "string"}));
+                args.push(
+                    serde_json::json!({"type": "literal", "value": ",", "data_type": "string"}),
+                );
                 changed = true;
             }
 
@@ -314,7 +315,9 @@ fn normalize_impl(val: &mut Value) -> bool {
             // should be `{"when_thens": [{"when":{...},"then":{...}}]}`.
             if let Some(when_thens) = map.get_mut("when_thens").and_then(|v| v.as_array_mut()) {
                 for item in when_thens.iter_mut() {
-                    let Some(obj) = item.as_object_mut() else { continue; };
+                    let Some(obj) = item.as_object_mut() else {
+                        continue;
+                    };
                     if obj.contains_key("when") || obj.contains_key("then") {
                         continue; // already canonical
                     }
@@ -395,10 +398,7 @@ mod tests {
     fn integer_literal_normalizes_to_int_consistently() {
         let mut v = serde_json::json!({"type": "integer", "value": 5});
         assert!(repair_expression_value(&mut v));
-        assert_eq!(
-            v.get("data_type").and_then(|d| d.as_str()),
-            Some("int"),
-        );
+        assert_eq!(v.get("data_type").and_then(|d| d.as_str()), Some("int"),);
         assert_eq!(v.get("type").and_then(|t| t.as_str()), Some("literal"));
     }
 
@@ -630,9 +630,6 @@ mod tests {
         });
         assert!(normalize_predicate(&mut val));
         assert_eq!(val.get("type").and_then(|t| t.as_str()), Some("like"));
-        assert_eq!(
-            val.get("pattern").and_then(|p| p.as_str()),
-            Some("%test%")
-        );
+        assert_eq!(val.get("pattern").and_then(|p| p.as_str()), Some("%test%"));
     }
 }

@@ -297,7 +297,9 @@ fn remove_aggregates_from_group_by(val: &mut serde_json::Value) -> bool {
         }
         // Also remove items that look like aggregate shorthands:
         // {"type": "sum", "args": [...]} (non-canonical aggregate form)
-        if !type_.is_empty() && type_ != "column_ref" && type_ != "literal"
+        if !type_.is_empty()
+            && type_ != "column_ref"
+            && type_ != "literal"
             && item.get("args").is_some()
         {
             removed.push(item.clone());
@@ -359,9 +361,7 @@ fn remove_star_with_group_by(val: &mut serde_json::Value) -> bool {
         return false;
     };
     let before = select_arr.len();
-    select_arr.retain(|item| {
-        item.get("type").and_then(|t| t.as_str()) != Some("star")
-    });
+    select_arr.retain(|item| item.get("type").and_then(|t| t.as_str()) != Some("star"));
     let changed = select_arr.len() != before;
     // If removing Star left the select list empty, inject a default
     // column_ref so the builder doesn't fail.
@@ -517,9 +517,15 @@ mod tests {
         // Star must be removed; individual columns must remain.
         for item in select.iter() {
             let type_ = item.get("type").and_then(|t| t.as_str()).unwrap_or("");
-            assert_ne!(type_, "star", "Star must be removed when GROUP BY is present");
+            assert_ne!(
+                type_, "star",
+                "Star must be removed when GROUP BY is present"
+            );
         }
-        assert!(!select.is_empty(), "select must not be empty after star removal");
+        assert!(
+            !select.is_empty(),
+            "select must not be empty after star removal"
+        );
     }
 
     #[test]

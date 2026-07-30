@@ -6,8 +6,7 @@
 
 use serde_json::Value;
 use vlorql_core::schema::{
-    CommonTableExpression, OrderByTerm, Predicate, QueryPlan, SetOperation,
-    SetOperationClause,
+    CommonTableExpression, OrderByTerm, Predicate, QueryPlan, SetOperation, SetOperationClause,
 };
 
 use super::expr_builder::{
@@ -108,7 +107,9 @@ pub fn build_plan_from_obj(obj: &serde_json::Map<String, Value>) -> Result<Query
             let exprs: Result<Vec<_>, _> = arr
                 .iter()
                 .enumerate()
-                .map(|(i, item)| build_expression(item).map_err(|e| e.at(&format!("distinct_on[{i}]"))))
+                .map(|(i, item)| {
+                    build_expression(item).map_err(|e| e.at(&format!("distinct_on[{i}]")))
+                })
                 .collect();
             Some(exprs?)
         }

@@ -162,7 +162,9 @@ impl ExpressionFold for ConstantFolding {
                         return bool_predicate(true);
                     }
                 }
-                Predicate::IsNull { expr: Box::new(expr) }
+                Predicate::IsNull {
+                    expr: Box::new(expr),
+                }
             }
             Predicate::And { left, right } => {
                 let left = self.fold_predicate(left);
@@ -630,7 +632,9 @@ mod tests {
 
     #[test]
     fn is_null_on_non_null_literal_is_false() {
-        let pred = Predicate::IsNull { expr: Box::new(lit_int(42)) };
+        let pred = Predicate::IsNull {
+            expr: Box::new(lit_int(42)),
+        };
         assert_eq!(ConstantFolding.fold_predicate(&pred), bool_predicate(false));
     }
 

@@ -161,10 +161,10 @@ const SQL_KEYWORDS: &[&str] = &[
 /// Tries both arithmetic and SQL function patterns.
 fn fix_expr(expr: &mut Expression) -> bool {
     match expr {
-        Expression::ColumnRef { table, column }
-            if !column.is_empty() =>
-        {
-            let Some((left, op, right)) = parse_arithmetic_column(column) else { return false; };
+        Expression::ColumnRef { table, column } if !column.is_empty() => {
+            let Some((left, op, right)) = parse_arithmetic_column(column) else {
+                return false;
+            };
             let new_expr = Expression::BinaryOp {
                 left: Box::new(col_ref(table.clone(), &left)),
                 op,
@@ -173,10 +173,10 @@ fn fix_expr(expr: &mut Expression) -> bool {
             *expr = new_expr;
             true
         }
-        Expression::ColumnRef { table, column }
-            if !column.is_empty() =>
-        {
-            let Some((name, args)) = parse_sql_function_column(column) else { return false; };
+        Expression::ColumnRef { table, column } if !column.is_empty() => {
+            let Some((name, args)) = parse_sql_function_column(column) else {
+                return false;
+            };
             let table_str = table.as_deref();
             let expr_args: Vec<Expression> =
                 args.iter().map(|a| arg_to_expr(table_str, a)).collect();
