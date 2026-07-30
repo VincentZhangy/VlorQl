@@ -43,7 +43,7 @@ fn optional_predicate(
     field: &str,
 ) -> Result<Option<Predicate>, BuildError> {
     obj.get(field)
-        .and_then(|v| if v.is_null() { None } else { Some(v) })
+        .filter(|&v| !v.is_null())
         .map(|v| build_predicate(v).map_err(|e| e.at(field)))
         .transpose()
 }
