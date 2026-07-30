@@ -168,6 +168,7 @@ impl SchemaCache {
 }
 
 #[cfg(test)]
+#[cfg(not(miri))]
 mod tests {
     use super::*;
     use crate::cache::SchemaCacheKey;

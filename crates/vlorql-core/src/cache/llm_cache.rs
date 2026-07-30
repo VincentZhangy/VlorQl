@@ -130,6 +130,7 @@ impl LlmResponseCache {
 }
 
 #[cfg(test)]
+#[cfg(not(miri))]
 mod tests {
     use super::*;
     use crate::schema::{FromClause, Projection, QueryPlan};
