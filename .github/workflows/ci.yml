@@ -152,7 +152,7 @@ jobs:
       # Run lib tests only (no doc-tests, no benches) — Miri is interpreted and very slow.
       - name: Run cargo miri test (core only)
         env:
-          MIRIFLAGS: -Zmiri-permissive-provenance
+          MIRIFLAGS: -Zmiri-permissive-provenance -Zmiri-disable-isolation
         # The Miri false-positive from crossbeam-epoch (used by moka) is
         # suppressed via #[cfg(not(miri))] on the specific test function.
         run: cargo miri test -p vlorql-core --lib --no-fail-fast
