@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.5.1] - 2026-07-30
+
+### Added
+
+- **Miri CI job:** 新增 `cargo miri test` 在 nightly 上运行 UB 检测，缓存测试模块跳过 crossbeam-epoch 已知误报。
+- **spawn_blocking CPU 卸载:** `optimize_async()` 和 `validate_and_optimize()` 中的 CPU 密集操作通过 `tokio::task::spawn_blocking` 分离到阻塞线程池。
+- **workspace lints:** 根 `Cargo.toml` 添加 `[workspace.lints.clippy]`（correctness=deny）。
+- **Expression 大小静态断言:** 添加 `assert_eq_size!(Expression, [u8; 64])` 和运行时验证。
+- **`suggestion()` 补全:** `ConfigErrorKind` 全部 7 个变体现有修复建议。
+- **`ConfigErrorKind::InternalError`:** 新增变体用于 spawn_blocking join 错误。
+
+### Fixed
+
+- **Expression/Predicate 内存布局:** 大字段（`args`、`when_thens`、`over`）改为 `Box<Vec<..>>`，enum 体积 ≤ 64 bytes。
+- **替换 ~20 处高风险 unwrap/expect:** Mutex 锁中毒恢复（`unwrap_or_else(IntoInner)`）替代 `.expect()`，serde_json 序列化标注 `invariant:`。
+- **`std::sync::Mutex` → `tokio::sync::Mutex` 回退:** `compile_cache.rs` 的 entries 锁回退为 `std::sync::Mutex` 以避免 Miri 误报。
+- **`QueryBuilder::new` 返回 `Result`:** 未知 dialect 不再静默默认 PostgreSQL，改为返回 `CompilationError`。
+- **修复 40+ 处 `Box::new(vec![...])` 括号语法错误:** 涉及 fix/*.rs、compile/tests.rs、benches、示例代码等。
+- **修复 35+ 处失效 intra-doc 链接:** 跨 crate 的 `[QueryPlan]`、`[Expression]`、`[Predicate]`、`[DatabaseExecutor]` 链接。
+- **clippy 修复:** `manual_filter` lint（`.and_then` → `.filter`）。
+
+### Changed
+
+- **tokio features 裁减:** 从 `features = ["full"]` 改为最小必需集 `["rt-multi-thread", "macros", "sync", "time", "io-util", "fs"]`。
+- **cargo-husky:** 从 `[build-dependencies]` 移到 `[dev-dependencies]`，仅开发时生效。
+- **CI 缓存策略:** 所有 job 添加 `restore-keys` fallback，加速冷构建。
+- **Miri 配置:** 使用 `-Zmiri-permissive-provenance -Zmiri-disable-isolation`，缓存测试模块通过 `#[cfg(not(miri))]` 跳过。
+
 ## [0.5.0] - 2026-07-28
 
 ### Added

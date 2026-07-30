@@ -12,9 +12,9 @@ description = "CLI tool for VlorQl SQL query optimization and natural language q
 workspace = true
 
 [dependencies]
-vlorql = { path = "../vlorql", version = "0.5.0" }
-vlorql-core = { path = "../vlorql-core", version = "0.5.0" }
-vlorql-llm = { path = "../vlorql-llm", version = "0.5.0" }
+vlorql = { path = "../vlorql", version = "0.5.1" }
+vlorql-core = { path = "../vlorql-core", version = "0.5.1" }
+vlorql-llm = { path = "../vlorql-llm", version = "0.5.1" }
 anyhow.workspace = true
 tokio.workspace = true
 tracing.workspace = true

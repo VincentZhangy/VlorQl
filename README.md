@@ -18,7 +18,8 @@
     </a>
     <br>
     <img src="https://img.shields.io/badge/Rust-1.85%2B-orange?style=flat-square" alt="MSRV" />
-    <img src="https://img.shields.io/badge/status-beta-yellow?style=flat-square" alt="status" />
+    <img src="https://img.shields.io/badge/status-production--ready-green?style=flat-square" alt="status" />
+    <img src="https://img.shields.io/badge/Miri-UB%20checked-purple?style=flat-square" alt="miri" />
   </p>
 
   <h4>
@@ -85,6 +86,10 @@ and every SQL feature is gated by an explicit dialect profile.
 - **🌐 Multi-provider** — ships clients for OpenAI, Anthropic Claude, DeepSeek, Zhipu GLM,
   vLLM, and Ollama behind a single `LlmClient` trait.
 - **🎯 CLI** — `vlorql-cli` with `query` and `validate` subcommands, TOML/JSON config.
+- **🧪 Undefined-Behavior checked** — CI runs Miri (nightly) on the core crate to detect
+  UB in unsafe code; known crossbeam-epoch false positives are suppressed.
+- **📦 Memory-optimized enums** — `Expression` and `Predicate` use `Box<Vec<..>>` for
+  large fields, keeping the enum ≤ 64 bytes (4 pointers).
 
 ## Quick Start
 
@@ -443,6 +448,9 @@ cargo test -p vlorql-llm
 
 # Security tests (SQL injection, policy bypass, malformed JSON)
 cargo test -p vlorql --test security
+
+# Undefined-Behavior analysis (nightly toolchain required)
+cargo +nightly miri test -p vlorql-core --lib --no-fail-fast
 ```
 
 The integration tests in `crates/vlorql/tests/integration.rs` cover the end-to-end
