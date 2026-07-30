@@ -150,9 +150,10 @@ jobs:
             ${{ runner.os }}-miri-
       # Only run Miri on the core crate to limit runtime.
       # Run lib tests only (no doc-tests, no benches) — Miri is interpreted and very slow.
-      # permissive-provenance + stacked-borrows-off silences known
-      # crossbeam-epoch / moka false positives.
+      # permissive-provenance silences known crossbeam-epoch integer-to-pointer warnings.
+      # cache_evicts_under_lru_weight_limit is skipped because it triggers a
+      # crossbeam-epoch Stacked Borrows false positive (upstream dependency, not our code).
       - name: Run cargo miri test (core only)
         env:
-          MIRIFLAGS: -Zmiri-permissive-provenance -Zmiri-stacked-borrows=off
-        run: cargo miri test -p vlorql-core --lib --no-fail-fast
+          MIRIFLAGS: -Zmiri-permissive-provenance
+        run: cargo miri test -p vlorql-core --lib --no-fail-fast -- --skip cache_evicts_under_lru_weight_limit
