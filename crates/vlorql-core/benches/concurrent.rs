@@ -216,7 +216,8 @@ impl Harness {
             .pipeline
             .validate(&self.plan)
             .expect("plan should validate");
-        let (sql, params) = QueryBuilder::new(&validated, &self.config).unwrap()
+        let (sql, params) = QueryBuilder::new(&validated, &self.config)
+            .unwrap()
             .build()
             .expect("plan should compile");
         (sql, params.len())
