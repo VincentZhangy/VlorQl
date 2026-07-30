@@ -233,7 +233,7 @@ fn unsafe_identifier_is_rejected_before_sql_is_built() {
         identifier_quote: "never".to_owned(),
         ..DialectConfig::default_postgres()
     };
-    let error = QueryBuilder::new(&validated, &config)
+    let error = QueryBuilder::new(&validated, &config).unwrap()
         .build()
         .expect_err("unsafe identifier must be rejected in unquoted mode");
     assert_eq!(error.error_code(), "C001");
@@ -253,7 +253,7 @@ fn double_quoted_identifier_escapes_dangerous_characters() {
     plan.from = FromClause::table("users\"; DROP TABLE x; --".to_owned(), None);
     let validated = ValidatedPlan(Arc::new(plan));
     let config = DialectConfig::default_postgres();
-    let (sql, _params) = QueryBuilder::new(&validated, &config)
+    let (sql, _params) = QueryBuilder::new(&validated, &config).unwrap()
         .build()
         .expect("double-quote mode must safely escape the identifier");
     // The whole name, including the dangerous characters, must be

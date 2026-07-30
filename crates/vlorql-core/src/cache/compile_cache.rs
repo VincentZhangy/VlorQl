@@ -474,7 +474,7 @@ mod tests {
         cache.insert(&plan, &profile, compiled).await;
         assert!(cache.get(&plan, &profile).await.is_some());
 
-        cache.clear();
+        cache.clear().await;
         assert!(
             cache.get(&plan, &profile).await.is_none(),
             "entry should be removed after clear"
